@@ -773,10 +773,11 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
       uint8_t raw = frame->data[3] & TEMPERATURE_DATA_MASK;  // raw[7]
       float rmt = static_cast<float>(raw) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
       if (rmt > -20 && rmt < 60) {
-        tcc_state.room_temp = rmt;
+        // tcc_state.room_temp = rmt; we don't update the state here, we wait for the next status update from master
         log_data_frame("Remote temperature", frame);
         ESP_LOGD(TAG, "Remote temperature: %.1f °C", tcc_state.room_temp);
-        sync_from_received_state();
+        // sync_from_received_state(); we don't update the state, we wait for the next status update from master
+        // remote temperature is sent regardless of DN32 setting, ac decides wether to use it or ignore it
       }
 
     // Remote PING sent every 30s: 40 00 15 07 08 0C 81 00 00 48 00 ..
