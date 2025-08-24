@@ -34,9 +34,13 @@ const LogString *opcode_to_string(uint8_t opcode) {
   }
 }
 
-uint8_t temp_celcius_to_payload(float temp_celsius) {
-  return static_cast<uint8_t>(temp_celsius + TEMPERATURE_CONVERSION_OFFSET) *
-         TEMPERATURE_CONVERSION_RATIO;  // temp is +35 in (bit7-bit0)/2
+uint8_t temp_celcius_to_payload(float t) {
+  // raw = round( (t + offset) * ratio )
+  const float scaled = (t + TEMPERATURE_CONVERSION_OFFSET) * TEMPERATURE_CONVERSION_RATIO;
+  int v = static_cast<int>(std::lround(scaled));
+  if (v < 0) v = 0;
+  if (v > 255) v = 255;
+  return static_cast<uint8_t>(v);
 }
 
 uint8_t get_heat_cool_bits(uint8_t mode) {
@@ -205,10 +209,9 @@ void ToshibaAbClimate::send_remote_temp(float temp_c) {
   }
 
   // Encode raw = (C + OFFSET) * RATIO, mask per protocol
-  const uint8_t raw =
-      static_cast<uint8_t>(std::lround((temp_c + TEMPERATURE_CONVERSION_OFFSET) *
-                                       TEMPERATURE_CONVERSION_RATIO)) &
-      TEMPERATURE_DATA_MASK;
+  const uint8_t raw = static_cast<uint8_t>(
+      std::lround((temp_c + TEMPERATURE_CONVERSION_OFFSET) * TEMPERATURE_CONVERSION_RATIO));
+
 
   DataFrame cmd{};
   cmd.source      = TOSHIBA_REMOTE;        // 0x40
@@ -710,7 +713,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           tcc_state.vent =
               (frame->data[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_VENT_MASK) >> STATUS_DATA_VENT_SHIFT_BITS;
           tcc_state.target_temp =
-              static_cast<float>(frame->data[STATUS_DATA_TARGET_TEMP_BYTE] & TEMPERATURE_DATA_MASK) /
+              static_cast<float>(frame->data[STATUS_DATA_TARGET_TEMP_BYTE]) /
                   TEMPERATURE_CONVERSION_RATIO -
               TEMPERATURE_CONVERSION_OFFSET;
 
@@ -734,8 +737,10 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           tcc_state.vent =
               (frame->data[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_VENT_MASK) >> STATUS_DATA_VENT_SHIFT_BITS;
 
-          tcc_state.target_temp = (static_cast<float>(frame->data[STATUS_DATA_TARGET_TEMP_BYTE] & TEMPERATURE_DATA_MASK) /
-            TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET);
+          tcc_state.target_temp =
+              static_cast<float>(frame->data[STATUS_DATA_TARGET_TEMP_BYTE]) /
+                  TEMPERATURE_CONVERSION_RATIO -
+              TEMPERATURE_CONVERSION_OFFSET;
 
           
           if (frame->data[STATUS_DATA_TARGET_TEMP_BYTE + 1] > 1) {

@@ -71,7 +71,7 @@ const uint8_t OPCODE2_SAVE = 0x54;
 const uint8_t OPCODE2_SENSOR_QUERY = 0x80;
 const uint8_t OPCODE2_SENSOR_ROOM_TEMP = 0x81;
 
-const uint8_t TEMPERATURE_DATA_MASK = 0b11111110;
+const uint8_t TEMPERATURE_DATA_MASK = 0xFF; // Changed from 0b11111110 to keep the .5 degrees precision
 const float TEMPERATURE_CONVERSION_RATIO = 2.0;
 const float TEMPERATURE_CONVERSION_OFFSET = 35.0;
 
