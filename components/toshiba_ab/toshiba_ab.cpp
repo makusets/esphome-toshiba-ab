@@ -200,7 +200,7 @@ void write_read_envelope(DataFrame *cmd, uint8_t master_address,
 }
 
 
-// Sends room temp to AC unit with and interval sensor configured in yaml
+// Sends room temp to AC unit with the sensor configured in yaml
 // example frame: 42:00:11:04:08:89:72:46:E2 for 22 degrees
 void ToshibaAbClimate::send_remote_temp(float temp_c) {
   // sanity
@@ -216,9 +216,9 @@ void ToshibaAbClimate::send_remote_temp(float temp_c) {
 
   DataFrame cmd{};
   cmd.source      = TOSHIBA_TEMP_SENSOR;        // 0x42
-  cmd.dest        = this->master_address_; // usually 0x00
-  cmd.opcode1     = OPCODE_PARAMETER;    // 0x11
-  cmd.data_length = 4;                     // payload: 08 89 <raw> 46
+  cmd.dest        = this->master_address_;  // usually 0x00
+  cmd.opcode1     = OPCODE_PARAMETER;       // 0x11
+  cmd.data_length = 4;                       // payload: 08 89 <raw> 46
 
   cmd.data[0] = 0x08;
   cmd.data[1] = 0x89;
@@ -809,16 +809,19 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         log_data_frame("Unknown remote data", frame);
       }
     } else if (frame->source == TOSHIBA_TEMP_SENSOR) {
-      // message from standalone temp sensor
-      // example:   42:00:11:04:08:89:72:46:E2  for 22 degrees
+      // message from configured temp sensor in yaml
+      // example:   42:00:11:04:08:89:72:46:E2  for 22 degrees, this message follows Toshiba standalone temp sensor format
       if (frame->opcode1 == OPCODE_PARAMETER &&
           frame->data_length == 4 &&
           frame->data[1] == 0x89) {
 
-        log_data_frame("Standalone temp sensor:", frame);
+        std::string label = this->ext_temp_sensor_name_.empty()
+                    ? "Yaml temp sensor"
+                    : this->ext_temp_sensor_name_;
+        log_data_frame(label, frame);
         uint8_t raw = frame->data[2] & TEMPERATURE_DATA_MASK;  // raw[7]
         float sensor_temp = static_cast<float>(raw) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
-        ESP_LOGD(TAG, "Standalone temp sensor: %.1f °C", sensor_temp);
+        ESP_LOGD(TAG, "%s: %.1f °C", label.c_str(), sensor_temp);
       } else {
         log_data_frame("Unknown 0x42 data", frame);
       }

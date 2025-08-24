@@ -325,11 +325,13 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   
   // Reporting external sensor temperature to AC *************************
 
+  std::string ext_temp_sensor_name_;
+
   void set_ext_temp_source(sensor::Sensor *s) { ext_temp_sensor_ = s; }
   void set_ext_temp_interval(uint32_t ms) { ext_temp_interval_ms_ = ms; }
   void set_ext_temp_enabled(bool en) { ext_temp_enabled_ = en; }
   void send_remote_temp(float temp_c);  // builds & enqueues remote-temp frame
-  
+  void set_ext_temp_sensor_name(const std::string &name) { this->ext_temp_sensor_name_ = name; }
   
   // AC sensors polling ************************************
 

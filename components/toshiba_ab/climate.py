@@ -156,3 +156,4 @@ async def to_code(config):
         cg.add(var.set_ext_temp_source(src))
         cg.add(var.set_ext_temp_enabled(rst["enabled"]))
         cg.add(var.set_ext_temp_interval(cg.uint32(rst[CONF_INTERVAL])))
+        cg.add(var.set_ext_temp_sensor_name(rst[CONF_SENSOR].id))
