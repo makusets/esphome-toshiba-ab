@@ -201,6 +201,7 @@ void write_read_envelope(DataFrame *cmd, uint8_t master_address,
 
 
 // Sends room temp to AC unit with and interval sensor configured in yaml
+// example frame: 42:00:11:04:08:89:72:46:E2 for 22 degrees
 void ToshibaAbClimate::send_remote_temp(float temp_c) {
   // sanity
   if (!std::isfinite(temp_c) || temp_c < -40.0f || temp_c > 80.0f) {
@@ -214,16 +215,16 @@ void ToshibaAbClimate::send_remote_temp(float temp_c) {
 
 
   DataFrame cmd{};
-  cmd.source      = TOSHIBA_REMOTE;        // 0x40
+  cmd.source      = TOSHIBA_TEMP_SENSOR;        // 0x42
   cmd.dest        = this->master_address_; // usually 0x00
-  cmd.opcode1     = OPCODE_TEMPERATURE;    // 0x55
-  cmd.data_length = 5;                     // payload: 08 81 01 <raw> 00
+  cmd.opcode1     = OPCODE_PARAMETER;    // 0x11
+  cmd.data_length = 4;                     // payload: 08 89 <raw> 46
 
   cmd.data[0] = 0x08;
-  cmd.data[1] = 0x81;
-  cmd.data[2] = 0x01;   // channel/slot used in observed frames
-  cmd.data[3] = raw;    // encoded temperature
-  cmd.data[4] = 0x00;
+  cmd.data[1] = 0x89;
+  cmd.data[2] = raw;   // encoded temperature
+  cmd.data[3] = 0x46;
+
 
   cmd.data[cmd.data_length] = cmd.calculate_crc();
 

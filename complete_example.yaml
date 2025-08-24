@@ -1,0 +1,198 @@
+#######################################################################################################################################
+#This is an example of the ESPHome yaml file needed to work with Home Assistant. Make sure you use your own network and HA credentials.
+########################################################################################################################################
+esphome:
+  name: toshiba-ac
+  friendly_name: toshiba_AC
+
+esp8266:
+  board: esp12e
+
+
+
+
+# Enable logging
+logger:
+  baud_rate: 0  #disable hardware UART log, necessary to use the pins for UART communication with the AC unit 
+  level: DEBUG
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: "your_encryption_key"
+
+ota:
+  password: "your_ota_password"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ap_timeout: 180s
+    ssid: "Toshiba-Ac"
+    password: "your_ap_password"
+
+captive_portal:
+
+# I2C bus for optional temperature sensors if used
+i2c:
+  sda: GPIO2
+  scl: GPIO14
+  scan: True
+
+# Serial bus for the Toshiba AB protocol
+uart:
+  rx_pin: GPIO16
+  tx_pin: GPIO17
+  baud_rate: 2400
+  rx_buffer_size: 2048    # increase buffer to avoid dropped bytes
+
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/makusets/esphome-toshiba-ab
+
+climate:
+  - platform: toshiba_ab
+    name: "My AC System"
+
+    # Required
+    id: my_ac_system
+
+    # --- Address of the AC master ---
+    master: 0x00                # default is 0x00 if not set, some units use 0x01, 0x04 and possibly others
+
+    ###### Optional settings  #######
+
+    # --- Forward a temperature sensor data to AC ---
+    # If enabled, the temperature sensor with the given id will be used to report room temperature to the AC unit
+    # This will override the temperature reported by the remote controller or the internal sensor of the AC unit
+
+    report_sensor_temp:
+      enabled: true             # default false
+      sensor: bme280_temp       # must match an existing temp sensor id in this yaml file
+                                # it can be any temperature sensor supported, including other HA sensors configured here
+      interval: 1min            # default 5min if omitted
+
+    # --- Query additional internal AC sensors ---
+    sensors:
+      - address: 0x6A           # Required, in this case, AC current sensor of the external unit
+        unit_of_measurement: "A"
+        scale: 0.1              # default 1.0; here we decode raw/10 as current is reported in deciAmps
+        interval: 30s           # default 5min
+        sensor:
+          name: "AC System Current"  #required
+          id: toshiba_current  #optional, but needed if used later in other yaml entries
+          name: "Toshiba current"  #required
+
+          #all other available options of sensor in esphome:
+
+          unit_of_measurement: "A"  #optional, defaults none
+          accuracy_decimals: 2  #optional
+          device_class: current  #optional but recommended for HA
+          state_class: measurement  #optional but recommended for HA
+
+      - address: 0x61        # Required, in this case, outdoor temperature sensor of the external unit
+        sensor:
+          name: "AC System Outdoor Temperature" #required
+          unit_of_measurement: "°C" 
+
+################# Available Sensors ##################################
+#
+######### indoor unit data ###################
+#
+#       0x00 //Room Temp as reported by master (Control Temp) (°C) 
+#       0x01 //Room temperature from remote controller
+#       0x02 //Indoor unit intake air temperature (TA)
+#       0x03 //Indoor unit heat exchanger (coil) temperature (TCJ) TCJ Coil Liquid Temp (°C)
+#       0x04 //Indoor unit heat exchanger (coil) temperature (TC)  Coil Vapour Temp (°C)
+#       0x07 //Fan Speed (rpm)
+#       0xF2 //Fan Run Time (x 100h)
+#       0xF3 //Filter sign time x 1h
+#       0xF4 //Indoor discharge temperature*1  F8???
+#
+#########  outdoor unit data ###################
+#
+#       0x60 //Outdoor unit heat exchanger (coil) temperature (TE)
+#       0x61 //Outside air temperature (TO)
+#       0x62 //Compressor discharge temperature (TD)
+#       0x63 //Compressor suction temperature (TS)
+#       0x65 //Heatsink temperature (THS)
+#       0x6A //Operating current (x1/10)
+#       0x6D //TL Liquid Temp (°C)
+#       0x70 //Compressor Frequency (rps)
+#       0x72 //Fan Speed (Lower) (rpm
+#       0x73 //Fan Speed (Upper) (rpm
+#       0xF1 //Compressor cumulative operating hours (x100 h)
+#
+#
+#  Use the logs to determine which sensors report valid data for your unit
+###########################################################################
+
+
+sensor:
+  - platform: bme280_i2c  # optional local temperature sensor, it can be used to report room temperature to the AC unit
+                          # if set in the climate section above
+    temperature:
+      name: "Indoor Temperature"
+      id: bme280_temp      # must match the id used in the climate section above if used to report temp to AC
+      oversampling: 1x
+    pressure:
+      name: "Indoor Pressure"
+      id: bme280_pressure
+      accuracy_decimals: 0
+      oversampling: 1x
+    humidity:
+      name: "Indoor Humidity"
+      id: bme280_humidity
+      accuracy_decimals: 0
+      oversampling: 2x
+    address: 0x76
+    update_interval: 30s
+
+  # used to report power and  energy from current sensor setup above
+
+    # Power = I * 230 V * 0.95 PF
+  - platform: template
+    id: toshiba_power
+    name: "Toshiba AC Power"
+    unit_of_measurement: "W"
+    device_class: power
+    state_class: measurement
+    accuracy_decimals: 0
+    update_interval: 30s         # match the current polling interval
+    lambda: |-
+      if (isnan(id(toshiba_current).state)) return NAN;
+      return id(toshiba_current).state * 230.0f * 0.95f;
+
+  # Lifetime energy (kWh) from power
+  - platform: integration
+    name: "Toshiba AC Energy"
+    sensor: toshiba_power
+    time_unit: h                 # W × hours
+    restore: true
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 3
+
+  # Optional: daily energy that resets at midnight
+  - platform: total_daily_energy
+    name: "Toshiba AC Daily Energy"
+    power_id: toshiba_power
+    unit_of_measurement: "kWh"
+    device_class: energy
+    state_class: total_increasing
+    accuracy_decimals: 3
+    filters:
+      # Multiplication factor from W to kW is 0.001
+      - multiply: 0.001
+
+# Enable time component to reset energy at midnight
+time:
+  - platform: homeassistant
+    id: homeassistant_time
+
+
