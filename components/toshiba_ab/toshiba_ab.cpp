@@ -775,7 +775,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
       if (rmt > -20 && rmt < 60) {
         // tcc_state.room_temp = rmt; we don't update the state here, we wait for the next status update from master
         log_data_frame("Remote temperature", frame);
-        ESP_LOGD(TAG, "Remote temperature: %.1f °C", tcc_state.room_temp);
+        ESP_LOGD(TAG, "Toshiba Wall Remote reports: %.1f °C", rmt);
         // sync_from_received_state(); we don't update the state, we wait for the next status update from master
         // remote temperature is sent regardless of DN32 setting, ac decides wether to use it or ignore it
       }
