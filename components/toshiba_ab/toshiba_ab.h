@@ -20,6 +20,7 @@ const uint32_t FRAME_SEND_MILLIS_FROM_LAST_SEND = 500;
 
 // const uint8_t TOSHIBA_MASTER = 0x00;  replaced by master_address_ which is setup in yaml
 const uint8_t TOSHIBA_REMOTE = 0x40;
+const uint8_t TOSHIBA_TEMP_SENSOR = 0x42;
 const uint8_t TOSHIBA_BROADCAST = 0xFE;
 const uint8_t TOSHIBA_REPORT = 0x52;
 

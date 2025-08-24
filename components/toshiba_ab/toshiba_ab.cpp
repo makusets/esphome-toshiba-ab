@@ -769,44 +769,58 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
       }
     }else {
     if (frame->source == TOSHIBA_REMOTE) {
-    ESP_LOGD(TAG, "Received data from remote:");
+      ESP_LOGD(TAG, "Received data from remote:");
 
-    // Remote temperature push: 40 00 55 05 08 81 01 6E 00 ..
-    if (frame->opcode1 == OPCODE_TEMPERATURE &&
-        frame->data_length >= 4 &&
-        frame->data[1] == 0x81) {
-      uint8_t raw = frame->data[3] & TEMPERATURE_DATA_MASK;  // raw[7]
-      float rmt = static_cast<float>(raw) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
-      if (rmt > -20 && rmt < 60) {
+      // Remote temperature push: 40 00 55 05 08 81 01 6E 00 ..
+      if (frame->opcode1 == OPCODE_TEMPERATURE &&
+          frame->data_length >= 4 &&
+          frame->data[1] == 0x81) {
+        uint8_t raw = frame->data[3] & TEMPERATURE_DATA_MASK;  // raw[7]
+        float rmt = static_cast<float>(raw) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
+
         // tcc_state.room_temp = rmt; we don't update the state here, we wait for the next status update from master
         log_data_frame("Remote temperature", frame);
         ESP_LOGD(TAG, "Toshiba Wall Remote reports: %.1f °C", rmt);
         // sync_from_received_state(); we don't update the state, we wait for the next status update from master
         // remote temperature is sent regardless of DN32 setting, ac decides wether to use it or ignore it
+        
+
+      // Remote PING sent every 30s: 40 00 15 07 08 0C 81 00 00 48 00 ..
+      } else if (frame->opcode1 == OPCODE_ERROR_HISTORY &&      // 0x15 envelope
+                frame->data_length >= 3 &&
+                frame->data[0] == COMMAND_MODE_READ &&         // 0x08
+                frame->data[1] == OPCODE2_PING_PONG &&         // 0x0C
+                frame->data[2] == OPCODE2_READ_STATUS) {       // 0x81
+        log_data_frame("Remote PING", frame);
+      
+      // Remote 40:00:15:06:08:E8:00:01:00:9E:2C that is sent every minute, not sure what it does
+      } else if (frame->opcode1 == OPCODE_ERROR_HISTORY &&      // 0x15 envelope
+                frame->data_length >= 6 &&
+                frame->data[0] == COMMAND_MODE_READ &&         // 0x08
+                frame->data[1] == 0xE8 &&
+                frame->data[3] == 0x01 &&                 
+                frame->data[5] == 0x9E) {                       
+                
+        log_data_frame("Remote E8 Read", frame);
+
+      } else {
+        // unknown remote message
+        log_data_frame("Unknown remote data", frame);
       }
+    } else if (frame->source == TOSHIBA_TEMP_SENSOR) {
+      // message from standalone temp sensor
+      // example:   42:00:11:04:08:89:72:46:E2  for 22 degrees
+      if (frame->opcode1 == OPCODE_PARAMETER &&
+          frame->data_length == 4 &&
+          frame->data[1] == 0x89) {
 
-    // Remote PING sent every 30s: 40 00 15 07 08 0C 81 00 00 48 00 ..
-    } else if (frame->opcode1 == OPCODE_ERROR_HISTORY &&      // 0x15 envelope
-              frame->data_length >= 3 &&
-              frame->data[0] == COMMAND_MODE_READ &&         // 0x08
-              frame->data[1] == OPCODE2_PING_PONG &&         // 0x0C
-              frame->data[2] == OPCODE2_READ_STATUS) {       // 0x81
-      log_data_frame("Remote PING", frame);
-    
-    // Remote 40:00:15:06:08:E8:00:01:00:9E:2C that is sent every minute, not sure what it does
-    }  else if (frame->opcode1 == OPCODE_ERROR_HISTORY &&      // 0x15 envelope
-              frame->data_length >= 6 &&
-              frame->data[0] == COMMAND_MODE_READ &&         // 0x08
-              frame->data[1] == 0xE8 &&
-              frame->data[3] == 0x01 &&                 
-              frame->data[5] == 0x9E) {                       
-              
-      log_data_frame("Remote E8 Read", frame);
-
-    } else {
-      // unknown remote message
-      log_data_frame("Unknown remote data", frame);
-    }
+        log_data_frame("Standalone temp sensor:", frame);
+        uint8_t raw = frame->data[2] & TEMPERATURE_DATA_MASK;  // raw[7]
+        float sensor_temp = static_cast<float>(raw) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
+        ESP_LOGD(TAG, "Standalone temp sensor: %.1f °C", sensor_temp);
+      } else {
+        log_data_frame("Unknown 0x42 data", frame);
+      }
     } else {
       ESP_LOGD(TAG, "Received data from unknown source: %02X", frame->source);
       log_data_frame("Unknown source", frame);
