@@ -12,6 +12,8 @@ Alternatively, you can order the board from places like JLCPCB. You will need th
 When ordering, make sure all components are selected in the list (components that incur an extra fee, need to be manually ticked)
 Use the 3D view to double check that all components appear on the board.
 
+Alternatively, the file EasyEDA_Toshiba.zip contains a copy of the project that you can import into EasyEDA to edit. 
+
 
 ## Component shortfall
 
