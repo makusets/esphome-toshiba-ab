@@ -217,7 +217,7 @@ struct DataFrameReader {
 
   bool put(uint8_t byte) {
     // Ignore a common noise byte at start
-    if (data_index_ == 0 && (byte != 0x00 && byte != 0x04 &&byte != 0x01 && byte != 0x40 && byte != 0x42))  {
+    if (data_index_ == 0 && (byte != 0x00 && byte != 0x04 &&byte != 0x01 &&byte != 0x02 &&byte != 0x03 && byte != 0x40 && byte != 0x42 ))  {
       ESP_LOGV("READER", "Ignoring noise");
       return false;
     }
