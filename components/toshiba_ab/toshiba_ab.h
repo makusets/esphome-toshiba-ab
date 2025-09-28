@@ -219,7 +219,7 @@ struct DataFrameReader {
     // List of valid sources
     static const uint8_t valid_sources[] = {
         0x00, // master (default)
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06 // other possible masters
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, // other possible masters
         0x40, // remote
         0x41, // possible remote
         0x42, // temp sensor
