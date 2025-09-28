@@ -301,7 +301,10 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void loop() override;
   
   uint8_t master_address_ = 0x00;
+  bool master_address_auto_{true};
   void set_master_address(uint8_t address);
+  void set_master_address_auto(bool auto_detect) { master_address_auto_ = auto_detect; }
+  bool get_master_address_auto() const { return master_address_auto_; }
 
 
   climate::ClimateTraits traits() override;

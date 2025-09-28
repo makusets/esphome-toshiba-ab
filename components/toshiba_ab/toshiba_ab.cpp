@@ -793,6 +793,13 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
                 frame->data[1] == OPCODE2_PING_PONG &&         // 0x0C
                 frame->data[2] == OPCODE2_READ_STATUS) {       // 0x81
         log_data_frame("Remote PING", frame);
+        
+        // Auto-update master address if enabled and different from current
+        if (this->master_address_auto_ &&
+        frame->dest != this->master_address_) {
+          ESP_LOGI(TAG, "Remote ping addressed to new master: 0x%02X, updating master address", frame->dest);
+          this->master_address_ = frame->dest;
+        }
       
       // Remote 40:00:15:06:08:E8:00:01:00:9E:2C that is sent every minute, not sure what it does
       } else if (frame->opcode1 == OPCODE_ERROR_HISTORY &&      // 0x15 envelope
@@ -808,6 +815,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         // unknown remote message
         log_data_frame("Unknown remote data", frame);
       }
+    
     } else if (frame->source == TOSHIBA_TEMP_SENSOR) {
       // message from configured temp sensor in yaml
       // example:   42:00:11:04:08:89:72:46:E2  for 22 degrees, this message follows Toshiba standalone temp sensor format
@@ -826,10 +834,21 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         log_data_frame("Unknown 0x42 data", frame);
       }
     } else {
-      ESP_LOGD(TAG, "Received data from unknown source: %02X", frame->source);
-      log_data_frame("Unknown source", frame);
+    // Unknown source handling
+    ESP_LOGD(TAG, "Received data from unknown source: %02X", frame->source);
+    log_data_frame("Unknown source", frame);
+
+    // Auto-detect master address from master parameters frame
+      if (this->master_address_auto_) {
+      // Check for master parameters pattern (opcode, length, etc.)
+        if (frame->opcode1 == OPCODE_PARAMETER && frame->data_length >= 4) {
+          ESP_LOGI(TAG, "Auto-detected master address: 0x%02X, updating master address", frame->source);
+          this->master_address_ = frame->source;
+
+        }
+      }
     }
-    }
+    } 
   }
 
 bool ToshibaAbClimate::receive_data(const std::vector<uint8_t> data) {

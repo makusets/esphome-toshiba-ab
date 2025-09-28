@@ -30,6 +30,7 @@ CONF_FAILED_CRCS = "failed_crcs"
 
 CONF_ON_DATA_RECEIVED = "on_data_received"
 CONF_MASTER = "master"
+CONF_MASTER_ADDRESS_AUTO = "master_address_auto"
 
 CONF_AUTONOMOUS = "autonomous"
 
@@ -39,6 +40,7 @@ CONF_SENSORS = "sensors"
 CONF_ADDRESS = "address"
 CONF_SCALE = "scale"
 CONF_INTERVAL = "interval"
+
 
 SENSOR_ITEM_SCHEMA = cv.Schema({
     cv.Required(CONF_ADDRESS): cv.uint8_t,                           # sensor ID to query via 0x17
@@ -72,6 +74,7 @@ REPORT_SENSOR_TEMP_SCHEMA = cv.Schema({
 CONFIG_SCHEMA = climate.CLIMATE_SCHEMA.extend(
     {
         cv.Optional(CONF_MASTER, default=0x00): cv.uint8_t,
+        cv.Optional(CONF_MASTER_ADDRESS_AUTO, default=True): cv.boolean,
     
         cv.GenerateID(): cv.declare_id(ToshibaAbClimate),
         cv.Optional(CONF_CONNECTED): binary_sensor.binary_sensor_schema(
@@ -121,6 +124,9 @@ async def to_code(config):
 
     if CONF_MASTER in config:
         cg.add(var.set_master_address(config[CONF_MASTER]))
+    
+    if CONF_MASTER_ADDRESS_AUTO in config:
+        cg.add(var.set_master_address_auto(config[CONF_MASTER_ADDRESS_AUTO]))
 
     if CONF_CONNECTED in config:
         sens = await binary_sensor.new_binary_sensor(config[CONF_CONNECTED])
