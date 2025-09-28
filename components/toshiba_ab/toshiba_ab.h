@@ -216,10 +216,28 @@ struct DataFrameReader {
   }
 
   bool put(uint8_t byte) {
-    // Ignore a common noise byte at start
-    if (data_index_ == 0 && (byte != 0x00 && byte != 0x04 &&byte != 0x01 &&byte != 0x02 &&byte != 0x03 && byte != 0x40 && byte != 0x42 ))  {
-      ESP_LOGV("READER", "Ignoring noise");
-      return false;
+    // List of valid sources
+    static const uint8_t valid_sources[] = {
+        0x00, // master (default)
+        0x01, 0x02, 0x03, 0x04, 0x05, 0x06 // other possible masters
+        0x40, // remote
+        0x41, // possible remote
+        0x42, // temp sensor
+        // Add more if needed
+    };
+    // Ignore common noise byte at start
+    if (data_index_ == 0) {
+        bool valid = false;
+        for (auto src : valid_sources) {
+            if (byte == src) {
+                valid = true;
+                break;
+            }
+        }
+        if (!valid) {
+            ESP_LOGV("READER", "Ignoring packet from unknown source: 0x%02X", byte);
+            return false;
+        }
     }
     // Store byte
     frame.raw[data_index_] = byte;
