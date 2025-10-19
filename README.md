@@ -37,6 +37,7 @@ uart:
   rx_pin: GPIO13
   baud_rate: 2400
   parity: EVEN
+  rx_buffer_size: 2048    # increase buffer to avoid dropped bytes
 
 climate:
   - platform: toshiba_ab

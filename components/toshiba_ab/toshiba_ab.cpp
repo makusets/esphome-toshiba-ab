@@ -1,4 +1,5 @@
 #include "toshiba_ab.h"
+#include "esphome.h"
 
 
 namespace esphome {
@@ -7,6 +8,9 @@ namespace toshiba_ab {
 
 
 static const char *const TAG = "tcc_link.climate";
+
+static uint8_t tx_enable_pin = 16;  // TX enable pin, when low = receive mode enabled, when high = block recveive mode
+
 
 const LogString *opcode_to_string(uint8_t opcode) {
   switch (opcode) {
@@ -555,7 +559,10 @@ void ToshibaAbClimate::setup() {
     this->failed_crcs_sensor_->publish_state(0);
   }
   ESP_LOGD("toshiba", "Setting up ToshibaClimate...");
-
+  
+  // Initialize TX enable pin, set to LOW (receive mode)
+  pinMode(tx_enable_pin, OUTPUT);
+  digitalWrite(tx_enable_pin, LOW);
 
   // Send ping if autonomous mode is enabled using set_interval calls every ping_interval_ms_ (30s))
   if (this->autonomous_) {
