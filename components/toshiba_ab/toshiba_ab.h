@@ -251,17 +251,6 @@ struct DataFrameReader {
             return false;
         }
 
-        bool valid = false;
-        for (auto src : valid_sources) {
-            if (byte == src) {
-                valid = true;
-                break;
-            }
-        }
-        if (!valid) {
-            ESP_LOGV("READER", "Ignoring packet from unknown source: 0x%02X", byte);
-            return false;
-        }
     }
 
     // When the length byte arrives (raw[3]), compute the expected total size
