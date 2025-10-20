@@ -242,6 +242,28 @@ struct DataFrameReader {
     // Store byte
     frame.raw[data_index_] = byte;
 
+    if (data_index_ == 1) {
+        // ignore frames where source == dest (likely noise or corrupted)
+        if (frame.raw[0] == frame.raw[1]) {
+            ESP_LOGV("READER", "Ignoring packet where source == dest: 0x%02X", frame.raw[0]);
+            // reset reader state so next byte is treated as new frame start
+            reset();
+            return false;
+        }
+
+        bool valid = false;
+        for (auto src : valid_sources) {
+            if (byte == src) {
+                valid = true;
+                break;
+            }
+        }
+        if (!valid) {
+            ESP_LOGV("READER", "Ignoring packet from unknown source: 0x%02X", byte);
+            return false;
+        }
+    }
+
     // When the length byte arrives (raw[3]), compute the expected total size
     if (data_index_ == 3) {
       frame.data_length = frame.raw[3];  // keep DataFrame fields in sync
