@@ -1,3 +1,4 @@
+# v3 Board. Oct 2025
 # Ordering or building the board
 
 You will need to build the compatible hardware. This folder contains all necessary files. I designed the board using EasyEDA online editor (free). All files are EasyEDA compatible format.
