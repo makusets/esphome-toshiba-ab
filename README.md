@@ -3,6 +3,7 @@
 <img src="hardware/v1/Final.jpg" width="170">    <img src="hardware/v1/Final2.jpg" width="170"> v1 depicted
 
 
+
 ESPHome component to integrate with Toshiba Air Conditioners via AB line protocol
 
 
@@ -33,7 +34,7 @@ external_components:
     refresh: 0s  #optional, how often to download fresh files from source, defaults to 1 day, use 0 to force updates 
 
 uart:
-  tx_pin: GPIO15
+  tx_pin: GPIO10  #GPIO15 if using v1 board
   rx_pin: GPIO13
   baud_rate: 2400
   parity: EVEN
@@ -45,14 +46,12 @@ climate:
     id: toshiba_ac
     connected:
       name: "Toshiba AC Connected"  # optional, binary sensor that monitors link with AC
-    master: 0x00 # Master ID in Toshiba protocol, optional, default is 0x00, for some units needs to be set to 0x01, 0x04 and possibly others
+    master: 0x00 # Master ID in Toshiba protocol, optional, if omitted will go into autodetect
 ```
 
 ## Optional section if you install a BME280 sensor
 
-This option is not really needed.
-
-The option of a BME280 sensor is added to give the option of reading the temperature, pressure and humidity from the thermostat. It is done as any other sensor in the Home Assistant environment. If configured, it will be exposed to the frontend.
+The option of a BME280 sensor is added to give the option of reading the temperature, pressure and humidity from the thermostat. It is done as any other sensor in the ESPHome environment. If configured, it will be exposed to the frontend. If you want to use this or another sensor to control the AC system, have a look at the complete_exmple.yaml file. 
 
 ```yaml
 # If installed, it will report the BME280 temp, humidity and pressure values
@@ -92,21 +91,21 @@ You will need to build the esphome compatible hardware. Instructions below.
 
 - Isolate the AC unit completely off (at the electrical distribution board ideally)
 - Take out the cover of your remote controller
-- Loose the screws of AB terminals. **WARNING**: The PCB assumes A is positive and B is negative. If this is not your case you can damage the PCB.
-- Wire the remote A,B terminals to the pcb A,B ports
+- Loose the screws of AB terminals. 
+- Wire the remote A,B terminals to the pcb. V1 board is polarity sensitive. V3 board can be connected both ways.
 
 ![image](https://github.com/issalig/toshiba_air_cond/blob/master/pcb/remote_back_pcb.jpg)
 
 # Hardware design
 
-This is the schematic of the board, it is powered by the AB line
+This is the schematic of the V3 board, it is powered by the AB line
 
-![image](hardware/Schematic.JPG)
+![image](hardware/v3/v3.png)
 
 
 It should look something like that
 
-![image](hardware/Board.JPG)
+![image](hardware/v3/v3_3D.png)
 
 
 I2C headers have been added for the BME280 I2C sensor option, also for future inclusion of a screen or other I2C device
@@ -115,3 +114,7 @@ If a BME280 sensor is installed and setup in yaml it will report the readings to
 All files necessary can be found in the hardware folder, including the EasyEDA Project:
 
 https://github.com/makusets/esphome-toshiba-ab/tree/main/hardware
+
+# More options and complete yaml
+
+Have a look at the complete_example.yaml file for more options available for the component. It includes details about reporting a chosen temperature to the AC central unit or reading extra sensors (power, pressure, runtime, temp...)
