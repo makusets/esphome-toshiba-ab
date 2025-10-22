@@ -1,6 +1,6 @@
 # ESPHome Toshiba_AB AC Component
 
-<img src="hardware/v1/Final.jpg" width="170">    <img src="hardware/v1/Final2.jpg" width="170">
+<img src="hardware/v1/Final.jpg" width="170">    <img src="hardware/v1/Final2.jpg" width="170"> v1 depicted
 
 
 ESPHome component to integrate with Toshiba Air Conditioners via AB line protocol
