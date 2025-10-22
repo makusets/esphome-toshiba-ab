@@ -44,7 +44,7 @@ i2c:
 
 # Serial bus for the Toshiba AB protocol
 uart:
-  tx_pin: GPIO15
+  tx_pin: GPIO10 #GPIO15 for v1 board
   rx_pin: GPIO13
   baud_rate: 2400
   parity: EVEN
@@ -66,7 +66,7 @@ climate:
     id: my_ac_system
 
     # --- Address of the AC master ---
-    master: 0x00                # default is 0x00 if not set, some units use 0x01, 0x04 and possibly others
+    master: 0x00                # optional, will autodetect if not set
 
     ###### Optional settings  #######
 
