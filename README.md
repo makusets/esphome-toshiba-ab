@@ -8,7 +8,8 @@ Improvements over v1:
 
 notes:
 
-- The ESP consumes a lot more energy than the conventional wall remotes due to WiFi. Therefore, the board is powered using a buck converter, as oposed to the LDO used in original Toshiba wall remote. This has the potential of introducing noise and interfere with data transmission. Through testing, I found that the specific make and model of the buck had a big impact on data corruption; as well as a good size capacitor on the 3.3v rail. This design has been tested with a DEXU branded buck and works without issues. If you test other components, please let me know what you found out. 
+- The ESP consumes a lot more energy than the conventional wall remotes due to WiFi. Therefore, the board is powered using a buck converter, as oposed to the LDO used in original Toshiba wall remote. This has the potential of introducing noise and interfere with data transmission. Through testing, I found that the specific make and model of the buck had a big impact on data corruption; as well as a good size capacitor on the 3.3v rail. This design has been tested with a DEXU branded buck and works without issues. If you test other components, please let me know what you found out.
+- The DCDC buck provides 3.3V and then in fed into a 3.3V LDO, although this is conterintuitive, the LDO is needed for USB power and the model chosen allows for 3.3V input. 
 - The data reading is done using DC filtering and then a comparator. The size of the DC filter capacitor is important. 
 - The writing is done by pulling the A line low (to B) across a 330ohm resistor for a "O" bit, this is the same approach adopted by toshiba otiginal board.
 
@@ -128,7 +129,7 @@ If a BME280 sensor is installed and setup in yaml it will report the readings to
 
 All files necessary can be found in the hardware folder, including the EasyEDA Project:
 
-https://github.com/makusets/esphome-toshiba-ab/tree/main/hardware
+https://github.com/makusets/esphome-toshiba-ab/tre e/main/hardware
 
 # More options and complete yaml
 
