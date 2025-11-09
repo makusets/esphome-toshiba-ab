@@ -39,7 +39,7 @@ USB-C connector: this is the hardest bit to solder and I might be easier done wi
 
 This is the schematic of the board.
 
-<img src="v3.png" width="400">
+<img src="v3.pdf" width="400">
 
 # Final product
 
