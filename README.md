@@ -131,6 +131,11 @@ All files necessary can be found in the hardware folder, including the EasyEDA P
 
 https://github.com/makusets/esphome-toshiba-ab/tre e/main/hardware
 
+# Case
+
+A suitable enclosure for the board was designed to be 3D printed in two parts, see the STL files contained in this folder. The case looks like this:
+![image](hardware/v3/toshiba_top_case.png)
+
 # More options and complete yaml
 
 Have a look at the complete_example.yaml file for more options available for the component. It includes details about reporting a chosen temperature to the AC central unit or reading extra sensors (power, pressure, runtime, temp...)
