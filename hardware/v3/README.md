@@ -22,7 +22,7 @@ It often happens that components are out of stock or become unavailable and need
 tick the option of "parts sourced by JLCPCB" instead of "by customer". That should make it easy to replace shortfalls. Otherwise, use the search option and look for an equivalent component. The 3D view on the next page can be useful to double check that you made the right choice.
 The K78xx DCDC buck is a critical component, the board works fine with a DEXU branded one, EVSUN not good as it introduces noise in the AB line. Have not tried other brands, if you do, let me know.
 
-<img src="v3_3D.png" width="400">
+<img src="v3_3D.png" width="70%">
 
 # DIY tips
 
