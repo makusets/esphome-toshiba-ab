@@ -133,7 +133,8 @@ https://github.com/makusets/esphome-toshiba-ab/tre e/main/hardware
 
 # Case
 
-A suitable enclosure for the board was designed to be 3D printed in two parts, see the STL files contained in this folder. The case looks like this:
+A suitable enclosure for the board was designed to be 3D printed in two parts, see the STL files contained in this folder. The case was designed using OnShape online designing software, the original file is public and can be found by searching "toshiba_esp_case" within OnShape environment. The case looks like this:
+
 ![image](hardware/v3/toshiba_top_case.png)
 
 # More options and complete yaml
