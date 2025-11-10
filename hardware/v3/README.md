@@ -30,7 +30,7 @@ The internet is full of electronics sodering instructional tips and videos. I ha
 
 I personally did not use any magnifying device, reflow oven, or special equipment.
 
-USB-C connector: this is the hardest bit to solder and I might be easier done with a hot air station. In any case, the connector is only there for the initial flashing of the firmware. Alternatively, one could flash the initial firmware on the ESP12 using a flashing board and get rid of the USB-C connector together with the USB to UART IC, the transistors and the resistorss. (U6, U8, R7, R10, R12, R11, Q3 and Q4). Updates can be done OTA once the board is up and running.
+USB-C connector: this is the hardest bit to solder and it might be easier done with a hot air station. In any case, the connector is only there for the initial flashing of the firmware. Alternatively, one could flash the initial firmware on the ESP12 using a flashing board and get rid of the USB-C connector together with the USB to UART IC, the transistors and the resistorss. (U6, U8, R7, R10, R12, R11, Q3 and Q4). Updates can be done OTA once the board is up and running.
 
 [USB-C programmer on AliExpress](https://www.aliexpress.com/item/1005007750007503.html)
 
