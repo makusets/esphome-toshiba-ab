@@ -129,7 +129,7 @@ If a BME280 sensor is installed and setup in yaml it will report the readings to
 
 All files necessary can be found in the hardware folder, including the EasyEDA Project:
 
-https://github.com/makusets/esphome-toshiba-ab/tre e/main/hardware
+https://github.com/makusets/esphome-toshiba-ab/tree/main/hardware
 
 # Case
 
