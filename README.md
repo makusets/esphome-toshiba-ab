@@ -119,7 +119,7 @@ This is the schematic of the V3 board, it is powered by the AB line
 ![image](hardware/v3/v3.png)
 
 
-It should look something like that
+It should look something like this:
 
 ![image](hardware/v3/v3_3D.png)
 
@@ -134,8 +134,8 @@ https://github.com/makusets/esphome-toshiba-ab/tre e/main/hardware
 # Case
 
 A suitable enclosure for the board was designed to be 3D printed in two parts, STL files are available in the hardware folder. The case was designed using OnShape online designing software, the original file is public and can be found and modified by searching "toshiba_esp_case" within OnShape environment. The case looks like this:
+<img src="hardware/v3/toshiba_top_case.png" width="200"> <img src="hardware/v3/toshiba_bot_case.png" width="200">
 
-![image](hardware/v3/toshiba_top_case.png) ![image](hardware/v3/toshiba_bot_case.png)
 
 # More options and complete yaml
 
