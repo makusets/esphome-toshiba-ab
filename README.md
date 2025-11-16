@@ -5,12 +5,12 @@ Improvements over v1:
 - Works with a wide voltage range in the AB line (v1 only worked within a very narrow voltage window on the AB line), which should expand compatibility to more toshiba models.
 - Much better filtering of noise and virtually no noise introduced on the AB line.
 - Robust comparator design for data processing with DC filtering capacitor.
-- Selectable power source with slide switch: AB line or USB. Only switch power source with the board completely disconnected. USB data will operate even with AB power. 
+- Selectable power source with slide switch: AB line or USB. Only switch power source with the board completely disconnected, otherwise there is high risk of damaging the circuit. USB data will operate even with AB power. 
 
 notes:
 
-- The ESP consumes a lot more energy than the conventional wall remotes due to Wi-Fi. Therefore, the board is powered using a buck converter, as opposed to the LDO used in original Toshiba wall remote. This has the potential of introducing noise and interfere with data transmission. Through testing, I found that the specific make and model of the buck had a big impact on data corruption; as well as a good size capacitor on the 3.3v rail. This design has been tested with a DEXU branded buck and works without issues. If you test other components, please let me know what you found out.
-- The DCDC buck provides 3.3V and then is fed into a 3.3V LDO, although this is counterintuitive, the LDO is needed for USB power and the model chosen allows for 3.3V input. 
+- The ESP consumes a lot more energy than the conventional wall remotes due to Wi-Fi. Therefore, the board is powered using a buck converter, as opposed to the LDO used in original Toshiba wall remote. This has the potential of introducing noise and interfere with data transmission. Through testing, I found that the specific make and model of the buck had a big impact on data corruption; as well as a good size capacitor on the 3.3v rail (at least 1000uF). This design has been tested with a DEXU branded buck,both K7803-500 and K7803-1000 and works without issues. If you test other components, please let me know what you found out.
+- The DCDC buck provides 3.3V and then is fed into a 3.3V LDO, although this is counterintuitive, the LDO reduces noise further and is needed for USB power anyway, the specific model chosen allows for 3.3V input. 
 - The data reading is done using DC filtering and then a comparator. The size of the DC filter capacitor is important. 
 - The writing is done by pulling the A line low (to B) across a 330ohm resistor for a "0" bit, this is the same approach adopted by toshiba original board.
 
@@ -21,10 +21,11 @@ notes:
 
 
 
-ESPHome component to integrate with Toshiba Air Conditioners via AB line protocol
+ESPHome component to integrate with Toshiba Air Conditioners using the two wire AB line connection to remote.
 
+This project implements all necessary functions to decode and interact with the Toshiba TCC protocol over the AB line. It interprets and reports all messages between remote controllers and central unit and sends commands as it was the wall remote.
 
-This project implements functions to decode Toshiba AB protocol from indoor units to wired controllers and provides a hardware design to communicate.
+The hardware side of this project includes a ESP12 based board design that connects to the system.
 
 In particular, this project has been tested with remote control unit RBC-AMT32E and RBC-AMT54E and central unit RAV-SM1103DT-A but should work with other models using the AB protocol.
 
