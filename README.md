@@ -5,6 +5,7 @@ Improvements over v1:
 - Works with a wide voltage range in the AB line (v1 only worked within a very narrow voltage window on the AB line), which should expand compatibility to more toshiba models.
 - Much better filtering of noise and virtually no noise introduced on the AB line.
 - Robust comparator design for data processing with DC filtering capacitor.
+- Selectable power source with slide switch: AB line or USB. Only switch power source with the board completely disconnected. USB data will operate even with AB power. 
 
 notes:
 
