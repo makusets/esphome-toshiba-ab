@@ -34,6 +34,10 @@ USB-C connector: this is the hardest bit to solder and it might be easier done w
 
 [USB-C programmer on AliExpress](https://www.aliexpress.com/item/1005007750007503.html)
 
+The big capacitor is meant to be soldered at the back of the board and bended on its side, the case was designed with this in mind.
+
+<img src="front.jpg" width="49%">      <img src="back.jpg" width="49%">
+
 
 # Schematic
 
