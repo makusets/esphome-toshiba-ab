@@ -651,7 +651,7 @@ void ToshibaAbClimate::sync_from_received_state() {
       this->filter_alert_sensor_->publish_state(this->filter_alert_state_);
     }
     changes++;
-
+  }
 
   if (changes > 0) {
     this->publish_state();
