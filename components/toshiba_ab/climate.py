@@ -61,8 +61,9 @@ ToshibaAbOnDataReceivedTrigger = toshiba_ab_ns.class_(
     "ToshibaAbOnDataReceivedTrigger", automation.Trigger.template()
 )
 
-# Report external temperature (from any ESPHome sensor) to the AC
-CONF_REPORT_SENSOR_TEMP = "report_sensor_temp"
+
+CONF_REPORT_SENSOR_TEMP = "report_sensor_temp" # Report external temperature (from any ESPHome sensor) to the AC
+CONF_FILTER_ALERT = "filter_alert" #report filter alert status as binary sensor
 
 REPORT_SENSOR_TEMP_SCHEMA = cv.Schema({
     cv.Optional("enabled", default=True): cv.boolean,
@@ -104,6 +105,7 @@ CONFIG_SCHEMA = climate.CLIMATE_SCHEMA.extend(
         cv.Optional(CONF_AUTONOMOUS, default=False): cv.boolean,
         cv.Optional(CONF_SENSORS, default=[]): cv.ensure_list(SENSOR_ITEM_SCHEMA),
         cv.Optional(CONF_REPORT_SENSOR_TEMP): REPORT_SENSOR_TEMP_SCHEMA,
+        cv.Optional(CONF_FILTER_ALERT): binary_sensor.binary_sensor_schema(),
     }
 ).extend(uart.UART_DEVICE_SCHEMA).extend(cv.COMPONENT_SCHEMA)
 
@@ -148,6 +150,10 @@ async def to_code(config):
             )
     if CONF_AUTONOMOUS in config:
         cg.add(var.set_autonomous(config[CONF_AUTONOMOUS]))
+    
+    if CONF_FILTER_ALERT in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_FILTER_ALERT])
+        cg.add(var.set_filter_alert_sensor(sens))
     
     for item in config.get(CONF_SENSORS, []):
         sens = await sensor.new_sensor(item["sensor"])  # creates the Sensor with name/units/etc.

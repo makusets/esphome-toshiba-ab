@@ -334,6 +334,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_master_address(uint8_t address);
   void set_master_address_auto(bool auto_detect) { master_address_auto_ = auto_detect; }
   bool get_master_address_auto() const { return master_address_auto_; }
+  void set_filter_alert_sensor(binary_sensor::BinarySensor *sensor) { filter_alert_sensor_ = sensor; }
+
 
 
   climate::ClimateTraits traits() override;
@@ -399,6 +401,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   CallbackManager<void(const struct DataFrame *frame)> set_data_received_callback_{};
 
   // sensors  ******************************************
+  binary_sensor::BinarySensor *filter_alert_sensor_{nullptr};
+  bool filter_alert_state_{false}; 
   binary_sensor::BinarySensor *connected_binary_sensor_{nullptr};
   switch_::Switch *vent_switch_{nullptr};
   sensor::Sensor *failed_crcs_sensor_{nullptr};
