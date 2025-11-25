@@ -70,6 +70,9 @@ climate:
 
     ###### Optional settings  #######
 
+    filter_alert:               # Optional binary sensor to report filter alert status
+      name: "Filter Alert"
+
     # --- Forward a temperature sensor data to AC ---
     # If enabled, the temperature sensor with the given id will be used to report room temperature to the AC unit
     # This will override the temperature reported by the remote controller or the internal sensor of the AC unit

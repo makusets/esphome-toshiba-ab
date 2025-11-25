@@ -17,7 +17,7 @@ notes:
 
 # ESPHome Toshiba_AB AC Component
 
-<img src="hardware/v3/Final.jpg" width="170">    <img src="hardware/v3/Final2.jpg" width="170">
+<img src="hardware/v3/Final.jpg" width="30%">    <img src="hardware/v3/Final2.jpg" width="30%"> <img src="card.JPG" width="30%">
 
 
 
