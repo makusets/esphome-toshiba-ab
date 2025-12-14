@@ -815,7 +815,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           this->master_address_ = frame->dest;
         }
       
-      // Remote 40:00:15:06:08:E8:00:01:00:9E:2C that is sent every minute, not sure what it does
+      // Remote 40:00:15:06:08:E8:00:01:00:9E:2C that is sent every minute, the master responds with an hourly counter (time on?)
       } else if (frame->opcode1 == OPCODE_ERROR_HISTORY &&      // 0x15 envelope
                 frame->data_length >= 6 &&
                 frame->data[0] == COMMAND_MODE_READ &&         // 0x08
@@ -823,7 +823,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
                 frame->data[3] == 0x01 &&                 
                 frame->data[5] == 0x9E) {                       
                 
-        log_data_frame("Remote E8 Read", frame);
+        log_data_frame("Remote Timer Read", frame);
 
       } else {
         // unknown remote message
