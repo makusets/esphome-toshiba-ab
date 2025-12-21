@@ -524,8 +524,8 @@ climate::ClimateFanMode to_climate_fan(const struct TccState *state) {
 
 ToshibaAbClimate::ToshibaAbClimate() {
   target_temperature = NAN;
-  this->traits_.set_supports_action(true);
-  this->traits_.set_supports_current_temperature(true);
+  this->traits_.add_feature_flags(climate::CLIMATE_FEATURE_ACTION);
+  this->traits_.add_feature_flags(climate::CLIMATE_FEATURE_CURRENT_TEMPERATURE);
   this->traits_.set_supported_modes({
       climate::CLIMATE_MODE_OFF,
       climate::CLIMATE_MODE_HEAT,
@@ -541,7 +541,6 @@ ToshibaAbClimate::ToshibaAbClimate() {
       climate::CLIMATE_FAN_MEDIUM,
       climate::CLIMATE_FAN_HIGH,
   });
-  this->traits_.set_supports_two_point_target_temperature(false);
   this->traits_.set_visual_min_temperature(18);
   this->traits_.set_visual_max_temperature(29);
   this->traits_.set_visual_temperature_step(0.5);
@@ -858,7 +857,8 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         if (frame->opcode1 == OPCODE_PARAMETER && frame->data_length >= 4) {
           ESP_LOGI(TAG, "Auto-detected master address: 0x%02X, updating master address", frame->source);
           this->master_address_ = frame->source;
-
+          this->data_reader.add_allowed_source(this->master_address_);
+          this->data_reader.set_allow_unknown_sources(false);
         }
       }
     }
@@ -1119,4 +1119,5 @@ void ToshibaAbVentSwitch::write_state(bool state) {
 
 void esphome::toshiba_ab::ToshibaAbClimate::set_master_address(uint8_t address) {
   this->master_address_ = address;
+  this->data_reader.add_allowed_source(address);
 }
