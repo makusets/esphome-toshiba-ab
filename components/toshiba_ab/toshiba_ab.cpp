@@ -524,8 +524,8 @@ climate::ClimateFanMode to_climate_fan(const struct TccState *state) {
 
 ToshibaAbClimate::ToshibaAbClimate() {
   target_temperature = NAN;
-  this->traits_.set_supports_action(true);
-  this->traits_.set_supports_current_temperature(true);
+  this->traits_.add_feature_flags(climate::CLIMATE_FEATURE_ACTION);
+  this->traits_.add_feature_flags(climate::CLIMATE_FEATURE_CURRENT_TEMPERATURE);
   this->traits_.set_supported_modes({
       climate::CLIMATE_MODE_OFF,
       climate::CLIMATE_MODE_HEAT,
@@ -541,7 +541,6 @@ ToshibaAbClimate::ToshibaAbClimate() {
       climate::CLIMATE_FAN_MEDIUM,
       climate::CLIMATE_FAN_HIGH,
   });
-  this->traits_.set_supports_two_point_target_temperature(false);
   this->traits_.set_visual_min_temperature(18);
   this->traits_.set_visual_max_temperature(29);
   this->traits_.set_visual_temperature_step(0.5);
