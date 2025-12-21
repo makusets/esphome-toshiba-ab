@@ -5,6 +5,7 @@
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/switch/switch.h"
 #include "esphome/components/uart/uart.h"
+#include <algorithm>
 #include <bitset>
 #include <queue>
 
@@ -206,6 +207,15 @@ struct DataFrameReader {
   bool complete{false};
   uint8_t  data_index_{0};
   uint16_t expected_total_{0};  // header(4) + payload(len) + crc(1)
+  bool allow_unknown_sources_{false};
+  std::vector<uint8_t> allowed_sources_{
+      0x00,  // master (default)
+      0x01, 0x02, 0x03, 0x04, 0x05, 0x06,  // other possible masters
+      0x40,  // remote
+      0x41,  // possible remote
+      0x42,  // temp sensor
+      // Add more if needed
+  };
 
   void reset() {
     frame.reset();
@@ -216,19 +226,10 @@ struct DataFrameReader {
   }
 
   bool put(uint8_t byte) {
-    // List of valid sources
-    static const uint8_t valid_sources[] = {
-        0x00, // master (default)
-        0x01, 0x02, 0x03, 0x04, 0x05, 0x06, // other possible masters
-        0x40, // remote
-        0x41, // possible remote
-        0x42, // temp sensor
-        // Add more if needed
-    };
     // Ignore common noise byte at start
-    if (data_index_ == 0) {
+    if (data_index_ == 0 && !allow_unknown_sources_) {
         bool valid = false;
-        for (auto src : valid_sources) {
+        for (auto src : allowed_sources_) {
             if (byte == src) {
                 valid = true;
                 break;
@@ -289,6 +290,14 @@ struct DataFrameReader {
     return false;
   }
 
+  void add_allowed_source(uint8_t source) {
+    if (std::find(allowed_sources_.begin(), allowed_sources_.end(), source) == allowed_sources_.end()) {
+      allowed_sources_.push_back(source);
+    }
+  }
+
+  void set_allow_unknown_sources(bool allow_unknown) { allow_unknown_sources_ = allow_unknown; }
+
 private:
 };
 
@@ -332,7 +341,10 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   uint8_t master_address_ = 0x00;
   bool master_address_auto_{true};
   void set_master_address(uint8_t address);
-  void set_master_address_auto(bool auto_detect) { master_address_auto_ = auto_detect; }
+  void set_master_address_auto(bool auto_detect) {
+    master_address_auto_ = auto_detect;
+    data_reader.set_allow_unknown_sources(auto_detect);
+  }
   bool get_master_address_auto() const { return master_address_auto_; }
   void set_filter_alert_sensor(binary_sensor::BinarySensor *sensor) { filter_alert_sensor_ = sensor; }
 
@@ -476,5 +488,3 @@ class ToshibaAbVentSwitch : public switch_::Switch, public Component {
 
 
 }  // namespace esphome
-
-
