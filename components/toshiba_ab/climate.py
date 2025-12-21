@@ -31,6 +31,8 @@ CONF_FAILED_CRCS = "failed_crcs"
 CONF_ON_DATA_RECEIVED = "on_data_received"
 CONF_MASTER = "master"
 CONF_MASTER_ADDRESS_AUTO = "master_address_auto"
+CONF_COMMAND_MODE_READ = "command_mode_read"
+CONF_COMMAND_MODE_WRITE = "command_mode_write"
 
 CONF_AUTONOMOUS = "autonomous"
 
@@ -76,6 +78,8 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
     {
         cv.Optional(CONF_MASTER, default=0x00): cv.uint8_t,
         cv.Optional(CONF_MASTER_ADDRESS_AUTO, default=True): cv.boolean,
+        cv.Optional(CONF_COMMAND_MODE_READ, default=0x08): cv.uint8_t,
+        cv.Optional(CONF_COMMAND_MODE_WRITE, default=0x80): cv.uint8_t,
     
         cv.GenerateID(): cv.declare_id(ToshibaAbClimate),
         cv.Optional(CONF_CONNECTED): binary_sensor.binary_sensor_schema(
@@ -129,6 +133,10 @@ async def to_code(config):
     
     if CONF_MASTER_ADDRESS_AUTO in config:
         cg.add(var.set_master_address_auto(config[CONF_MASTER_ADDRESS_AUTO]))
+    if CONF_COMMAND_MODE_READ in config:
+        cg.add(var.set_command_mode_read(config[CONF_COMMAND_MODE_READ]))
+    if CONF_COMMAND_MODE_WRITE in config:
+        cg.add(var.set_command_mode_write(config[CONF_COMMAND_MODE_WRITE]))
 
     if CONF_CONNECTED in config:
         sens = await binary_sensor.new_binary_sensor(config[CONF_CONNECTED])

@@ -346,6 +346,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
     data_reader.set_allow_unknown_sources(auto_detect);
   }
   bool get_master_address_auto() const { return master_address_auto_; }
+  void set_command_mode_read(uint8_t value) { command_mode_read_ = value; }
+  void set_command_mode_write(uint8_t value) { command_mode_write_ = value; }
   void set_filter_alert_sensor(binary_sensor::BinarySensor *sensor) { filter_alert_sensor_ = sensor; }
 
 
@@ -443,6 +445,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool autonomous_ = false;
   uint32_t ping_interval_ms_ = 30000;  // default ping interval
   uint32_t read08_interval_ms = 60000;  // interval to send 40:00:15:06:08:E8:00:01:00:9E:2C, not sure what it does, but it is sent every minute by remote in the logs
+  uint8_t command_mode_read_{COMMAND_MODE_READ};
+  uint8_t command_mode_write_{COMMAND_MODE_WRITE};
 
  private:
   uint32_t loops_without_reads_ = 0;
