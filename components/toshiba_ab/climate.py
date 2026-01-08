@@ -61,6 +61,10 @@ ToshibaAbVentSwitch =  toshiba_ab_ns.class_(
     "ToshibaAbVentSwitch", switch.Switch, cg.Component
 )
 
+ToshibaAbReadOnlySwitch = toshiba_ab_ns.class_(
+    "ToshibaAbReadOnlySwitch", switch.Switch, cg.Component
+)
+
 ToshibaAbOnDataReceivedTrigger = toshiba_ab_ns.class_(
     "ToshibaAbOnDataReceivedTrigger", automation.Trigger.template()
 )
