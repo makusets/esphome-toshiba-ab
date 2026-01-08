@@ -64,7 +64,7 @@ climate:
 
     id: my_ac_system      # Required
 
-    autonomous: true            # Optional, default false
+    autonomous: false            # Optional, default false
                                 # Needed if you want to operate the AC whithout a wall remote controller
                                 # In autonomous mode, the ESP will always report a temperature to AC unit, either from a sensor configured below or will fake it
 
