@@ -61,8 +61,12 @@ climate:
   - platform: toshiba_ab
     name: "My AC System"
 
-    # Required
-    id: my_ac_system
+
+    id: my_ac_system      # Required
+
+    autonomous: true            # Optional, default false
+                                # Needed if you want to operate the AC whithout a wall remote controller
+                                # In autonomous mode, the ESP will always report a temperature to AC unit, either from a sensor configured below or will fake it
 
     # --- Address of the AC master ---
     master: 0x00                # optional, will autodetect if not set
@@ -80,7 +84,7 @@ climate:
     # If enabled, this will override the temperature reported by the remote controller or the internal sensor of the AC unit,
     # regardless of settings in the AC system
     # If disabled or omitted, the AC unit will use its internal sensor or the remote controller temperature, depending on settings
-    # In autonomous mode, a sensor should always be configured here, whether enable or disabled. 
+    # In autonomous mode, a sensor should always be configured here, whether enabled or disabled. 
 
     report_sensor_temp:
       enabled: true             # default false
