@@ -274,7 +274,7 @@ void ToshibaAbClimate::send_read_block(uint8_t opcode2, uint16_t start, uint16_t
 
 void ToshibaAbClimate::remote_announce() {
   // Build and enqueue a short announce/envelope frame from the remote.
-  // Example format: 40:00:15:02:00:0D:AA -> source=0x40, opcode=0x15, len=2, data={0x00,0x0D}
+  // Example format: 40:F0:15:02:00:0D:AA -> source=0x40, opcode=0x15, len=2, data={0x00,0x0D}
   DataFrame cmd{};
   cmd.source = TOSHIBA_REMOTE;
   cmd.dest = TOSHIBA_BROADCAST;
@@ -941,13 +941,30 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
 
     // Auto-detect master address from master parameters frame
       if (this->master_address_auto_) {
-      // Check for master parameters pattern (opcode, length, etc.)
+      // First, check for announce ACK pattern from an unknown source: if the
+      // raw frame contains 0x0D at byte index 5, treat that source as the new
+      // master and stop allowing unknown sources.
+      if (frame->size() > 5 && frame->raw[5] == 0x0D) {
+        // Only act on announce ACK if we haven't already seen one
+        if (!this->announce_ack_received_) {
+          ESP_LOGI(TAG, "Auto-detected master address from announce ACK: 0x%02X, updating master address", frame->source);
+          this->master_address_ = frame->source;
+          this->data_reader.add_allowed_source(this->master_address_);
+          this->data_reader.set_allow_unknown_sources(false);
+          // Mark that we've received the announce ACK so we don't repeatedly auto-update
+          this->announce_ack_received_ = true;
+        } else {
+          ESP_LOGV(TAG, "Announce ACK from 0x%02X ignored; announce_ack_received_ already true", frame->source);
+        }
+      } else {
+        // Fallback: Check for master parameters pattern (opcode, length, etc.)
         if (frame->opcode1 == OPCODE_PARAMETER && frame->data_length >= 4) {
           ESP_LOGI(TAG, "Auto-detected master address: 0x%02X, updating master address", frame->source);
           this->master_address_ = frame->source;
           this->data_reader.add_allowed_source(this->master_address_);
           this->data_reader.set_allow_unknown_sources(false);
         }
+      }
       }
     }
     } 
