@@ -301,6 +301,10 @@ void ToshibaAbClimate::add_polled_sensor(uint8_t id, float scale, uint32_t inter
       }
     });
   }
+  
+    // Ensure the read-only switch reports its initial state to Home Assistant
+    if (this->read_only_switch_)
+      this->read_only_switch_->publish_state(this->read_only_);
 }
 
 void ToshibaAbClimate::send_sensor_query(uint8_t sensor_id) {
@@ -684,7 +688,10 @@ void ToshibaAbClimate::setup() {
   }
 });
 }
-}
+  // Ensure the read-only switch reports its initial state on startup (default OFF)
+  if (this->read_only_switch_)
+    this->read_only_switch_->publish_state(this->read_only_);
+
 
 
 void ToshibaAbClimate::sync_from_received_state() {
@@ -1237,6 +1244,13 @@ void ToshibaAbVentSwitch::write_state(bool state) {
   if (this->climate_->control_vent(state)) {
     // don't publish state. wait for the unit to report it's state
   }
+}
+
+void ToshibaAbReadOnlySwitch::write_state(bool state) {
+  // Toggle read-only mode on the climate component
+  this->climate_->set_read_only(state);
+  // Publish the new state so Home Assistant UI reflects the change immediately
+  this->publish_state(state);
 }
 
 }  // namespace toshiba_ab

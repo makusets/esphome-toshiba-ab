@@ -361,6 +361,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
 
   void set_vent_switch(switch_::Switch *vent_switch) { vent_switch_ = vent_switch; }
 
+  void set_read_only_switch(switch_::Switch *read_only_switch) { read_only_switch_ = read_only_switch; }
+
   void set_failed_crcs_sensor(sensor::Sensor *failed_crcs_sensor) { this->failed_crcs_sensor_ = failed_crcs_sensor; }
 
   void send_command(struct DataFrame command);
@@ -421,6 +423,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool filter_alert_state_{false}; 
   binary_sensor::BinarySensor *connected_binary_sensor_{nullptr};
   switch_::Switch *vent_switch_{nullptr};
+  switch_::Switch *read_only_switch_{nullptr};
   sensor::Sensor *failed_crcs_sensor_{nullptr};
 
   sensor::Sensor *current_sensor_{nullptr}; // Sensor for current, x10 A
@@ -492,6 +495,14 @@ class ToshibaAbVentSwitch : public switch_::Switch, public Component {
 
   void write_state(bool state) override;
 
+  ToshibaAbClimate *climate_;
+};
+
+class ToshibaAbReadOnlySwitch : public switch_::Switch, public Component {
+ public:
+  ToshibaAbReadOnlySwitch(ToshibaAbClimate *climate) { climate_ = climate; }
+ protected:
+  void write_state(bool state) override;
   ToshibaAbClimate *climate_;
 };
 

@@ -26,6 +26,7 @@ toshiba_ab_ns = cg.esphome_ns.namespace("toshiba_ab")
 
 CONF_CONNECTED = "connected"
 CONF_VENT = "vent"
+CONF_READ_ONLY_SWITCH = "read_only_switch"
 CONF_FAILED_CRCS = "failed_crcs"
 
 CONF_ON_DATA_RECEIVED = "on_data_received"
@@ -97,6 +98,16 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
             ),
             key=CONF_NAME,
         ),
+        cv.Optional(CONF_READ_ONLY_SWITCH): cv.maybe_simple_value(
+            switch._SWITCH_SCHEMA.extend(
+                cv.Schema(
+                    {
+                        cv.GenerateID(): cv.declare_id(ToshibaAbReadOnlySwitch),
+                    }
+                )
+            ),
+            key=CONF_NAME,
+        ),
         cv.Optional(CONF_FAILED_CRCS): sensor.sensor_schema(
             accuracy_decimals=0,
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
@@ -151,6 +162,9 @@ async def to_code(config):
     if CONF_VENT in config:
         sw = await switch.new_switch(config[CONF_VENT], var)
         cg.add(var.set_vent_switch(sw))
+    if CONF_READ_ONLY_SWITCH in config:
+        sw = await switch.new_switch(config[CONF_READ_ONLY_SWITCH], var)
+        cg.add(var.set_read_only_switch(sw))
 
     if CONF_ON_DATA_RECEIVED in config:
         for on_data_received in config.get(CONF_ON_DATA_RECEIVED, []):
