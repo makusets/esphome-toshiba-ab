@@ -246,15 +246,18 @@ void ToshibaAbClimate::send_remote_temp(float temp_c) {
 
 
 void ToshibaAbClimate::send_ping() { // Sends a PING command to the master unit, command goes into queue, sent when loop() finds it
+  // typical: 40:00:15:07:08:0C:81:00:00:48:00:9F
+  // where tail = 0x81, 0x00, 0x00, 0x48, 0x00  (matches the reference ping)
   DataFrame cmd{};
-  // Tail = 0x81, 0x00, 0x00, 0x48, 0x00  (matches the reference ping)
+
   const uint8_t tail[] = { OPCODE2_READ_STATUS, 0x00, 0x00, 0x48, 0x00 };
   write_read_envelope(&cmd, this->master_address_, this->command_mode_read_, OPCODE2_PING_PONG, tail, sizeof(tail));
   this->send_command(cmd);
 }
 
 void ToshibaAbClimate::send_read_block(uint8_t opcode2, uint16_t start, uint16_t length) {  //used to read a block of data from the master unit
-  // 40 00 15 06 08 E8 00 01 00 9E 2C Seems to be sent regularly from remote, this function is used to construct it if in autonomous mode
+  // 40 00 15 06 08 E8 00 01 00 9E 2C Seems to be sent every 1 min from remote, master answers with some sort of hour counter
+  //  this function is also used to construct this frame if in autonomous mode
   DataFrame cmd{};
 
   // Tail is big-endian: start_hi, start_lo, len_hi, len_lo
@@ -267,6 +270,21 @@ void ToshibaAbClimate::send_read_block(uint8_t opcode2, uint16_t start, uint16_t
 
   write_read_envelope(&cmd, this->master_address_, this->command_mode_read_, opcode2, tail, sizeof(tail));
   this->send_command(cmd);  // enqueue; loop() will transmit when bus is idle
+}
+
+void ToshibaAbClimate::remote_announce() {
+  // Build and enqueue a short announce/envelope frame from the remote.
+  // Example format: 40:00:15:02:00:0D:AA -> source=0x40, opcode=0x15, len=2, data={0x00,0x0D}
+  DataFrame cmd{};
+  cmd.source = TOSHIBA_REMOTE;
+  cmd.dest = TOSHIBA_BROADCAST;
+  cmd.opcode1 = OPCODE_ERROR_HISTORY; // 0x15
+  cmd.data_length = 2;
+  cmd.data[0] = 0x00;
+  cmd.data[1] = 0x0D;
+  cmd.data[cmd.data_length] = cmd.calculate_crc();
+  ESP_LOGV(TAG, "remote_announce: enqueuing announce to broadcast (0x%02X)", TOSHIBA_BROADCAST);
+  this->send_command(cmd);
 }
 
 void ToshibaAbClimate::add_polled_sensor(uint8_t id, float scale, uint32_t interval_ms, sensor::Sensor *sensor) {
@@ -571,18 +589,71 @@ void ToshibaAbClimate::setup() {
   pinMode(tx_enable_pin, OUTPUT);
   digitalWrite(tx_enable_pin, LOW);
 
-  // Send ping if autonomous mode is enabled using set_interval calls every ping_interval_ms_ (30s))
+  // If autonomous mode is enabled, we need to send ping, E8 read, and external temp periodically
+  // Send all these if autonomous mode is enabled using set_interval calls
   if (this->autonomous_) {
-  this->set_interval(this->ping_interval_ms_, [this]() {
+  this->set_interval(this->ping_interval_ms_, [this]() { //30s
+    // Ping (keep-alive) from remote
     this->send_ping();  // just enqueues; loop() will transmit
-    
+    ESP_LOGV(TAG, "Autonomous: enqueued PING (keep-alive)");
+
+    // Send remote temperature along with ping in the remote format (source=0x40,
+    // opcode=OPCODE_TEMPERATURE, payload: 08 81 00 <raw> 00, CRC). Prefer
+    // configured external sensor, otherwise use current target temperature,
+    // otherwise default to 20°C.
+    // This should still work if the AC is configured to use return duct temp sensor for room temp,
+    // as the value here will be disregarded by the master unit in that case.
+
+    float t = NAN;
+    if (this->ext_temp_sensor_ && this->ext_temp_sensor_->has_state()) {
+      t = this->ext_temp_sensor_->state;
+    } else if (!std::isnan(this->target_temperature)) {
+      t = this->target_temperature;
+    } else {
+      t = 20.0f;
+    }
+
+    if (std::isfinite(t)) {
+      const uint8_t raw = temp_celcius_to_payload(t);
+      ESP_LOGV(TAG, "Autonomous: enqueuing remote temperature %.1f°C (raw=0x%02X)", t, raw);
+      DataFrame cmd{};
+      cmd.source = TOSHIBA_REMOTE;                 // 0x40
+      cmd.dest = this->master_address_;
+      cmd.opcode1 = OPCODE_TEMPERATURE;            // 0x55
+      cmd.data_length = 5;                         // 08 81 00 <raw> 00
+      cmd.data[0] = this->command_mode_read_;
+      cmd.data[1] = 0x81;
+      cmd.data[2] = 0x00;
+      cmd.data[3] = raw;
+      cmd.data[4] = 0x00;
+      cmd.data[cmd.data_length] = cmd.calculate_crc();
+      this->send_command(cmd);
+      ESP_LOGV(TAG, "Autonomous: remote temperature frame enqueued (dest=0x%02X)", this->master_address_);
+    }
     });
   this->set_interval(this->read08_interval_ms, [this]() { // send 40:00:15:06:08:E8:00:01:00:9E:2C every min as remote does
 
+    ESP_LOGV(TAG, "Autonomous: enqueuing read hourly counter block E8");
     this->send_read_block(0xE8, 0x0001, 0x009E);  // enqueues; loop() will transmit
-    
+
     });
+
+  // Announce loop: broadcast remote_announce() every 2s until an ACK with 0x0D is seen
+  this->announce_ack_received_ = false;
+  this->set_interval(2000, [this]() {
+    if (!this->announce_ack_received_) {
+      ESP_LOGV(TAG, "Autonomous announce: sending broadcast announce");
+      this->remote_announce();
+    } 
+  });
   } 
+
+    // next block manages the temp reporting to the central unit using the external sensor approach if configured,
+    // this sends a different temp frame to the one sent with the ping above,
+    // the frame source is 0x42, which is the id for Toshiba external temp sensor, this will force the 
+    // master unit to use this temp for room temp readings instead of it's own sensor, regardless of config parameters
+    // frame format is: 42:00:11:04:08:89:<raw>:46:<crc> for temp in celcius
+    // in autonomous mode the same sensor is used for the regular temp reporting with ping above
 
   if (this->ext_temp_enabled_ && this->ext_temp_sensor_ && this->ext_temp_interval_ms_ > 0) {
     this->set_interval(this->ext_temp_interval_ms_, [this]() {
@@ -591,6 +662,7 @@ void ToshibaAbClimate::setup() {
         t = this->ext_temp_sensor_->state;
 
       if (std::isfinite(t) && t > -40.0f && t < 80.0f) {
+        ESP_LOGV(TAG, "Using external temp: enqueuing temp %.1f°C", t);
         this->send_remote_temp(t);   // enqueues; loop() controls bus timing
       } else {
         ESP_LOGV(TAG, "report_sensor_temp: source has no valid state");
@@ -684,9 +756,17 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         break;
         }
         case OPCODE_ACK: {
-        // ACK (maps to 0xA1)
+        // ACK (maps to 0x18)
         log_data_frame("ACK", frame);
         if (last_unconfirmed_command_.has_value()) last_unconfirmed_command_.reset();
+
+        // Check for announce ACK pattern: 6th raw byte == 0x0D (index 5)
+        // When this is received after boot, the remote can stop announcing itself
+        // The full raw frame may be longer; guard on size()
+        if (frame->size() > 5 && frame->raw[5] == 0x0D) {
+          this->announce_ack_received_ = true;
+          ESP_LOGI(TAG, "Received announce ACK (0x0D) from 0x%02X, stopping announce", frame->source);
+        }
         break;
       }
         case OPCODE_PARAMETER:

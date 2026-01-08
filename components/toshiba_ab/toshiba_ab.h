@@ -370,6 +370,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_autonomous(bool v) { autonomous_ = v; }
   void send_ping();
   void send_read_block(uint8_t opcode2, uint16_t start, uint16_t length);
+  void remote_announce();
   
   // Reporting external sensor temperature to AC *************************
 
@@ -440,6 +441,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   sensor::Sensor *ext_temp_sensor_{nullptr};
   uint32_t ext_temp_interval_ms_{300000};  // 5 min default
   bool ext_temp_enabled_{false};
+  // Flag set when a broadcast announce ACK containing 0x0D is received
+  bool announce_ack_received_{false};
 
   //autonomous mode **********************************
   bool autonomous_ = false;
