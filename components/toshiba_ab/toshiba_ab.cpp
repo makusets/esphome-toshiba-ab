@@ -672,7 +672,7 @@ void ToshibaAbClimate::setup() {
         ESP_LOGV(TAG, "report_sensor_temp: source has no valid state");
       }
     });
-
+  }
   this->set_interval(1000, [this]() {
 //checks if sensor query is still outstanding every second, if there hasn't been a reply after sensor_query_timeout_ms,
 // it clears the outstanding flag so that the next sensor query can be sent
