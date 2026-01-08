@@ -1252,10 +1252,10 @@ void ToshibaAbReadOnlySwitch::write_state(bool state) {
   this->publish_state(state);
 }
 
-}  // namespace toshiba_ab
-}  // namespace esphome
-
-void esphome::toshiba_ab::ToshibaAbClimate::set_master_address(uint8_t address) {
+void ToshibaAbClimate::set_master_address(uint8_t address) {
   this->master_address_ = address;
   this->data_reader.add_allowed_source(address);
 }
+
+}  // namespace toshiba_ab
+}  // namespace esphome
