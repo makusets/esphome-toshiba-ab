@@ -687,12 +687,11 @@ void ToshibaAbClimate::setup() {
     }
   }
 });
-}
   // Ensure the read-only switch reports its initial state on startup (default OFF)
   if (this->read_only_switch_)
     this->read_only_switch_->publish_state(this->read_only_);
 
-
+}
 
 void ToshibaAbClimate::sync_from_received_state() {
   uint8_t changes = 0;
