@@ -371,6 +371,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void send_ping();
   void send_read_block(uint8_t opcode2, uint16_t start, uint16_t length);
   void remote_announce();
+  void set_read_only(bool en) { read_only_ = en; }
   
   // Reporting external sensor temperature to AC *************************
 
@@ -443,6 +444,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool ext_temp_enabled_{false};
   // Flag set when a broadcast announce ACK containing 0x0D is received
   bool announce_ack_received_{false};
+  // If true, component will not send any commands to the central unit
+  // (useful for read-only deployments). Default: false
+  bool read_only_{false};
 
   //autonomous mode **********************************
   bool autonomous_ = false;

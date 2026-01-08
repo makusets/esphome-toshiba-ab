@@ -35,6 +35,7 @@ CONF_COMMAND_MODE_READ = "command_mode_read"
 CONF_COMMAND_MODE_WRITE = "command_mode_write"
 
 CONF_AUTONOMOUS = "autonomous"
+CONF_READ_ONLY = "read_only"
 
 #AC Sensors addresses
 
@@ -107,6 +108,7 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
             }
         ),
         cv.Optional(CONF_AUTONOMOUS, default=False): cv.boolean,
+        cv.Optional(CONF_READ_ONLY, default=False): cv.boolean,
         cv.Optional(CONF_SENSORS, default=[]): cv.ensure_list(SENSOR_ITEM_SCHEMA),
         cv.Optional(CONF_REPORT_SENSOR_TEMP): REPORT_SENSOR_TEMP_SCHEMA,
         cv.Optional(CONF_FILTER_ALERT): binary_sensor.binary_sensor_schema(),
@@ -158,6 +160,8 @@ async def to_code(config):
             )
     if CONF_AUTONOMOUS in config:
         cg.add(var.set_autonomous(config[CONF_AUTONOMOUS]))
+    if CONF_READ_ONLY in config:
+        cg.add(var.set_read_only(config[CONF_READ_ONLY]))
     
     if CONF_FILTER_ALERT in config:
         sens = await binary_sensor.new_binary_sensor(config[CONF_FILTER_ALERT])

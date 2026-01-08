@@ -1198,6 +1198,11 @@ void ToshibaAbClimate::control(const climate::ClimateCall &call) {
 }
 
 void ToshibaAbClimate::send_command(const struct DataFrame command) {
+  // Read-only mode: do not send any commands
+  if (this->read_only_) {
+    ESP_LOGW(TAG, "Read-only mode enabled: dropping command");
+    return;
+  }
   // While waiting for announce ACK, only allow the broadcast announce frame
   if (!this->announce_ack_received_) {
     bool is_announce = false;
