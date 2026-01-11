@@ -207,7 +207,7 @@ struct DataFrameReader {
   bool complete{false};
   uint8_t  data_index_{0};
   uint16_t expected_total_{0};  // header(4) + payload(len) + crc(1)
-  bool allow_unknown_sources_{false};
+  bool allow_unknown_sources_{true};
   std::vector<uint8_t> allowed_sources_{
       0x00,  // master (default)
       0x01, 0x02, 0x03, 0x04, 0x05, 0x06,  // other possible masters
