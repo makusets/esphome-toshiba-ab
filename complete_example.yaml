@@ -1,6 +1,7 @@
-#######################################################################################################################################
-#This is an example of the ESPHome yaml file needed to work with Home Assistant. Make sure you use your own network.
 ########################################################################################################################################
+#   This is an example of the ESPHome yaml file needed to work with Home Assistant. Make sure you use your own network settings.       #
+########################################################################################################################################
+
 esphome:
   name: toshiba-ac
   friendly_name: toshiba_AC
@@ -13,8 +14,8 @@ esp8266:
 
 # Enable logging
 logger:
-  baud_rate: 0  #disable hardware UART log, necessary to use the pins for UART communication with the AC unit 
-  level: DEBUG
+  baud_rate: 0  # disable hardware UART log, necessary to use the pins for UART communication with the AC unit 
+  level: DEBUG  # use VERBOSE if troubleshooting or sending logs
 
 # Enable Home Assistant API
 api:
@@ -43,18 +44,18 @@ i2c:
 
 # Serial bus for the Toshiba AB protocol
 uart:
-  tx_pin: GPIO10 #GPIO15 for v1 board
+  tx_pin: GPIO10   # GPIO15 for v1 board
   rx_pin: GPIO13
   baud_rate: 2400
   parity: EVEN
-  rx_buffer_size: 2048    # increase buffer to avoid dropped bytes
+  rx_buffer_size: 2048    # optionally increase buffer to avoid dropped bytes
 
 
 external_components:
   - source:
       type: git
       url: https://github.com/makusets/esphome-toshiba-ab
-    refresh: 0s  #optional, how often to download fresh files from source, defaults to 1 day, use 0 to force updates 
+    refresh: 0s  # optional, how often to download fresh files from source, defaults to 1 day, use 0 to force updates 
 
 
 climate:
@@ -64,37 +65,37 @@ climate:
 
     id: my_ac_system      # Required
 
-    autonomous: false            # Optional, default false
+    autonomous: false           # Optional, default false
                                 # Needed if you want to operate the AC whithout a wall remote controller
-                                # In autonomous mode, the ESP will always report a temperature to AC unit, either from a sensor configured below or will fake it
+                                # In autonomous mode, the ESP will always report a temperature to AC unit, either from a sensor configured below (recommended) or will fake it
 
     # --- Address of the AC master ---
-    master: 0x00                # optional, will autodetect if not set
+    master: 0x00                # optional, will autodetect if omitted (recommended)
     # --- Command mode bytes (optional) ---
-    command_mode_read: 0x08     # default 0x08; use 0x0D for some commercial systems
-    command_mode_write: 0x80    # default 0x80; use 0xD0 for some commercial systems
+    command_mode_read: 0x08     # optional, defaults to 0x08 if omitted; use 0x0D for some commercial systems
+    command_mode_write: 0x80    # optional, defaults to 0x80 if omitted; use 0xD0 for some commercial systems
 
     ###### Optional settings  #######
 
-    filter_alert:               # Optional binary sensor to report filter alert status
+    filter_alert:               # Optional binary sensor to report filter alert status if available
       name: "Filter Alert"
 
     # --- Forward a temperature sensor data to AC  ---
-    # The temperature sensor with the given id will be available and used to report room temperature to the AC unit
-    # If enabled, this will override the temperature reported by the remote controller or the internal sensor of the AC unit,
+    # The temperature sensor with the given id below will be passed to the thermostat and used to report room temperature to the AC unit
+    # If "enabled: true" this will override the temperature reported by the remote controller or the internal sensor of the AC unit,
     # regardless of settings in the AC system
-    # If disabled or omitted, the AC unit will use its internal sensor or the remote controller temperature, depending on settings
-    # In autonomous mode, a sensor should always be configured here, whether enabled or disabled. 
+    # If "enabled: false" or enabled is omitted, the AC unit will use its internal sensor or the remote controller temperature, depending on settings
+    # In autonomous mode, a sensor should always be configured here, regardless of enabled setting. 
 
     report_sensor_temp:
-      enabled: true             # default false
+      enabled: true             # default false, when "true" forces AC unit to use this temperature as room temperature control regardless of AC unit settings
       sensor: bme280_temp       # must match an existing temp sensor id in this yaml file
                                 # it can be any temperature sensor supported, including other HA sensors configured here
       interval: 1min            # default 5min if omitted
 
     # --- Query additional internal AC sensors ---
     sensors:
-      - address: 0x6A           # Required, in this case, AC current sensor of the external unit
+      - address: 0x6A           # Required for every sensor added, in this case, AC current sensor of the external unit
         unit_of_measurement: "A"
         scale: 0.1              # default 1.0; here we decode raw/10 as current is reported in deciAmps
         interval: 30s           # default 5min
@@ -109,7 +110,7 @@ climate:
           device_class: current  #optional but recommended for HA
           state_class: measurement  #optional but recommended for HA
 
-      - address: 0x61        # Required, in this case, outdoor temperature sensor of the external unit
+      - address: 0x61        # Required for every sensor added, in this case, outdoor temperature sensor of the external unit
         sensor:
           name: "AC System Outdoor Temperature" #required
           unit_of_measurement: "°C" 
@@ -210,5 +211,6 @@ sensor:
 time:
   - platform: homeassistant
     id: homeassistant_time
+
 
 
