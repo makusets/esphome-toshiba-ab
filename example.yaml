@@ -54,7 +54,7 @@ uart:
   rx_pin: GPIO13
   baud_rate: 2400
   parity: EVEN
-  rx_buffer_size: 2048    # increase buffer to avoid dropped bytes
+  rx_buffer_size: 2048    # increase buffer to avoid dropped bytes, optional
 
 climate:
   - platform: toshiba_ab
@@ -62,7 +62,7 @@ climate:
     id: toshiba_ac
     connected:
       name: "Toshiba AC Connected"  # optional, binary sensor that monitors link with AC
-    master: 0x01  # Master ID in Toshiba protocol, optional, default is 0x00, for some units needs to be set to 0x01, 0x04 and possibly others
+    master: 0x00  # Master ID in Toshiba protocol, optional, default is 0x00, for some units needs to be set to 0x01, 0x04 and possibly others, leave blank if in doubt
 
 
 sensor:
@@ -85,4 +85,5 @@ sensor:
     update_interval: 30s
 
     
+
 
