@@ -956,7 +956,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           ESP_LOGI(TAG, "Auto-detected master address from announce ACK: 0x%02X, updating master address", frame->source);
           this->master_address_ = frame->source;
           this->data_reader.add_allowed_source(this->master_address_);
-          this->data_reader.set_allow_unknown_sources(false);
+          // this->data_reader.set_allow_unknown_sources(false);
           // Mark that we've received the announce ACK so we don't repeatedly auto-update
           this->announce_ack_received_ = true;
         } else {
@@ -968,7 +968,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           ESP_LOGI(TAG, "Auto-detected master address: 0x%02X, updating master address", frame->source);
           this->master_address_ = frame->source;
           this->data_reader.add_allowed_source(this->master_address_);
-          this->data_reader.set_allow_unknown_sources(false);
+          // this->data_reader.set_allow_unknown_sources(false);
         }
       }
       }
