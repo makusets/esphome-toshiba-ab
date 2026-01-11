@@ -1,4 +1,4 @@
-# Updated code (Jan 2026)
+# Updated code (Jan 2026) - New Autonomous Mode
 - Added the option of using the board without any other controller or wall remote (autonomous mode). Details in "complete_example.yaml"
 - Added the option of changing read/write codes needed for some comercial systems.
 - Added the option of a filter alert sensor.
