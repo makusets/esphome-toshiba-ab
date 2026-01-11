@@ -1,5 +1,5 @@
 # Updated code (Jan 2026)
-- Added the option of using the board without any other controller or wall remote. Details in "complete_example.yaml"
+- Added the option of using the board without any other controller or wall remote (autonomous mode). Details in "complete_example.yaml"
 - Added the option of changing read/write codes needed for some comercial systems.
 - Added the option of a filter alert sensor.
 - Refined protocol reading to include variations, specifically frames preceded by 0xF0 0xF0 and followed by 0xA0 at the end.
