@@ -1218,10 +1218,10 @@ void ToshibaAbClimate::send_command(const struct DataFrame command) {
       is_announce = true;
     }
 
-    if (!is_announce) {
-      ESP_LOGW(TAG, "Dropping command while awaiting announce ACK");
-      return;
-    }
+ //   if (!is_announce) {
+ //     ESP_LOGW(TAG, "Dropping command while awaiting announce ACK");
+ //     return;
+ //   }
   }
 
   log_data_frame("Enqueue command", &command);
