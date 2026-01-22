@@ -1209,8 +1209,9 @@ void ToshibaAbClimate::send_command(const struct DataFrame command) {
     ESP_LOGW(TAG, "Read-only mode enabled: dropping command");
     return;
   }
-  // While waiting for announce ACK, only allow the broadcast announce frame
-  if (!this->announce_ack_received_) {
+  // While waiting for announce ACK, only allow the broadcast announce frame.
+  // This restriction is only relevant when autonomous mode is enabled.
+  if (this->autonomous_ && !this->announce_ack_received_) {
     bool is_announce = false;
     if (command.source == TOSHIBA_REMOTE && command.dest == TOSHIBA_BROADCAST &&
         command.opcode1 == OPCODE_ERROR_HISTORY && command.data_length == 2 &&
@@ -1218,10 +1219,10 @@ void ToshibaAbClimate::send_command(const struct DataFrame command) {
       is_announce = true;
     }
 
- //   if (!is_announce) {
- //     ESP_LOGW(TAG, "Dropping command while awaiting announce ACK");
- //     return;
- //   }
+    if (!is_announce) {
+      ESP_LOGW(TAG, "Dropping command while awaiting announce ACK (autonomous mode)");
+      return;
+    }
   }
 
   log_data_frame("Enqueue command", &command);
