@@ -248,20 +248,44 @@ struct DataFrameReader {
 
     for (uint8_t i = 0; i < bytes_count; i++) {
       uint8_t current_byte = bytes_to_process[i];
-      if (wrapped_ && expected_total_ > 0 && data_index_ >= expected_total_) {
-        if (current_byte == 0xA0) {
-          crc_valid = frame.validate_crc();
-          complete  = true;
+      if (wrapped_) {
+        if (expected_total_ > 0 && data_index_ >= expected_total_) {
+          if (current_byte == 0xA0) {
+            crc_valid = frame.validate_crc();
+            complete  = true;
 
-          data_index_     = 0;
-          expected_total_ = 0;
-          wrapped_        = false;
+            data_index_     = 0;
+            expected_total_ = 0;
+            wrapped_        = false;
 
-          return true;
+            return true;
+          }
+          ESP_LOGV("READER", "Invalid wrapper suffix 0x%02X; resetting reader", current_byte);
+          reset();
+          return false;
         }
-        ESP_LOGV("READER", "Invalid wrapper suffix 0x%02X; resetting reader", current_byte);
-        reset();
-        return false;
+
+        // If wrapped and we are ignoring the length byte (expected_total_ == 0),
+        // use 0xA0 as the terminator: when seen, compute data_length from
+        // the number of bytes already stored (data_index_) and finish frame.
+        if (expected_total_ == 0) {
+          if (current_byte == 0xA0) {
+            if (data_index_ >= DATA_OFFSET_FROM_START + 1) {
+              frame.data_length = data_index_ - DATA_OFFSET_FROM_START - 1; // subtract CRC
+            } else {
+              frame.data_length = 0;
+            }
+            crc_valid = frame.validate_crc();
+            complete  = true;
+
+            data_index_     = 0;
+            expected_total_ = 0;
+            wrapped_        = false;
+
+            return true;
+          }
+          // otherwise keep consuming bytes until terminator arrives
+        }
       }
       // Ignore common noise byte at start
       if (data_index_ == 0 && !allow_unknown_sources_) {
@@ -293,14 +317,18 @@ struct DataFrameReader {
 
     // When the length byte arrives (raw[3]), compute the expected total size
       if (data_index_ == 3) {
-        frame.data_length = frame.raw[3];  // keep DataFrame fields in sync
-        if (!frame.validate_bounds()) {    // early length sanity check
-          ESP_LOGV("READER", "Invalid length 0x%02X; resetting reader", frame.data_length);
-          // Resync
-          reset();
-          return false;
+        // When wrapped_ is true we ignore the length byte and rely on 0xA0
+        // as the frame terminator. Only compute expected_total_ when not wrapped_.
+        if (!wrapped_) {
+          frame.data_length = frame.raw[3];  // keep DataFrame fields in sync
+          if (!frame.validate_bounds()) {    // early length sanity check
+            ESP_LOGV("READER", "Invalid length 0x%02X; resetting reader", frame.data_length);
+            // Resync
+            reset();
+            return false;
+          }
+          expected_total_ = DATA_OFFSET_FROM_START + frame.data_length + 1;  // 4 + len + crc
         }
-        expected_total_ = DATA_OFFSET_FROM_START + frame.data_length + 1;  // 4 + len + crc
       }
 
       data_index_++;
