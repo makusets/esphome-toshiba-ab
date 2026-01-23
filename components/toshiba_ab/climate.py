@@ -70,7 +70,7 @@ ToshibaAbOnDataReceivedTrigger = toshiba_ab_ns.class_(
     "ToshibaAbOnDataReceivedTrigger", automation.Trigger.template()
 )
 
-FrameFormat = toshiba_ab_ns.enum("FrameFormat", is_class=True)
+FrameFormat = toshiba_ab_ns.enum("FrameFormat")
 FRAME_FORMATS = {
     "n": FrameFormat.NORMAL,
     "u": FrameFormat.WRAPPED,
