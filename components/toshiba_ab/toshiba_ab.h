@@ -173,6 +173,9 @@ struct DataFrame {
     return raw[size() - 1];
   }
 
+  void set_wrapped(bool wrapped) { wrapped_ = wrapped; }
+  bool is_wrapped() const { return wrapped_; }
+
   /**
    * Calculates CRC on the current data by creating an XOR sum
    */
@@ -195,6 +198,9 @@ struct DataFrame {
   }
 
   std::vector<uint8_t> get_data() const { return std::vector<uint8_t>(raw, raw + size()); }
+
+ private:
+  bool wrapped_{false};
 };
 
 enum class FrameFormat : uint8_t {
@@ -242,6 +248,7 @@ struct DataFrameReader {
           wrapped_ = true;
           prefix_match_ = 0;
           reset_frame_state_();
+          frame.set_wrapped(true);
           return false;
         }
         prefix_match_ = 0;
@@ -261,7 +268,7 @@ struct DataFrameReader {
     if (use_wrapped && wrapped_) {
       if (current_byte == 0xA0) {
         if (data_index_ >= DATA_OFFSET_FROM_START + 1) {
-          frame.data_length = data_index_ - DATA_OFFSET_FROM_START - 1; // subtract CRC
+          frame.data_length = data_index_ - DATA_OFFSET_FROM_START - 1;  // subtract CRC
         } else {
           frame.data_length = 0;
         }
@@ -359,6 +366,7 @@ struct DataFrameReader {
 private:
   void reset_frame_state_() {
     frame.reset();
+    frame.set_wrapped(false);
     crc_valid       = false;
     complete        = false;
     data_index_     = 0;

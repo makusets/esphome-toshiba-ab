@@ -996,7 +996,7 @@ bool ToshibaAbClimate::receive_data(const std::vector<uint8_t> data) {
 }
 
 bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
-  if (frame->crc() != frame->calculate_crc()) {
+  if (!frame->is_wrapped() && frame->crc() != frame->calculate_crc()) {
     ESP_LOGW(TAG, "CRC check failed");
     log_data_frame("Failed frame", frame);
 
