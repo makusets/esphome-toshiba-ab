@@ -47,7 +47,7 @@ uart:
   tx_pin: GPIO10   # GPIO15 for v1 board
   rx_pin: GPIO13
   baud_rate: 2400
-  parity: EVEN
+  parity: EVEN # Some units use NONE, specially with frame format "U", see below
   rx_buffer_size: 2048    # optionally increase buffer to avoid dropped bytes
 
 
