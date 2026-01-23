@@ -63,7 +63,6 @@ climate:
     connected:
       name: "Toshiba AC Connected"  # optional, binary sensor that monitors link with AC
     master: 0x00  # Master ID in Toshiba protocol, optional, default is 0x00, for some units needs to be set to 0x01, 0x04 and possibly others, leave blank if in doubt
-    frame_format: N  # optional, use "U" if your bus uses F0 F0 ... A0 framing
 
 
 sensor:

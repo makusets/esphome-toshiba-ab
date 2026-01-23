@@ -74,7 +74,6 @@ climate:
     # --- Command mode bytes (optional) ---
     command_mode_read: 0x08     # optional, defaults to 0x08 if omitted; use 0x0D for some commercial systems
     command_mode_write: 0x80    # optional, defaults to 0x80 if omitted; use 0xD0 for some commercial systems
-    frame_format: N             # optional, use "U" if your bus uses F0 F0 ... A0 framing
 
     ###### Optional settings  #######
 
