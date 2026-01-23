@@ -74,6 +74,7 @@ climate:
     connected:
       name: "Toshiba AC Connected"  # optional, binary sensor that monitors link with AC
     master: 0x00 # Master ID in Toshiba protocol, optional, if omitted will go into autodetect
+    frame_format: N  # optional, use "U" if your bus uses F0 F0 ... A0 framing
 ```
 
 ## Optional section if you install a BME280 sensor

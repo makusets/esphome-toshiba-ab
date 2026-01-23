@@ -84,6 +84,11 @@ bool ToshibaAbClimate::is_own_tx_echo_(const DataFrame *f) const { // used to fi
   return std::memcmp(f->raw, tx.raw, f->size()) == 0;
 }
 
+void ToshibaAbClimate::update_frame_validation_() {
+  const bool allow_same = this->autonomous_ && !this->announce_ack_received_;
+  this->data_reader.set_allow_same_source_dest(allow_same);
+}
+
 void log_data_frame(const std::string msg, const struct DataFrame *frame, size_t length = 0) {
   std::string res;
   char buf[5];
@@ -652,6 +657,8 @@ void ToshibaAbClimate::setup() {
   });
   } 
 
+  this->update_frame_validation_();
+
     // next block manages the temp reporting to the central unit using the external sensor approach if configured,
     // this sends a different temp frame to the one sent with the ping above,
     // the frame source is 0x42, which is the id for Toshiba external temp sensor, this will force the 
@@ -771,6 +778,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         // The full raw frame may be longer; guard on size()
         if (frame->size() > 5 && frame->raw[5] == 0x0D) {
           this->announce_ack_received_ = true;
+          this->update_frame_validation_();
           ESP_LOGI(TAG, "Received announce ACK (0x0D) from 0x%02X, stopping announce", frame->source);
         }
         break;
@@ -959,6 +967,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           // this->data_reader.set_allow_unknown_sources(false);
           // Mark that we've received the announce ACK so we don't repeatedly auto-update
           this->announce_ack_received_ = true;
+          this->update_frame_validation_();
         } else {
           ESP_LOGV(TAG, "Announce ACK from 0x%02X ignored; announce_ack_received_ already true", frame->source);
         }

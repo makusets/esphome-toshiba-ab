@@ -34,6 +34,7 @@ CONF_MASTER = "master"
 CONF_MASTER_ADDRESS_AUTO = "master_address_auto"
 CONF_COMMAND_MODE_READ = "command_mode_read"
 CONF_COMMAND_MODE_WRITE = "command_mode_write"
+CONF_FRAME_FORMAT = "frame_format"
 
 CONF_AUTONOMOUS = "autonomous"
 CONF_READ_ONLY = "read_only"
@@ -69,6 +70,12 @@ ToshibaAbOnDataReceivedTrigger = toshiba_ab_ns.class_(
     "ToshibaAbOnDataReceivedTrigger", automation.Trigger.template()
 )
 
+FrameFormat = toshiba_ab_ns.enum("FrameFormat")
+FRAME_FORMATS = {
+    "n": FrameFormat.NORMAL,
+    "u": FrameFormat.WRAPPED,
+}
+
 
 CONF_REPORT_SENSOR_TEMP = "report_sensor_temp" # Report external temperature (from any ESPHome sensor) to the AC
 CONF_FILTER_ALERT = "filter_alert" #report filter alert status as binary sensor
@@ -86,6 +93,7 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
         cv.Optional(CONF_MASTER_ADDRESS_AUTO, default=True): cv.boolean,
         cv.Optional(CONF_COMMAND_MODE_READ, default=0x08): cv.uint8_t,
         cv.Optional(CONF_COMMAND_MODE_WRITE, default=0x80): cv.uint8_t,
+        cv.Optional(CONF_FRAME_FORMAT, default="n"): cv.one_of(*FRAME_FORMATS, lower=True),
     
         cv.GenerateID(): cv.declare_id(ToshibaAbClimate),
         cv.Optional(CONF_CONNECTED): binary_sensor.binary_sensor_schema(
@@ -154,6 +162,8 @@ async def to_code(config):
         cg.add(var.set_command_mode_read(config[CONF_COMMAND_MODE_READ]))
     if CONF_COMMAND_MODE_WRITE in config:
         cg.add(var.set_command_mode_write(config[CONF_COMMAND_MODE_WRITE]))
+    if CONF_FRAME_FORMAT in config:
+        cg.add(var.set_frame_format(FRAME_FORMATS[config[CONF_FRAME_FORMAT]]))
 
     if CONF_CONNECTED in config:
         sens = await binary_sensor.new_binary_sensor(config[CONF_CONNECTED])
