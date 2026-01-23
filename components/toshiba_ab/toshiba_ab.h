@@ -197,6 +197,13 @@ struct DataFrame {
   std::vector<uint8_t> get_data() const { return std::vector<uint8_t>(raw, raw + size()); }
 };
 
+enum class FrameFormat : uint8_t {
+  NORMAL = 0,
+  WRAPPED = 1,
+};
+constexpr FrameFormat NORMAL = FrameFormat::NORMAL;
+constexpr FrameFormat WRAPPED = FrameFormat::WRAPPED;
+
 struct DataFrameReader {
   // Reads a data frame byte by byte, accumulating bytes until a complete frame is received
   // Returns true when a complete frame is received, false otherwise
@@ -210,6 +217,8 @@ struct DataFrameReader {
   bool wrapped_{false};
   uint8_t prefix_match_{0};
   bool allow_unknown_sources_{true};
+  bool allow_same_source_dest_{false};
+  FrameFormat frame_format_{FrameFormat::NORMAL};
   std::vector<uint8_t> allowed_sources_{
       0x00,  // master (default)
       0x01, 0x02, 0x03, 0x04, 0x05, 0x06,  // other possible masters
@@ -226,9 +235,8 @@ struct DataFrameReader {
   }
 
   bool put(uint8_t byte) {
-    uint8_t bytes_to_process[2]{byte, 0};
-    uint8_t bytes_count = 1;
-    if (data_index_ == 0 && !wrapped_) {
+    const bool use_wrapped = frame_format_ == FrameFormat::WRAPPED;
+    if (data_index_ == 0 && use_wrapped && !wrapped_) {
       if (prefix_match_ == 1) {
         if (byte == 0xF0) {
           wrapped_ = true;
@@ -237,122 +245,99 @@ struct DataFrameReader {
           return false;
         }
         prefix_match_ = 0;
-        bytes_to_process[0] = 0xF0;
-        bytes_to_process[1] = byte;
-        bytes_count = 2;
-      } else if (byte == 0xF0) {
-        prefix_match_ = 1;
         return false;
+      }
+      if (byte == 0xF0) {
+        prefix_match_ = 1;
+      }
+      return false;
+    }
+    if (!use_wrapped) {
+      wrapped_ = false;
+      prefix_match_ = 0;
+    }
+
+    uint8_t current_byte = byte;
+    if (use_wrapped && wrapped_) {
+      if (current_byte == 0xA0) {
+        if (data_index_ >= DATA_OFFSET_FROM_START + 1) {
+          frame.data_length = data_index_ - DATA_OFFSET_FROM_START - 1; // subtract CRC
+        } else {
+          frame.data_length = 0;
+        }
+        crc_valid = frame.validate_crc();
+        complete  = true;
+
+        data_index_     = 0;
+        expected_total_ = 0;
+        wrapped_        = false;
+
+        return true;
       }
     }
 
-    for (uint8_t i = 0; i < bytes_count; i++) {
-      uint8_t current_byte = bytes_to_process[i];
-      if (wrapped_) {
-        if (expected_total_ > 0 && data_index_ >= expected_total_) {
-          if (current_byte == 0xA0) {
-            crc_valid = frame.validate_crc();
-            complete  = true;
-
-            data_index_     = 0;
-            expected_total_ = 0;
-            wrapped_        = false;
-
-            return true;
+    // Ignore common noise byte at start
+    if (data_index_ == 0 && !allow_unknown_sources_) {
+      bool valid = false;
+      for (auto src : allowed_sources_) {
+          if (current_byte == src) {
+              valid = true;
+              break;
           }
-          ESP_LOGV("READER", "Invalid wrapper suffix 0x%02X; resetting reader", current_byte);
+      }
+      if (!valid) {
+          ESP_LOGV("READER", "Ignoring packet from unknown source: 0x%02X", current_byte);
+          return false;
+      }
+    }
+    // Store byte
+    frame.raw[data_index_] = current_byte;
+
+    if (!use_wrapped && data_index_ == 1) {
+      // ignore frames where source == dest (likely noise or corrupted)
+      if (!allow_same_source_dest_ && frame.raw[0] == frame.raw[1]) {
+          ESP_LOGV("READER", "Ignoring packet where source == dest: 0x%02X", frame.raw[0]);
+          // reset reader state so next byte is treated as new frame start
+          reset();
+          return false;
+      }
+    }
+
+    // When the length byte arrives (raw[3]), compute the expected total size
+    if (data_index_ == 3) {
+      if (!use_wrapped) {
+        frame.data_length = frame.raw[3];  // keep DataFrame fields in sync
+        if (!frame.validate_bounds()) {    // early length sanity check
+          ESP_LOGV("READER", "Invalid length 0x%02X; resetting reader", frame.data_length);
+          // Resync
           reset();
           return false;
         }
-
-        // If wrapped and we are ignoring the length byte (expected_total_ == 0),
-        // use 0xA0 as the terminator: when seen, compute data_length from
-        // the number of bytes already stored (data_index_) and finish frame.
-        if (expected_total_ == 0) {
-          if (current_byte == 0xA0) {
-            if (data_index_ >= DATA_OFFSET_FROM_START + 1) {
-              frame.data_length = data_index_ - DATA_OFFSET_FROM_START - 1; // subtract CRC
-            } else {
-              frame.data_length = 0;
-            }
-            crc_valid = frame.validate_crc();
-            complete  = true;
-
-            data_index_     = 0;
-            expected_total_ = 0;
-            wrapped_        = false;
-
-            return true;
-          }
-          // otherwise keep consuming bytes until terminator arrives
-        }
+        expected_total_ = DATA_OFFSET_FROM_START + frame.data_length + 1;  // 4 + len + crc
       }
-      // Ignore common noise byte at start
-      if (data_index_ == 0 && !allow_unknown_sources_) {
-        bool valid = false;
-        for (auto src : allowed_sources_) {
-            if (current_byte == src) {
-                valid = true;
-                break;
-            }
-        }
-        if (!valid) {
-            ESP_LOGV("READER", "Ignoring packet from unknown source: 0x%02X", current_byte);
-            return false;
-        }
+    }
+
+    data_index_++;
+
+    // If we know how many bytes we expect, finish only when we have them all
+    if (expected_total_ > 0 && data_index_ >= expected_total_) {
+      if (!use_wrapped) {
+        // We have the whole frame (header + payload + CRC)
+        crc_valid = frame.validate_crc();
+        complete  = true;
+
+        // Prepare reader for the next frame
+        data_index_     = 0;
+        expected_total_ = 0;
+
+        return true;
       }
-      // Store byte
-      frame.raw[data_index_] = current_byte;
+    }
 
-//    if (data_index_ == 1) {
-        // ignore frames where source == dest (likely noise or corrupted)
-//        if (frame.raw[0] == frame.raw[1]) {
-//            ESP_LOGV("READER", "Ignoring packet where source == dest: 0x%02X", frame.raw[0]);
-            // reset reader state so next byte is treated as new frame start
-//            reset();
-//            return false;
-//        }
-
-//    }
-
-    // When the length byte arrives (raw[3]), compute the expected total size
-      if (data_index_ == 3) {
-        // When wrapped_ is true we ignore the length byte and rely on 0xA0
-        // as the frame terminator. Only compute expected_total_ when not wrapped_.
-        if (!wrapped_) {
-          frame.data_length = frame.raw[3];  // keep DataFrame fields in sync
-          if (!frame.validate_bounds()) {    // early length sanity check
-            ESP_LOGV("READER", "Invalid length 0x%02X; resetting reader", frame.data_length);
-            // Resync
-            reset();
-            return false;
-          }
-          expected_total_ = DATA_OFFSET_FROM_START + frame.data_length + 1;  // 4 + len + crc
-        }
-      }
-
-      data_index_++;
-
-      // If we know how many bytes we expect, finish only when we have them all
-      if (expected_total_ > 0 && data_index_ >= expected_total_) {
-        if (!wrapped_) {
-          // We have the whole frame (header + payload + CRC)
-          crc_valid = frame.validate_crc();
-          complete  = true;
-
-          // Prepare reader for the next frame
-          data_index_     = 0;
-          expected_total_ = 0;
-
-          return true;
-        }
-      }
-
-      // Guard against runaway input
-      if (data_index_ == DATA_FRAME_MAX_SIZE) {
-        ESP_LOGW("READER", "Went over buffer; resetting");
-        reset();
-      }
+    // Guard against runaway input
+    if (data_index_ == DATA_FRAME_MAX_SIZE) {
+      ESP_LOGW("READER", "Went over buffer; resetting");
+      reset();
     }
 
     return false;
@@ -365,6 +350,11 @@ struct DataFrameReader {
   }
 
   void set_allow_unknown_sources(bool allow_unknown) { allow_unknown_sources_ = allow_unknown; }
+  void set_allow_same_source_dest(bool allow_same) { allow_same_source_dest_ = allow_same; }
+  void set_frame_format(FrameFormat format) {
+    frame_format_ = format;
+    reset();
+  }
 
 private:
   void reset_frame_state_() {
@@ -424,6 +414,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_command_mode_read(uint8_t value) { command_mode_read_ = value; }
   void set_command_mode_write(uint8_t value) { command_mode_write_ = value; }
   void set_filter_alert_sensor(binary_sensor::BinarySensor *sensor) { filter_alert_sensor_ = sensor; }
+  void set_frame_format(FrameFormat format) { data_reader.set_frame_format(format); }
 
 
 
@@ -486,6 +477,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   size_t send_new_state(const struct TccState *new_state);
   void sync_from_received_state();
   bool is_own_tx_echo_(const DataFrame *f) const; //used to filter echo after sending frame
+  void update_frame_validation_();
 
 
   std::vector<DataFrame> create_commands(const struct TccState *new_state);
