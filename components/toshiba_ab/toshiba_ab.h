@@ -201,6 +201,8 @@ enum class FrameFormat : uint8_t {
   NORMAL = 0,
   WRAPPED = 1,
 };
+constexpr FrameFormat NORMAL = FrameFormat::NORMAL;
+constexpr FrameFormat WRAPPED = FrameFormat::WRAPPED;
 
 struct DataFrameReader {
   // Reads a data frame byte by byte, accumulating bytes until a complete frame is received
