@@ -281,7 +281,7 @@ struct DataFrameReader {
         wrapped_expected_total_ = current_byte > 3 ? current_byte - 3 : 0;
         wrapped_bytes_seen_ = 0;
         wrapped_len_pending_ = false;
-        if (wrapped_expected_total_ < 1) {
+        if (wrapped_expected_total_ < 1 || (wrapped_expected_total_ - 1) > DATA_FRAME_MAX_SIZE) {
           ESP_LOGV("READER", "Invalid wrapped length 0x%02X; resetting reader", current_byte);
           reset();
         }
@@ -351,14 +351,14 @@ struct DataFrameReader {
 
     // When the length byte arrives (raw[3]), compute the expected total size
     if (data_index_ == 3) {
+      frame.data_length = frame.raw[3];  // keep DataFrame fields in sync
+      if (!frame.validate_bounds()) {    // early length sanity check
+        ESP_LOGV("READER", "Invalid length 0x%02X; resetting reader", frame.data_length);
+        // Resync
+        reset();
+        return false;
+      }
       if (!use_wrapped) {
-        frame.data_length = frame.raw[3];  // keep DataFrame fields in sync
-        if (!frame.validate_bounds()) {    // early length sanity check
-          ESP_LOGV("READER", "Invalid length 0x%02X; resetting reader", frame.data_length);
-          // Resync
-          reset();
-          return false;
-        }
         expected_total_ = DATA_OFFSET_FROM_START + frame.data_length + 1;  // 4 + len + crc
       }
     }
