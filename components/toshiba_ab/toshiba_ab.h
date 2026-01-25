@@ -284,7 +284,10 @@ struct DataFrameReader {
         if (wrapped_expected_total_ < 1 || (wrapped_expected_total_ - 1) > DATA_FRAME_MAX_SIZE) {
           ESP_LOGV("READER", "Invalid wrapped length 0x%02X; resetting reader", current_byte);
           reset();
+          return false;
         }
+        frame.raw[data_index_] = current_byte;
+        data_index_++;
         return false;
       }
 
