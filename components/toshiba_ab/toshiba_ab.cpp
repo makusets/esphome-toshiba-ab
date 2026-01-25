@@ -997,8 +997,8 @@ void ToshibaAbClimate::process_received_data_wrapped_(const struct DataFrame *fr
   }
 
   const uint8_t frame_length = frame->raw[0];
-  const uint8_t master_address = frame->raw[1];
-  const uint8_t opcode = frame->raw[2];
+  const uint8_t source = frame->raw[1];
+  const uint8_t dest = frame->raw[2];
   const uint8_t payload_length = frame->raw[3];
   const size_t payload_offset = 4;
   const bool has_tail_signature =
@@ -1011,15 +1011,19 @@ void ToshibaAbClimate::process_received_data_wrapped_(const struct DataFrame *fr
       this->connected_binary_sensor_->publish_state(true);
     }
 
-    if (this->master_address_auto_ && this->master_address_ == 0x00 && master_address != 0x00) {
-      ESP_LOGI(TAG, "Auto-detected master address from wrapped keepalive: 0x%02X", master_address);
-      this->set_master_address(master_address);
+    if (this->master_address_auto_ && this->master_address_ == 0x00 && source != 0x00) {
+      ESP_LOGI(TAG, "Auto-detected master address from wrapped keepalive: 0x%02X", source);
+      this->set_master_address(source);
     }
     return;
   }
 
-  if (opcode == 0xFF && payload_length >= STATUS_DATA_TARGET_TEMP_BYTE + 1 &&
+  if (dest == 0xFF && payload_length >= STATUS_DATA_TARGET_TEMP_BYTE + 1 &&
       size >= payload_offset + payload_length) {
+    if (frame->raw[payload_offset] != 0xC0 || frame->raw[payload_offset + 1] != 0x38) {
+      log_raw_data("Wrapped data: ", frame->raw, size);
+      return;
+    }
     const uint8_t *payload = &frame->raw[payload_offset];
     log_raw_data("Wrapped status: ", frame->raw, size);
     tcc_state.power = (payload[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_POWER_MASK);
