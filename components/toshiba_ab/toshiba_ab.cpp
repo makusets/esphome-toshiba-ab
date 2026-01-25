@@ -998,6 +998,9 @@ void ToshibaAbClimate::process_received_data_wrapped_(const struct DataFrame *fr
 
   const uint8_t frame_length = frame->raw[0];
   const uint8_t master_address = frame->raw[1];
+  const uint8_t opcode = frame->raw[2];
+  const uint8_t payload_length = frame->raw[3];
+  const size_t payload_offset = 4;
   const bool has_tail_signature =
       size >= 3 && frame->raw[size - 3] == 0x00 && frame->raw[size - 2] == 0x3A;
 
@@ -1012,6 +1015,36 @@ void ToshibaAbClimate::process_received_data_wrapped_(const struct DataFrame *fr
       ESP_LOGI(TAG, "Auto-detected master address from wrapped keepalive: 0x%02X", master_address);
       this->set_master_address(master_address);
     }
+    return;
+  }
+
+  if (opcode == 0xFF && payload_length >= STATUS_DATA_TARGET_TEMP_BYTE + 1 &&
+      size >= payload_offset + payload_length) {
+    const uint8_t *payload = &frame->raw[payload_offset];
+    log_raw_data("Wrapped status: ", frame->raw, size);
+    tcc_state.power = (payload[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_POWER_MASK);
+    tcc_state.mode =
+        (payload[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_MODE_MASK) >> STATUS_DATA_MODE_SHIFT_BITS;
+    tcc_state.fan = (payload[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_FAN_MASK) >> STATUS_DATA_FAN_SHIFT_BITS;
+    tcc_state.vent =
+        (payload[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_VENT_MASK) >> STATUS_DATA_VENT_SHIFT_BITS;
+    tcc_state.target_temp =
+        static_cast<float>(payload[STATUS_DATA_TARGET_TEMP_BYTE]) / TEMPERATURE_CONVERSION_RATIO -
+        TEMPERATURE_CONVERSION_OFFSET;
+    if (payload_length > STATUS_DATA_TARGET_TEMP_BYTE + 1 &&
+        payload[STATUS_DATA_TARGET_TEMP_BYTE + 1] > 1) {
+      tcc_state.room_temp =
+          static_cast<float>(payload[STATUS_DATA_TARGET_TEMP_BYTE + 1]) / TEMPERATURE_CONVERSION_RATIO -
+          TEMPERATURE_CONVERSION_OFFSET;
+    }
+    tcc_state.preheating = (payload[STATUS_DATA_FLAGS_BYTE] & 0b00000010) >> 1;
+    tcc_state.filter_alert = (payload[STATUS_DATA_FLAGS_BYTE] & 0b10000000) >> 7;
+
+    ESP_LOGD(TAG,
+             "Wrapped status power=%d mode=%02X fan=%02X vent=%02X target=%.1f room=%.1f preheat=%d filter=%d",
+             tcc_state.power, tcc_state.mode, tcc_state.fan, tcc_state.vent, tcc_state.target_temp,
+             tcc_state.room_temp, tcc_state.preheating, tcc_state.filter_alert);
+    sync_from_received_state();
     return;
   }
 
