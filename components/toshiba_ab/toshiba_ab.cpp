@@ -985,6 +985,39 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
     } 
   }
 
+void ToshibaAbClimate::process_received_data_wrapped_(const struct DataFrame *frame) {
+  if (frame == nullptr) {
+    return;
+  }
+
+  const size_t size = frame->size();
+  if (size < 4) {
+    log_raw_data("Wrapped frame too short: ", frame->raw, size);
+    return;
+  }
+
+  const uint8_t frame_length = frame->raw[0];
+  const uint8_t master_address = frame->raw[1];
+  const bool has_tail_signature =
+      size >= 3 && frame->raw[size - 3] == 0x00 && frame->raw[size - 2] == 0x3A;
+
+  if (frame_length == 0x0A && has_tail_signature) {
+    log_raw_data("Wrapped master keepalive: ", frame->raw, size);
+    last_master_alive_millis_ = millis();
+    if (this->connected_binary_sensor_) {
+      this->connected_binary_sensor_->publish_state(true);
+    }
+
+    if (this->master_address_auto_ && this->master_address_ == 0x00 && master_address != 0x00) {
+      ESP_LOGI(TAG, "Auto-detected master address from wrapped keepalive: 0x%02X", master_address);
+      this->set_master_address(master_address);
+    }
+    return;
+  }
+
+  log_raw_data("Wrapped data: ", frame->raw, size);
+}
+
 bool ToshibaAbClimate::receive_data(const std::vector<uint8_t> data) {
   auto frame = DataFrame();
 
@@ -1014,7 +1047,11 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
 
   // still notify any listeners of real frames
   this->set_data_received_callback_.call(frame);
-  process_received_data(frame);
+  if (frame->is_wrapped()) {
+    process_received_data_wrapped_(frame);
+  } else {
+    process_received_data(frame);
+  }
   return true;
 }
 

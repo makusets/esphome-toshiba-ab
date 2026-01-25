@@ -524,6 +524,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   TccState tcc_state;
 
   void process_received_data(const struct DataFrame *frame);
+  void process_received_data_wrapped_(const struct DataFrame *frame);
   size_t send_new_state(const struct TccState *new_state);
   void sync_from_received_state();
   bool is_own_tx_echo_(const DataFrame *f) const; //used to filter echo after sending frame
