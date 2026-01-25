@@ -999,8 +999,8 @@ void ToshibaAbClimate::process_received_data_wrapped_(const struct DataFrame *fr
   const uint8_t frame_length = frame->raw[0];
   const uint8_t source = frame->raw[1];
   const uint8_t dest = frame->raw[2];
-  const uint8_t payload_length = frame->raw[3];
   const size_t payload_offset = 4;
+  const size_t payload_available = size > payload_offset ? size - payload_offset : 0;
   const bool has_tail_signature =
       size >= 3 && frame->raw[size - 3] == 0x00 && frame->raw[size - 2] == 0x3A;
 
@@ -1018,8 +1018,7 @@ void ToshibaAbClimate::process_received_data_wrapped_(const struct DataFrame *fr
     return;
   }
 
-  if (dest == 0xFF && payload_length >= STATUS_DATA_TARGET_TEMP_BYTE + 1 &&
-      size >= payload_offset + payload_length) {
+  if (dest == 0xFF && payload_available >= STATUS_DATA_TARGET_TEMP_BYTE + 1) {
     if (frame->raw[payload_offset] != 0xC0 || frame->raw[payload_offset + 1] != 0x38) {
       log_raw_data("Wrapped data: ", frame->raw, size);
       return;
@@ -1035,7 +1034,7 @@ void ToshibaAbClimate::process_received_data_wrapped_(const struct DataFrame *fr
     tcc_state.target_temp =
         static_cast<float>(payload[STATUS_DATA_TARGET_TEMP_BYTE]) / TEMPERATURE_CONVERSION_RATIO -
         TEMPERATURE_CONVERSION_OFFSET;
-    if (payload_length > STATUS_DATA_TARGET_TEMP_BYTE + 1 &&
+    if (payload_available >= STATUS_DATA_TARGET_TEMP_BYTE + 2 &&
         payload[STATUS_DATA_TARGET_TEMP_BYTE + 1] > 1) {
       tcc_state.room_temp =
           static_cast<float>(payload[STATUS_DATA_TARGET_TEMP_BYTE + 1]) / TEMPERATURE_CONVERSION_RATIO -
