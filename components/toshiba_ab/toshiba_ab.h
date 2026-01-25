@@ -222,6 +222,9 @@ struct DataFrameReader {
   uint16_t expected_total_{0};  // header(4) + payload(len) + crc(1)
   bool wrapped_{false};
   uint8_t prefix_match_{0};
+  bool wrapped_len_pending_{false};
+  uint16_t wrapped_expected_total_{0};  // total bytes after length byte
+  uint16_t wrapped_bytes_seen_{0};
   bool allow_unknown_sources_{true};
   bool allow_same_source_dest_{false};
   FrameFormat frame_format_{FrameFormat::NORMAL};
@@ -238,6 +241,9 @@ struct DataFrameReader {
     reset_frame_state_();
     wrapped_      = false;
     prefix_match_ = 0;
+    wrapped_len_pending_ = false;
+    wrapped_expected_total_ = 0;
+    wrapped_bytes_seen_ = 0;
   }
 
   bool put(uint8_t byte) {
@@ -249,6 +255,7 @@ struct DataFrameReader {
           prefix_match_ = 0;
           reset_frame_state_();
           frame.set_wrapped(true);
+          wrapped_len_pending_ = true;
           return false;
         }
         prefix_match_ = 0;
@@ -266,20 +273,52 @@ struct DataFrameReader {
 
     uint8_t current_byte = byte;
     if (use_wrapped && wrapped_) {
-      if (current_byte == 0xA0) {
-        if (data_index_ >= DATA_OFFSET_FROM_START + 1) {
-          frame.data_length = data_index_ - DATA_OFFSET_FROM_START - 1;  // subtract CRC
-        } else {
-          frame.data_length = 0;
+      if (wrapped_len_pending_) {
+        // Wrapped frames: third byte is the length, and it includes the 3 wrapping bytes.
+        // The total length includes the two 0xF0 prefix bytes, the length byte itself,
+        // and the trailing 0xA0. We therefore expect (len - 3) bytes after consuming
+        // the length byte here, with the final one being 0xA0.
+        wrapped_expected_total_ = current_byte > 3 ? current_byte - 3 : 0;
+        wrapped_bytes_seen_ = 0;
+        wrapped_len_pending_ = false;
+        if (wrapped_expected_total_ < 1) {
+          ESP_LOGV("READER", "Invalid wrapped length 0x%02X; resetting reader", current_byte);
+          reset();
         }
-        crc_valid = frame.validate_crc();
-        complete  = true;
+        return false;
+      }
 
-        data_index_     = 0;
-        expected_total_ = 0;
-        wrapped_        = false;
+      wrapped_bytes_seen_++;
 
-        return true;
+      if (current_byte == 0xA0) {
+        if (wrapped_expected_total_ > 0 && wrapped_bytes_seen_ == wrapped_expected_total_) {
+          if (data_index_ >= DATA_OFFSET_FROM_START + 1) {
+            frame.data_length = data_index_ - DATA_OFFSET_FROM_START - 1;  // subtract CRC
+          } else {
+            frame.data_length = 0;
+          }
+          crc_valid = false;
+          complete  = true;
+
+          data_index_     = 0;
+          expected_total_ = 0;
+          wrapped_        = false;
+          wrapped_expected_total_ = 0;
+          wrapped_bytes_seen_ = 0;
+
+          return true;
+        }
+
+        ESP_LOGV("READER", "Wrapped frame ended early/late (seen=%u expected=%u); resetting",
+                 wrapped_bytes_seen_, wrapped_expected_total_);
+        reset();
+        return false;
+      }
+
+      if (wrapped_expected_total_ > 0 && wrapped_bytes_seen_ >= wrapped_expected_total_) {
+        ESP_LOGV("READER", "Wrapped frame exceeded expected length without 0xA0; resetting");
+        reset();
+        return false;
       }
     }
 
@@ -371,6 +410,9 @@ private:
     complete        = false;
     data_index_     = 0;
     expected_total_ = 0;
+    wrapped_len_pending_ = false;
+    wrapped_expected_total_ = 0;
+    wrapped_bytes_seen_ = 0;
   }
 };
 
