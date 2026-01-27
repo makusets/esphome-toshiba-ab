@@ -586,7 +586,11 @@ climate::ClimateTraits ToshibaAbClimate::traits() { return traits_; }
 
 void ToshibaAbClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "TCC Link:");
+#ifdef LOG_UART_DEVICE
   LOG_UART_DEVICE(this);
+#else
+  ESP_LOGCONFIG(TAG, "  UART: logging unavailable");
+#endif
   this->dump_traits_(TAG);
   ESP_LOGCONFIG(TAG, "  Master address: 0x%02X", this->master_address_);
   ESP_LOGCONFIG(TAG, "  Master address auto: %s", this->master_address_auto_ ? "true" : "false");
