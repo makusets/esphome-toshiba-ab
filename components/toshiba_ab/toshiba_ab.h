@@ -293,33 +293,32 @@ struct DataFrameReader {
 
       wrapped_bytes_seen_++;
 
-      if (current_byte == 0xA0) {
-        if (wrapped_expected_total_ > 0 && wrapped_bytes_seen_ == wrapped_expected_total_) {
-          if (data_index_ >= DATA_OFFSET_FROM_START + 1) {
-            frame.data_length = data_index_ - DATA_OFFSET_FROM_START - 1;  // subtract CRC
-          } else {
-            frame.data_length = 0;
-          }
-          crc_valid = false;
-          complete  = true;
-
-          data_index_     = 0;
-          expected_total_ = 0;
-          wrapped_        = false;
-          wrapped_expected_total_ = 0;
-          wrapped_bytes_seen_ = 0;
-
-          return true;
+      if (wrapped_expected_total_ > 0 && wrapped_bytes_seen_ == wrapped_expected_total_) {
+        if (current_byte != 0xA0) {
+          ESP_LOGV("READER", "Wrapped frame ended without 0xA0 (seen=%u expected=%u); resetting",
+                   wrapped_bytes_seen_, wrapped_expected_total_);
+          reset();
+          return false;
         }
+        if (data_index_ >= DATA_OFFSET_FROM_START + 1) {
+          frame.data_length = data_index_ - DATA_OFFSET_FROM_START - 1;  // subtract CRC
+        } else {
+          frame.data_length = 0;
+        }
+        crc_valid = false;
+        complete  = true;
 
-        ESP_LOGV("READER", "Wrapped frame ended early/late (seen=%u expected=%u); resetting",
-                 wrapped_bytes_seen_, wrapped_expected_total_);
-        reset();
-        return false;
+        data_index_     = 0;
+        expected_total_ = 0;
+        wrapped_        = false;
+        wrapped_expected_total_ = 0;
+        wrapped_bytes_seen_ = 0;
+
+        return true;
       }
 
-      if (wrapped_expected_total_ > 0 && wrapped_bytes_seen_ >= wrapped_expected_total_) {
-        ESP_LOGV("READER", "Wrapped frame exceeded expected length without 0xA0; resetting");
+      if (wrapped_expected_total_ > 0 && wrapped_bytes_seen_ > wrapped_expected_total_) {
+        ESP_LOGV("READER", "Wrapped frame exceeded expected length; resetting");
         reset();
         return false;
       }
