@@ -1,6 +1,7 @@
 #include "toshiba_ab.h"
 #include "esphome.h"
 #include <inttypes.h>
+#include <cstring>
 
 
 namespace esphome {
@@ -76,6 +77,15 @@ uint8_t get_fan_bit_mask_for_mode(uint8_t mode) {
   }
 
   return 0;
+}
+
+uint8_t calculate_wrapped_set_parameter_flags_crc(const uint8_t *data, size_t size) {
+  constexpr uint8_t crc_seed = 0xB8;
+  uint16_t sum = crc_seed;
+  for (size_t i = 0; i < size; i++) {
+    sum += data[i];
+  }
+  return static_cast<uint8_t>(sum & 0xFF);
 }
 
 bool ToshibaAbClimate::is_own_tx_echo_(const DataFrame *f) const { // used to filter out echo from our last command sent
@@ -168,6 +178,30 @@ void write_set_parameter_flags(struct DataFrame *command, uint8_t master_address
       get_heat_cool_bits(state->mode),
   };
   write_set_parameter(command, master_address, command_mode_read, OPCODE2_SET_TEMP_WITH_FAN, payload, sizeof(payload));
+}
+
+void write_set_parameter_flags_wrapped(struct DataFrame *command, uint8_t remote_address, uint8_t master_address,
+                                       const struct TccState *state, uint8_t set_flags) {
+  constexpr uint8_t payload_length = 0x08;
+  constexpr uint8_t wrapped_length = 0x10;
+  constexpr uint8_t wrapped_header_marker_msb = 0x01;
+  constexpr uint8_t wrapped_header_marker_lsb = 0x2C;
+
+  command->set_wrapped(true);
+  command->raw[0] = wrapped_length;
+  command->raw[1] = remote_address;
+  command->raw[2] = master_address;
+  command->raw[3] = payload_length;
+  command->raw[4] = wrapped_header_marker_msb;
+  command->raw[5] = wrapped_header_marker_lsb;
+  command->raw[6] = static_cast<uint8_t>(state->mode | set_flags);
+  command->raw[7] = static_cast<uint8_t>(state->fan | get_fan_bit_mask_for_mode(state->mode));
+  command->raw[8] = temp_celcius_to_payload(state->target_temp);
+  command->raw[9] = EMPTY_DATA;
+  command->raw[10] = get_heat_cool_bits(state->mode);
+  command->raw[11] = get_heat_cool_bits(state->mode);
+
+  command->raw[12] = calculate_wrapped_set_parameter_flags_crc(command->raw, 12);
 }
 
 void write_set_parameter_mode(struct DataFrame *command, uint8_t master_address, uint8_t command_mode_read,
@@ -1128,7 +1162,21 @@ void ToshibaAbClimate::loop() {
     auto frame = this->write_queue_.front();
     last_unconfirmed_command_ = frame;
     log_data_frame("Write frame", &frame);
-    this->write_array(frame.raw, frame.size());
+    if (frame.is_wrapped()) {
+      const size_t raw_size = frame.size();
+      uint8_t wrapped[DATA_FRAME_MAX_SIZE + 3];
+      wrapped[0] = 0xF0;
+      wrapped[1] = 0xF0;
+      if (raw_size + 3 <= sizeof(wrapped)) {
+        std::memcpy(&wrapped[2], frame.raw, raw_size);
+        wrapped[2 + raw_size] = 0xA0;
+        this->write_array(wrapped, raw_size + 3);
+      } else {
+        ESP_LOGW(TAG, "Wrapped frame too large to send (size=%u)", static_cast<unsigned>(raw_size));
+      }
+    } else {
+      this->write_array(frame.raw, frame.size());
+    }
     this->write_queue_.pop();
     if (this->write_queue_.empty()) {
       ESP_LOGD(TAG, "All frames written");
@@ -1238,6 +1286,7 @@ size_t ToshibaAbClimate::send_new_state(const struct TccState *new_state) {
 
 std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *new_state) {
   auto commands = std::vector<DataFrame>();
+  const bool use_wrapped = this->data_reader.frame_format() == FrameFormat::WRAPPED;
 
   if (new_state->power != tcc_state.power) {
     if (new_state->power) {
@@ -1267,14 +1316,24 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
   if (new_state->fan != tcc_state.fan) {
     ESP_LOGD(TAG, "Changing fan");
     auto command = DataFrame{};
-    write_set_parameter_flags(&command, this->master_address_, this->command_mode_read_, new_state, COMMAND_SET_FAN);
+    if (use_wrapped) {
+      write_set_parameter_flags_wrapped(&command, this->wrapped_remote_address_, this->wrapped_master_address_, new_state,
+                                        COMMAND_SET_FAN);
+    } else {
+      write_set_parameter_flags(&command, this->master_address_, this->command_mode_read_, new_state, COMMAND_SET_FAN);
+    }
     commands.push_back(command);
   }
 
   if (new_state->target_temp != tcc_state.target_temp) {
     ESP_LOGD(TAG, "Changing target temperature");
     auto command = DataFrame{};
-    write_set_parameter_flags(&command, this->master_address_, this->command_mode_read_, new_state, COMMAND_SET_TEMP);
+    if (use_wrapped) {
+      write_set_parameter_flags_wrapped(&command, this->wrapped_remote_address_, this->wrapped_master_address_, new_state,
+                                        COMMAND_SET_TEMP);
+    } else {
+      write_set_parameter_flags(&command, this->master_address_, this->command_mode_read_, new_state, COMMAND_SET_TEMP);
+    }
     commands.push_back(command);
   }
 

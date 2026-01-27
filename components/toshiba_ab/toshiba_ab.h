@@ -20,7 +20,9 @@ const uint32_t FRAME_SEND_MILLIS_FROM_LAST_RECEIVE = 500;
 const uint32_t FRAME_SEND_MILLIS_FROM_LAST_SEND = 500;
 
 // const uint8_t TOSHIBA_MASTER = 0x00;  replaced by master_address_ which is set up in yaml
-const uint8_t TOSHIBA_REMOTE = 0x40;  
+const uint8_t TOSHIBA_REMOTE = 0x40;
+const uint8_t TOSHIBA_WRAPPED_REMOTE_DEFAULT = 0x50;
+const uint8_t TOSHIBA_WRAPPED_MASTER_DEFAULT = 0x90;
 const uint8_t TOSHIBA_TEMP_SENSOR = 0x42;
 const uint8_t TOSHIBA_BROADCAST = 0xF0;
 const uint8_t TOSHIBA_REPORT = 0x52;
@@ -456,6 +458,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   
   uint8_t master_address_ = 0x00;
   bool master_address_auto_{true};
+  uint8_t wrapped_remote_address_{TOSHIBA_WRAPPED_REMOTE_DEFAULT};
+  uint8_t wrapped_master_address_{TOSHIBA_WRAPPED_MASTER_DEFAULT};
   void set_master_address(uint8_t address);
   void set_master_address_auto(bool auto_detect) {
     master_address_auto_ = auto_detect;
