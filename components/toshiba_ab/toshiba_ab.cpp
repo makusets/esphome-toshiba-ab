@@ -1,5 +1,6 @@
 #include "toshiba_ab.h"
 #include "esphome.h"
+#include <inttypes.h>
 
 
 namespace esphome {
@@ -585,7 +586,28 @@ climate::ClimateTraits ToshibaAbClimate::traits() { return traits_; }
 
 void ToshibaAbClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "TCC Link:");
+  LOG_UART_DEVICE(this);
   this->dump_traits_(TAG);
+  ESP_LOGCONFIG(TAG, "  Master address: 0x%02X", this->master_address_);
+  ESP_LOGCONFIG(TAG, "  Master address auto: %s", this->master_address_auto_ ? "true" : "false");
+  ESP_LOGCONFIG(TAG, "  Command mode read: 0x%02X", this->command_mode_read_);
+  ESP_LOGCONFIG(TAG, "  Command mode write: 0x%02X", this->command_mode_write_);
+  ESP_LOGCONFIG(TAG, "  Frame format: %s",
+                this->data_reader.frame_format() == FrameFormat::WRAPPED ? "wrapped" : "normal");
+  ESP_LOGCONFIG(TAG, "  Autonomous mode: %s", this->autonomous_ ? "true" : "false");
+  ESP_LOGCONFIG(TAG, "  Read only: %s", this->read_only_ ? "true" : "false");
+  const bool has_ext_temp = this->ext_temp_sensor_ != nullptr;
+  ESP_LOGCONFIG(TAG, "  External temp report: %s", (has_ext_temp && this->ext_temp_enabled_) ? "enabled" : "disabled");
+  if (has_ext_temp) {
+    ESP_LOGCONFIG(TAG, "    Sensor: %s", this->ext_temp_sensor_name_.c_str());
+    ESP_LOGCONFIG(TAG, "    Interval: %" PRIu32 "ms", this->ext_temp_interval_ms_);
+  }
+  ESP_LOGCONFIG(TAG, "  Polled sensors configured: %zu", this->polled_sensors_.size());
+  ESP_LOGCONFIG(TAG, "  Connected sensor: %s", this->connected_binary_sensor_ ? "yes" : "no");
+  ESP_LOGCONFIG(TAG, "  Failed CRCs sensor: %s", this->failed_crcs_sensor_ ? "yes" : "no");
+  ESP_LOGCONFIG(TAG, "  Filter alert sensor: %s", this->filter_alert_sensor_ ? "yes" : "no");
+  ESP_LOGCONFIG(TAG, "  Vent switch: %s", this->vent_switch_ ? "yes" : "no");
+  ESP_LOGCONFIG(TAG, "  Read-only switch: %s", this->read_only_switch_ ? "yes" : "no");
 }
 
 void ToshibaAbClimate::setup() {

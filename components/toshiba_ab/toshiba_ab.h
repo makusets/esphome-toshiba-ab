@@ -404,6 +404,7 @@ struct DataFrameReader {
     frame_format_ = format;
     reset();
   }
+  FrameFormat frame_format() const { return frame_format_; }
 
 private:
   void reset_frame_state_() {
