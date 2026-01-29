@@ -97,7 +97,6 @@ climate:
     # --- Query additional internal AC sensors ---
     sensors:
       - address: 0x6A           # Required for every sensor added, in this case, AC current sensor of the external unit
-        unit_of_measurement: "A"
         scale: 0.1              # default 1.0; here we decode raw/10 as current is reported in deciAmps
         interval: 30s           # default 5min
         sensor:
