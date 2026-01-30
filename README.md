@@ -116,11 +116,13 @@ sensor:
 You will need to build the esphome compatible hardware. Instructions below.
 
 - Most likely, the first time, you will have to flash the board with the firmware via USB, typical ESPHome process. Once working, OTA updates will work.
-
+  - More information on first connection here: https://esphome.io/guides/physical_device_connection/#connecting-to-the-esp
+  - **While connected to USB, the board needs to have the Power Selector set to USB**
 - Isolate the AC unit completely off (at the electrical distribution board ideally)
 - Take out the cover of your remote controller
 - Loose the screws of AB terminals. 
 - Wire the remote A,B terminals to the pcb. V1 board is polarity sensitive. V3 board can be connected both ways.
+  - **Set the Power Selector to AB**
 
 ![image](https://github.com/issalig/toshiba_air_cond/blob/master/pcb/remote_back_pcb.jpg)
 
@@ -145,7 +147,9 @@ https://github.com/makusets/esphome-toshiba-ab/tree/main/hardware
 
 # Case
 
-A suitable enclosure for the board was designed to be 3D printed in two parts, STL files are available in the hardware folder. The case was designed using OnShape online designing software, the original file is public and can be found and modified by searching "toshiba_esp_case" within OnShape environment. The case looks like this:
+A suitable enclosure for the board was designed to be 3D printed in two parts, STL files are available in the hardware folder. The case was designed using OnShape online designing software, the original file is public and can be found and modified by searching "toshiba_esp_case" within OnShape environment. 
+The case looks like this:
+
 <img src="hardware/v3/toshiba_top_case.png" width="49%"> <img src="hardware/v3/toshiba_bot_case.png" width="49%">
 
 
