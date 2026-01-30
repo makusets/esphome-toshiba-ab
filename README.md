@@ -2,7 +2,6 @@
 - Added the option of using the board without any other controller or wall remote (autonomous mode). Details in "complete_example.yaml"
 - Added the option of changing read/write codes needed for some comercial systems.
 - Added the option of a filter alert sensor.
-- Refined protocol reading to include variations, specifically frames preceded by 0xF0 0xF0 and followed by 0xA0 at the end.
 - Removed filters that prevented some messages from being read.
 - Improved logs.
 - Other small changes.
@@ -36,7 +35,7 @@ This project implements all necessary functions to decode and interact with the 
 
 The hardware side of this project includes a ESP12 based board design that connects to the system.
 
-In particular, this project has been tested with remote control unit RBC-AMT32E and RBC-AMT54E and central unit RAV-SM1103DT-A but should work with other models using the AB protocol.
+In particular, this project has been tested with remote control unit RBC-AMT32E and RBC-AMT54E; and central unit RAV-SM1103DT-A and RAV-SM406BTP-E but should work with other models using the AB protocol.
 
 
 Requires reader & writer circuit to interface with the AB line, connected to the remote AB ports. 
@@ -116,13 +115,11 @@ sensor:
 You will need to build the esphome compatible hardware. Instructions below.
 
 - Most likely, the first time, you will have to flash the board with the firmware via USB, typical ESPHome process. Once working, OTA updates will work.
-  - More information on first connection here: https://esphome.io/guides/physical_device_connection/#connecting-to-the-esp
-  - **While connected to USB, the board needs to have the Power Selector set to USB**
+
 - Isolate the AC unit completely off (at the electrical distribution board ideally)
 - Take out the cover of your remote controller
 - Loose the screws of AB terminals. 
 - Wire the remote A,B terminals to the pcb. V1 board is polarity sensitive. V3 board can be connected both ways.
-  - **Set the Power Selector to AB**
 
 ![image](https://github.com/issalig/toshiba_air_cond/blob/master/pcb/remote_back_pcb.jpg)
 
@@ -147,9 +144,7 @@ https://github.com/makusets/esphome-toshiba-ab/tree/main/hardware
 
 # Case
 
-A suitable enclosure for the board was designed to be 3D printed in two parts, STL files are available in the hardware folder. The case was designed using OnShape online designing software, the original file is public and can be found and modified by searching "toshiba_esp_case" within OnShape environment. 
-The case looks like this:
-
+A suitable enclosure for the board was designed to be 3D printed in two parts, STL files are available in the hardware folder. The case was designed using OnShape online designing software, the original file is public and can be found and modified by searching "toshiba_esp_case" within OnShape environment. The case looks like this:
 <img src="hardware/v3/toshiba_top_case.png" width="49%"> <img src="hardware/v3/toshiba_bot_case.png" width="49%">
 
 
