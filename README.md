@@ -36,14 +36,14 @@ This project implements all necessary functions to decode and interact with the 
 
 The hardware side of this project includes a ESP12 based board design that connects to the system.
 
-In particular, this project has been tested with remote control unit RBC-AMT32E and RBC-AMT54E and central unit RAV-SM1103DT-A but should work with other models using the AB protocol.
+In particular, this project has been tested with remote control unit RBC-AMT32E and RBC-AMT54E and central unit RAV-SM1103DT-A and MMD-AP0366BHP1-E but should work with other models using the AB protocol.
 
 
 Requires reader & writer circuit to interface with the AB line, connected to the remote AB ports. 
 The circuit board was designed in easyEDA and all necessary files are included here.
 
-Most of the work is based on previous work from @muxa: https://github.com/muxa/esphome-tcc-link
-and the hard bits of decoding and initial board design by @issalig https://github.com/issalig/toshiba_air_cond
+Most of the work is based on previous work, hard bits of decoding and initial board design by @issalig https://github.com/issalig/toshiba_air_cond and an initial esphome component from @muxa: https://github.com/muxa/esphome-tcc-link
+
 
 
 ## To install, add or modify these sections in your esphome device yaml file
