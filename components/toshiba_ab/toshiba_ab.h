@@ -588,7 +588,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
 
  private:
   struct BootLogEntry {
-    int level;
+    uint8_t level;
     std::string tag;
     std::string message;
     uint32_t millis_since_boot;
@@ -615,7 +615,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool boot_log_capture_enabled_{false};
   bool boot_log_capture_active_{false};
   bool boot_log_replay_active_{false};
-  void capture_boot_log_(int level, const char *tag, const char *message);
+  void capture_boot_log_(uint8_t level, const char *tag, const char *message, size_t message_length);
 
 };
 

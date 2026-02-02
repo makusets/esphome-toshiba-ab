@@ -618,7 +618,7 @@ ToshibaAbClimate::ToshibaAbClimate() {
 
 climate::ClimateTraits ToshibaAbClimate::traits() { return traits_; }
 
-void ToshibaAbClimate::capture_boot_log_(int level, const char *tag, const char *message) {
+void ToshibaAbClimate::capture_boot_log_(uint8_t level, const char *tag, const char *message, size_t message_length) {
   if (!this->boot_log_capture_enabled_ || this->boot_log_replay_active_) {
     return;
   }
@@ -633,7 +633,14 @@ void ToshibaAbClimate::capture_boot_log_(int level, const char *tag, const char 
     return;
   }
 
-  this->boot_log_entries_.push_back({level, tag ? tag : "", message ? message : "", elapsed});
+  std::string entry_message;
+  if (message != nullptr && message_length > 0) {
+    entry_message.assign(message, message_length);
+  } else if (message != nullptr) {
+    entry_message.assign(message);
+  }
+
+  this->boot_log_entries_.push_back({level, tag ? tag : "", entry_message, elapsed});
 }
 
 void ToshibaAbClimate::print_boot_logs() {
@@ -642,8 +649,27 @@ void ToshibaAbClimate::print_boot_logs() {
            this->boot_log_entries_.size(),
            static_cast<float>(BOOT_LOG_CAPTURE_WINDOW_MS) / 1000.0f);
   for (const auto &entry : this->boot_log_entries_) {
-    ESP_LOG_LEVEL(entry.level, entry.tag.c_str(), "[boot+%u ms] %s", entry.millis_since_boot,
-                  entry.message.c_str());
+    switch (entry.level) {
+      case logger::LOG_LEVEL_ERROR:
+        ESP_LOGE(entry.tag.c_str(), "[boot+%u ms] %s", entry.millis_since_boot, entry.message.c_str());
+        break;
+      case logger::LOG_LEVEL_WARN:
+        ESP_LOGW(entry.tag.c_str(), "[boot+%u ms] %s", entry.millis_since_boot, entry.message.c_str());
+        break;
+      case logger::LOG_LEVEL_INFO:
+        ESP_LOGI(entry.tag.c_str(), "[boot+%u ms] %s", entry.millis_since_boot, entry.message.c_str());
+        break;
+      case logger::LOG_LEVEL_DEBUG:
+        ESP_LOGD(entry.tag.c_str(), "[boot+%u ms] %s", entry.millis_since_boot, entry.message.c_str());
+        break;
+      case logger::LOG_LEVEL_VERBOSE:
+      case logger::LOG_LEVEL_VERY_VERBOSE:
+        ESP_LOGV(entry.tag.c_str(), "[boot+%u ms] %s", entry.millis_since_boot, entry.message.c_str());
+        break;
+      case logger::LOG_LEVEL_NONE:
+      default:
+        break;
+    }
   }
   this->boot_log_replay_active_ = false;
 }
@@ -687,8 +713,9 @@ void ToshibaAbClimate::setup() {
     this->boot_log_entries_.clear();
     this->boot_log_start_millis_ = millis();
     this->boot_log_capture_active_ = true;
-    logger::global_logger->add_on_log_callback(
-        [this](int level, const char *tag, const char *message) { this->capture_boot_log_(level, tag, message); });
+    logger::global_logger->add_on_log_callback([this](uint8_t level, const char *tag, const char *message, size_t length) {
+      this->capture_boot_log_(level, tag, message, length);
+    });
   } else if (this->boot_log_capture_enabled_) {
     ESP_LOGW(TAG, "Boot log capture enabled but logger component not available");
   }
