@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
-from esphome.components import climate, uart, binary_sensor, sensor, switch, text_sensor, template, button
+from esphome.components import climate, uart, binary_sensor, sensor, switch, text_sensor, template
 from esphome.const import (
     CONF_ID,
     CONF_NAME,
@@ -19,7 +19,7 @@ from esphome.const import (
 )
 
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["climate", "binary_sensor", "sensor", "switch", "button"]
+AUTO_LOAD = ["climate", "binary_sensor", "sensor", "switch"]
 CODEOWNERS = ["@muxa"]
 
 toshiba_ab_ns = cg.esphome_ns.namespace("toshiba_ab")
@@ -28,7 +28,6 @@ CONF_CONNECTED = "connected"
 CONF_VENT = "vent"
 CONF_READ_ONLY_SWITCH = "read_only_switch"
 CONF_FAILED_CRCS = "failed_crcs"
-CONF_BOOT_LOG_PRINT = "boot_log_print"
 
 CONF_ON_DATA_RECEIVED = "on_data_received"
 CONF_MASTER = "master"
@@ -65,10 +64,6 @@ ToshibaAbVentSwitch =  toshiba_ab_ns.class_(
 
 ToshibaAbReadOnlySwitch = toshiba_ab_ns.class_(
     "ToshibaAbReadOnlySwitch", switch.Switch, cg.Component
-)
-
-ToshibaAbBootLogButton = toshiba_ab_ns.class_(
-    "ToshibaAbBootLogButton", button.Button, cg.Component
 )
 
 ToshibaAbOnDataReceivedTrigger = toshiba_ab_ns.class_(
@@ -125,7 +120,6 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
             ),
             key=CONF_NAME,
         ),
-        cv.Optional(CONF_BOOT_LOG_PRINT): button.button_schema(ToshibaAbBootLogButton),
         cv.Optional(CONF_FAILED_CRCS): sensor.sensor_schema(
             accuracy_decimals=0,
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
@@ -185,12 +179,6 @@ async def to_code(config):
     if CONF_READ_ONLY_SWITCH in config:
         sw = await switch.new_switch(config[CONF_READ_ONLY_SWITCH], var)
         cg.add(var.set_read_only_switch(sw))
-
-    if CONF_BOOT_LOG_PRINT in config:
-        boot_button = cg.new_Pvariable(config[CONF_BOOT_LOG_PRINT][CONF_ID], var)
-        await cg.register_component(boot_button, config[CONF_BOOT_LOG_PRINT])
-        await button.register_button(boot_button, config[CONF_BOOT_LOG_PRINT])
-        cg.add(var.set_boot_log_capture_enabled(True))
 
     if CONF_ON_DATA_RECEIVED in config:
         for on_data_received in config.get(CONF_ON_DATA_RECEIVED, []):
