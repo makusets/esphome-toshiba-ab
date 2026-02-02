@@ -650,23 +650,23 @@ void ToshibaAbClimate::print_boot_logs() {
            static_cast<float>(BOOT_LOG_CAPTURE_WINDOW_MS) / 1000.0f);
   for (const auto &entry : this->boot_log_entries_) {
     switch (entry.level) {
-      case api::enums::LOG_LEVEL_ERROR:
+      case logger::LOG_LEVEL_ERROR:
         ESP_LOGE(entry.tag.c_str(), "[boot+%u ms] %s", entry.millis_since_boot, entry.message.c_str());
         break;
-      case api::enums::LOG_LEVEL_WARN:
+      case logger::LOG_LEVEL_WARN:
         ESP_LOGW(entry.tag.c_str(), "[boot+%u ms] %s", entry.millis_since_boot, entry.message.c_str());
         break;
-      case api::enums::LOG_LEVEL_INFO:
+      case logger::LOG_LEVEL_INFO:
         ESP_LOGI(entry.tag.c_str(), "[boot+%u ms] %s", entry.millis_since_boot, entry.message.c_str());
         break;
-      case api::enums::LOG_LEVEL_DEBUG:
+      case logger::LOG_LEVEL_DEBUG:
         ESP_LOGD(entry.tag.c_str(), "[boot+%u ms] %s", entry.millis_since_boot, entry.message.c_str());
         break;
-      case api::enums::LOG_LEVEL_VERBOSE:
-      case api::enums::LOG_LEVEL_VERY_VERBOSE:
+      case logger::LOG_LEVEL_VERBOSE:
+      case logger::LOG_LEVEL_VERY_VERBOSE:
         ESP_LOGV(entry.tag.c_str(), "[boot+%u ms] %s", entry.millis_since_boot, entry.message.c_str());
         break;
-      case api::enums::LOG_LEVEL_NONE:
+      case logger::LOG_LEVEL_NONE:
       default:
         break;
     }
