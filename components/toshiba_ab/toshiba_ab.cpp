@@ -1,5 +1,6 @@
 #include "toshiba_ab.h"
 #include "esphome.h"
+#include "esphome/components/logger/logger.h"
 #include <inttypes.h>
 #include <cstring>
 
@@ -617,6 +618,36 @@ ToshibaAbClimate::ToshibaAbClimate() {
 
 climate::ClimateTraits ToshibaAbClimate::traits() { return traits_; }
 
+void ToshibaAbClimate::capture_boot_log_(int level, const char *tag, const char *message) {
+  if (!this->boot_log_capture_enabled_ || this->boot_log_replay_active_) {
+    return;
+  }
+  if (!this->boot_log_capture_active_) {
+    return;
+  }
+
+  const uint32_t now = millis();
+  const uint32_t elapsed = now - this->boot_log_start_millis_;
+  if (elapsed > BOOT_LOG_CAPTURE_WINDOW_MS) {
+    this->boot_log_capture_active_ = false;
+    return;
+  }
+
+  this->boot_log_entries_.push_back({level, tag ? tag : "", message ? message : "", elapsed});
+}
+
+void ToshibaAbClimate::print_boot_logs() {
+  this->boot_log_replay_active_ = true;
+  ESP_LOGI(TAG, "Replaying %zu log entries from first %.1f seconds after boot",
+           this->boot_log_entries_.size(),
+           static_cast<float>(BOOT_LOG_CAPTURE_WINDOW_MS) / 1000.0f);
+  for (const auto &entry : this->boot_log_entries_) {
+    ESP_LOG_LEVEL(entry.level, entry.tag.c_str(), "[boot+%u ms] %s", entry.millis_since_boot,
+                  entry.message.c_str());
+  }
+  this->boot_log_replay_active_ = false;
+}
+
 void ToshibaAbClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "TCC Link:");
 #ifdef LOG_UART_DEVICE
@@ -652,6 +683,15 @@ void ToshibaAbClimate::setup() {
     this->failed_crcs_sensor_->publish_state(0);
   }
   ESP_LOGD("toshiba", "Setting up ToshibaClimate...");
+  if (this->boot_log_capture_enabled_ && logger::global_logger != nullptr) {
+    this->boot_log_entries_.clear();
+    this->boot_log_start_millis_ = millis();
+    this->boot_log_capture_active_ = true;
+    logger::global_logger->add_on_log_callback(
+        [this](int level, const char *tag, const char *message) { this->capture_boot_log_(level, tag, message); });
+  } else if (this->boot_log_capture_enabled_) {
+    ESP_LOGW(TAG, "Boot log capture enabled but logger component not available");
+  }
   
 
   // If autonomous mode is enabled, we need to send ping, E8 read, and external temp periodically
