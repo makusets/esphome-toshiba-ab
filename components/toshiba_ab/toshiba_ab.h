@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esphome/components/binary_sensor/binary_sensor.h"
+#include "esphome/components/button/button.h"
 #include "esphome/components/climate/climate.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/switch/switch.h"
@@ -8,6 +9,7 @@
 #include <algorithm>
 #include <bitset>
 #include <queue>
+#include <string>
 
 namespace esphome {
 namespace toshiba_ab {
@@ -18,6 +20,7 @@ const uint32_t LAST_ALIVE_TIMEOUT_MILLIS = ALIVE_MESSAGE_PERIOD_MILLIS * 3 +1000
 const uint32_t PACKET_MIN_WAIT_MILLIS = 200;
 const uint32_t FRAME_SEND_MILLIS_FROM_LAST_RECEIVE = 500;
 const uint32_t FRAME_SEND_MILLIS_FROM_LAST_SEND = 500;
+const uint32_t BOOT_LOG_CAPTURE_WINDOW_MS = 30000;
 
 // const uint8_t TOSHIBA_MASTER = 0x00;  replaced by master_address_ which is set up in yaml
 const uint8_t TOSHIBA_REMOTE = 0x40;
@@ -455,7 +458,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void dump_config() override;
   void setup() override;
   void loop() override;
-  
+  void print_boot_logs();
+
   uint8_t master_address_ = 0x00;
   bool master_address_auto_{true};
   uint8_t wrapped_remote_address_{TOSHIBA_WRAPPED_REMOTE_DEFAULT};
@@ -485,6 +489,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_read_only_switch(switch_::Switch *read_only_switch) { read_only_switch_ = read_only_switch; }
 
   void set_failed_crcs_sensor(sensor::Sensor *failed_crcs_sensor) { this->failed_crcs_sensor_ = failed_crcs_sensor; }
+  void set_boot_log_capture_enabled(bool enabled) { boot_log_capture_enabled_ = enabled; }
 
   void send_command(struct DataFrame command);
   
@@ -582,6 +587,13 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   uint8_t command_mode_write_{COMMAND_MODE_WRITE};
 
  private:
+  struct BootLogEntry {
+    int level;
+    std::string tag;
+    std::string message;
+    uint32_t millis_since_boot;
+  };
+
   uint32_t loops_without_reads_ = 0;
   uint32_t loops_with_reads_ = 0;
   uint32_t last_read_millis_ = 0;
@@ -598,7 +610,12 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
 
   uint32_t last_temp_log_time_ = 0;  // Counter for BME280 temperature logging
   float last_sent_temp_ = 1; // Last sent room temperature to the unit
-
+  std::vector<BootLogEntry> boot_log_entries_{};
+  uint32_t boot_log_start_millis_{0};
+  bool boot_log_capture_enabled_{false};
+  bool boot_log_capture_active_{false};
+  bool boot_log_replay_active_{false};
+  void capture_boot_log_(int level, const char *tag, const char *message);
 
 };
 
@@ -626,6 +643,16 @@ class ToshibaAbReadOnlySwitch : public switch_::Switch, public Component {
   ToshibaAbReadOnlySwitch(ToshibaAbClimate *climate) { climate_ = climate; }
  protected:
   void write_state(bool state) override;
+  ToshibaAbClimate *climate_;
+};
+
+class ToshibaAbBootLogButton : public button::Button, public Component {
+ public:
+  explicit ToshibaAbBootLogButton(ToshibaAbClimate *climate) : climate_(climate) {}
+
+ protected:
+  void press_action() override { climate_->print_boot_logs(); }
+
   ToshibaAbClimate *climate_;
 };
 
