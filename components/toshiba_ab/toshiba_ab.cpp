@@ -109,7 +109,7 @@ void log_data_frame(const std::string msg, const struct DataFrame *frame, size_t
     sprintf(buf, "%02X", frame->data[i]);
     res += buf;
   }
-  ESP_LOGD(TAG, "%s: %02X:%02X:\x1B[32m%02X\033[0m:%02X:\033[2;100;37m%s\033[0m:%02X", msg.c_str(), frame->source,
+  ESP_LOGD("RX", "%s: %02X:%02X:\x1B[32m%02X\033[0m:%02X:\033[2;100;37m%s\033[0m:%02X", msg.c_str(), frame->source,
            frame->dest, frame->opcode1, frame->data_length, res.c_str(), frame->crc());
 }
 
@@ -122,7 +122,7 @@ void log_raw_data(const std::string& prefix, const uint8_t raw[], size_t size) {
     std::snprintf(buf, sizeof(buf), "%02X", raw[i]);
     res += buf;
   }
-  ESP_LOGV(TAG, "%s%s", prefix.c_str(), res.c_str());
+  ESP_LOGD("RX", "%s%s", prefix.c_str(), res.c_str());
 }
 
 
