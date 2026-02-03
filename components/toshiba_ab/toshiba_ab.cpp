@@ -122,7 +122,7 @@ void log_raw_data(const std::string& prefix, const uint8_t raw[], size_t size) {
     std::snprintf(buf, sizeof(buf), "%02X", raw[i]);
     res += buf;
   }
-  ESP_LOGD("RX", "%s%s", prefix.c_str(), res.c_str());
+  ESP_LOGD("RX", "%s", res.c_str());
 }
 
 
