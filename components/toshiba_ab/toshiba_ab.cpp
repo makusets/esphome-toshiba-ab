@@ -12,7 +12,6 @@ namespace toshiba_ab {
 static const char *const TAG = "tcc_link.climate";
 
 
-
 const LogString *opcode_to_string(uint8_t opcode) {
   switch (opcode) {
     case OPCODE_PING:
@@ -653,6 +652,10 @@ void ToshibaAbClimate::setup() {
   }
   ESP_LOGD("toshiba", "Setting up ToshibaClimate...");
   
+
+
+  pinMode(16, OUTPUT); // Set GPIO16 low, only needed for my old board, to be removed soon
+  digitalWrite(16, LOW);
 
   // If autonomous mode is enabled, we need to send ping, E8 read, and external temp periodically
   // Send all these if autonomous mode is enabled using set_interval calls
