@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
-from esphome.components import climate, uart, binary_sensor, sensor, switch, text_sensor, template
+from esphome.components import climate, uart, binary_sensor, sensor, switch, text_sensor, template, button
 from esphome.const import (
     CONF_ID,
     CONF_NAME,
@@ -19,7 +19,7 @@ from esphome.const import (
 )
 
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["climate", "binary_sensor", "sensor", "switch"]
+AUTO_LOAD = ["climate", "binary_sensor", "sensor", "switch", "text_sensor", "button"]
 CODEOWNERS = ["@muxa"]
 
 toshiba_ab_ns = cg.esphome_ns.namespace("toshiba_ab")
@@ -69,6 +69,9 @@ ToshibaAbReadOnlySwitch = toshiba_ab_ns.class_(
 ToshibaAbOnDataReceivedTrigger = toshiba_ab_ns.class_(
     "ToshibaAbOnDataReceivedTrigger", automation.Trigger.template()
 )
+ToshibaAbBootLogReplayButton = toshiba_ab_ns.class_(
+    "ToshibaAbBootLogReplayButton", button.Button
+)
 
 FrameFormat = toshiba_ab_ns.enum("FrameFormat")
 FRAME_FORMATS = {
@@ -79,6 +82,8 @@ FRAME_FORMATS = {
 
 CONF_REPORT_SENSOR_TEMP = "report_sensor_temp" # Report external temperature (from any ESPHome sensor) to the AC
 CONF_FILTER_ALERT = "filter_alert" #report filter alert status as binary sensor
+CONF_BOOT_LOG = "boot_log"
+CONF_BOOT_LOG_REPLAY = "boot_log_replay"
 
 REPORT_SENSOR_TEMP_SCHEMA = cv.Schema({
     cv.Optional("enabled", default=True): cv.boolean,
@@ -135,6 +140,13 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
         cv.Optional(CONF_SENSORS, default=[]): cv.ensure_list(SENSOR_ITEM_SCHEMA),
         cv.Optional(CONF_REPORT_SENSOR_TEMP): REPORT_SENSOR_TEMP_SCHEMA,
         cv.Optional(CONF_FILTER_ALERT): binary_sensor.binary_sensor_schema(),
+        cv.Optional(CONF_BOOT_LOG): text_sensor.text_sensor_schema(
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
+        cv.Optional(CONF_BOOT_LOG_REPLAY): button.button_schema(
+            ToshibaAbBootLogReplayButton,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
     }
 ).extend(uart.UART_DEVICE_SCHEMA).extend(cv.COMPONENT_SCHEMA)
 
@@ -194,6 +206,13 @@ async def to_code(config):
     if CONF_FILTER_ALERT in config:
         sens = await binary_sensor.new_binary_sensor(config[CONF_FILTER_ALERT])
         cg.add(var.set_filter_alert_sensor(sens))
+
+    if CONF_BOOT_LOG in config:
+        boot_log = await text_sensor.new_text_sensor(config[CONF_BOOT_LOG])
+        cg.add(var.set_boot_log_text_sensor(boot_log))
+
+    if CONF_BOOT_LOG_REPLAY in config:
+        await button.new_button(config[CONF_BOOT_LOG_REPLAY], var)
     
     for item in config.get(CONF_SENSORS, []):
         sens = await sensor.new_sensor(item["sensor"])  # creates the Sensor with name/units/etc.

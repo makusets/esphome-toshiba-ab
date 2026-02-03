@@ -98,7 +98,15 @@ void ToshibaAbClimate::update_frame_validation_() {
   this->data_reader.set_allow_same_source_dest(allow_same);
 }
 
-void log_data_frame(const std::string msg, const struct DataFrame *frame, size_t length = 0) {
+namespace {
+void append_hex_byte(std::string &out, uint8_t value) {
+  char buf[3];
+  std::snprintf(buf, sizeof(buf), "%02X", value);
+  out += buf;
+}
+}  // namespace
+
+void ToshibaAbClimate::log_data_frame_(const std::string &msg, const struct DataFrame *frame, size_t length) {
   std::string res;
   char buf[5];
   size_t len = length > 0 ? length : frame->data_length;
@@ -106,14 +114,30 @@ void log_data_frame(const std::string msg, const struct DataFrame *frame, size_t
     if (i > 0) {
       res += ':';
     }
-    sprintf(buf, "%02X", frame->data[i]);
+    std::snprintf(buf, sizeof(buf), "%02X", frame->data[i]);
     res += buf;
   }
+  std::string summary;
+  summary.reserve(msg.size() + 16 + res.size());
+  summary += msg;
+  summary += ": ";
+  append_hex_byte(summary, frame->source);
+  summary += ":";
+  append_hex_byte(summary, frame->dest);
+  summary += ":";
+  append_hex_byte(summary, frame->opcode1);
+  summary += ":";
+  append_hex_byte(summary, frame->data_length);
+  summary += ":";
+  summary += res;
+  summary += ":";
+  append_hex_byte(summary, frame->crc());
+  this->record_boot_log_(summary);
   ESP_LOGD(TAG, "%s: %02X:%02X:\x1B[32m%02X\033[0m:%02X:\033[2;100;37m%s\033[0m:%02X", msg.c_str(), frame->source,
            frame->dest, frame->opcode1, frame->data_length, res.c_str(), frame->crc());
 }
 
-void log_raw_data(const std::string& prefix, const uint8_t raw[], size_t size) {
+void ToshibaAbClimate::log_raw_data_(const std::string &prefix, const uint8_t raw[], size_t size) {
   std::string res;
   res.reserve(size ? (size * 3 - 1) : 0);  // pre-size: "AA:" per byte minus last colon
   char buf[3];
@@ -122,7 +146,50 @@ void log_raw_data(const std::string& prefix, const uint8_t raw[], size_t size) {
     std::snprintf(buf, sizeof(buf), "%02X", raw[i]);
     res += buf;
   }
+  this->record_boot_log_(prefix + res);
   ESP_LOGV(TAG, "%s%s", prefix.c_str(), res.c_str());
+}
+
+void ToshibaAbClimate::record_boot_log_(const std::string &line) {
+  if (!this->boot_log_active_) {
+    return;
+  }
+  if (this->boot_log_start_ms_ == 0) {
+    this->boot_log_start_ms_ = millis();
+  }
+  if (millis() - this->boot_log_start_ms_ > this->boot_log_capture_ms_) {
+    this->boot_log_active_ = false;
+    return;
+  }
+  if (this->boot_log_lines_.size() >= this->boot_log_max_lines_) {
+    return;
+  }
+  this->boot_log_lines_.push_back(line);
+}
+
+void ToshibaAbClimate::stop_boot_log_if_expired_() {
+  if (this->boot_log_active_ && this->boot_log_start_ms_ != 0 &&
+      millis() - this->boot_log_start_ms_ > this->boot_log_capture_ms_) {
+    this->boot_log_active_ = false;
+  }
+}
+
+void ToshibaAbClimate::replay_boot_log() {
+  if (this->boot_log_text_sensor_ == nullptr) {
+    return;
+  }
+  if (this->boot_log_lines_.empty()) {
+    this->boot_log_text_sensor_->publish_state("No boot log captured.");
+    return;
+  }
+  std::string replay;
+  for (size_t i = 0; i < this->boot_log_lines_.size(); i++) {
+    if (i > 0) {
+      replay += "\n";
+    }
+    replay += this->boot_log_lines_[i];
+  }
+  this->boot_log_text_sensor_->publish_state(replay);
 }
 
 
@@ -396,7 +463,7 @@ void ToshibaAbClimate::process_sensor_value_(const DataFrame *frame) {
   if (frame->data_length < 5 || frame->data[0] != this->command_mode_write_ || frame->data[1] != 0xEF) {
     ESP_LOGW(TAG, "0x1A unrecognized header (len=%u), last_id=0x%02X",
              static_cast<unsigned>(frame->data_length), prev_id);
-    log_raw_data("0x1A unrecognized (bad header)", frame->raw, frame->size());
+    this->log_raw_data_("0x1A unrecognized (bad header)", frame->raw, frame->size());
     this->sensor_query_outstanding_ = false;
     this->last_sensor_query_id_     = 0xFF;
     return;
@@ -474,7 +541,7 @@ void ToshibaAbClimate::process_sensor_value_(const DataFrame *frame) {
   // Fallback for any new/unknown variant
   // -------------------------
   ESP_LOGW(TAG, "0x1A unrecognized (header ok, no pattern match), last_id=0x%02X", prev_id);
-  log_raw_data("0x1A unrecognized (no pattern)", frame->raw, frame->size());
+  this->log_raw_data_("0x1A unrecognized (no pattern)", frame->raw, frame->size());
   this->sensor_query_outstanding_ = false;
   this->last_sensor_query_id_     = 0xFF;
 }
@@ -651,6 +718,11 @@ void ToshibaAbClimate::setup() {
     this->failed_crcs_sensor_->publish_state(0);
   }
   ESP_LOGD("toshiba", "Setting up ToshibaClimate...");
+
+  if (this->boot_log_text_sensor_ != nullptr) {
+    this->boot_log_active_ = true;
+    this->boot_log_start_ms_ = millis();
+  }
   
 
 
@@ -824,12 +896,12 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
 
       switch (frame->opcode1) {
         case OPCODE_PING: {
-        log_data_frame("PING/ALIVE", frame);
+        this->log_data_frame_("PING/ALIVE", frame);
         break;
         }
         case OPCODE_ACK: {
         // ACK (maps to 0x18)
-        log_data_frame("ACK", frame);
+        this->log_data_frame_("ACK", frame);
         if (last_unconfirmed_command_.has_value()) last_unconfirmed_command_.reset();
 
         // Check for announce ACK pattern: 6th raw byte == 0x0D (index 5)
@@ -851,7 +923,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
                             |- 0010 0100 -> mode bit7-bit5  bit4-bit0 ???
                               ---
           */
-          log_data_frame("MASTER PARAMETERS", frame);
+          this->log_data_frame_("MASTER PARAMETERS", frame);
 
           tcc_state.power = (frame->data[3] & STATUS_DATA_POWER_MASK);
           tcc_state.mode =
@@ -870,7 +942,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           // sync power, mode, fan and target temp from the unit to the climate
           // component
 
-          log_data_frame("STATUS", frame);
+          this->log_data_frame_("STATUS", frame);
 
           // this message means that the command sent to master was confirmed
           // (may be it can return an error, but no idea how to read that at the
@@ -903,7 +975,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           // sync power, mode, fan and target temp from the unit to the climate
           // component
 
-          log_data_frame("EXTENDED STATUS", frame);
+          this->log_data_frame_("EXTENDED STATUS", frame);
 
           tcc_state.power = (frame->data[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_POWER_MASK);
           tcc_state.mode =
@@ -939,7 +1011,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           break;
 
         default:
-          log_data_frame("MASTER", frame);
+          this->log_data_frame_("MASTER", frame);
           break;
       }
     }else {
@@ -954,7 +1026,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         float rmt = static_cast<float>(raw) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
 
         // tcc_state.room_temp = rmt; we don't update the state here, we wait for the next status update from master
-        log_data_frame("Remote temperature", frame);
+        this->log_data_frame_("Remote temperature", frame);
         ESP_LOGD(TAG, "Toshiba Wall Remote reports: %.1f °C", rmt);
         // sync_from_received_state(); we don't update the state, we wait for the next status update from master
         // remote temperature is sent regardless of DN32 setting, ac decides wether to use it or ignore it
@@ -966,7 +1038,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
                 frame->data[0] == this->command_mode_read_ &&
                 frame->data[1] == OPCODE2_PING_PONG &&         // 0x0C
                 frame->data[2] == OPCODE2_READ_STATUS) {       // 0x81
-        log_data_frame("Remote PING", frame);
+        this->log_data_frame_("Remote PING", frame);
         
         // Auto-update master address if enabled and different from current
         if (this->master_address_auto_ &&
@@ -983,11 +1055,11 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
                 frame->data[3] == 0x01 &&                 
                 frame->data[5] == 0x9E) {                       
                 
-        log_data_frame("Remote Timer Read", frame);
+        this->log_data_frame_("Remote Timer Read", frame);
 
       } else {
         // unknown remote message
-        log_data_frame("Unknown remote data", frame);
+        this->log_data_frame_("Unknown remote data", frame);
       }
     
     } else if (frame->source == TOSHIBA_TEMP_SENSOR) {
@@ -1000,17 +1072,17 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         std::string label = this->ext_temp_sensor_name_.empty()
                     ? "Yaml temp sensor"
                     : this->ext_temp_sensor_name_;
-        log_data_frame(label, frame);
+        this->log_data_frame_(label, frame);
         uint8_t raw = frame->data[2] & TEMPERATURE_DATA_MASK;  // raw[7]
         float sensor_temp = static_cast<float>(raw) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
         ESP_LOGD(TAG, "%s: %.1f °C", label.c_str(), sensor_temp);
       } else {
-        log_data_frame("Unknown 0x42 data", frame);
+        this->log_data_frame_("Unknown 0x42 data", frame);
       }
     } else {
     // Unknown source handling
     ESP_LOGD(TAG, "Received data from unknown source: %02X", frame->source);
-    log_data_frame("Unknown source", frame);
+    this->log_data_frame_("Unknown source", frame);
 
     // Auto-detect master address from master parameters frame
       if (this->master_address_auto_) {
@@ -1051,7 +1123,7 @@ void ToshibaAbClimate::process_received_data_wrapped_(const struct DataFrame *fr
 
   const size_t size = frame->size();
   if (size < 4) {
-    log_raw_data("Wrapped frame too short: ", frame->raw, size);
+    this->log_raw_data_("Wrapped frame too short: ", frame->raw, size);
     return;
   }
 
@@ -1064,7 +1136,7 @@ void ToshibaAbClimate::process_received_data_wrapped_(const struct DataFrame *fr
       size >= 3 && frame->raw[size - 3] == 0x00 && frame->raw[size - 2] == 0x3A;
 
   if (frame_length == 0x0A && has_tail_signature) {
-    log_raw_data("Wrapped master keepalive: ", frame->raw, size);
+    this->log_raw_data_("Wrapped master keepalive: ", frame->raw, size);
     last_master_alive_millis_ = millis();
     if (this->connected_binary_sensor_) {
       this->connected_binary_sensor_->publish_state(true);
@@ -1079,11 +1151,11 @@ void ToshibaAbClimate::process_received_data_wrapped_(const struct DataFrame *fr
 
   if (dest == 0xFF && payload_available >= STATUS_DATA_TARGET_TEMP_BYTE + 1) {
     if (frame->raw[payload_offset] != 0xC0 || frame->raw[payload_offset + 1] != 0x38) {
-      log_raw_data("Wrapped data: ", frame->raw, size);
+      this->log_raw_data_("Wrapped data: ", frame->raw, size);
       return;
     }
     const uint8_t *payload = &frame->raw[payload_offset];
-    log_raw_data("Wrapped status: ", frame->raw, size);
+    this->log_raw_data_("Wrapped status: ", frame->raw, size);
     tcc_state.power = (payload[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_POWER_MASK);
     tcc_state.mode =
         (payload[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_MODE_MASK) >> STATUS_DATA_MODE_SHIFT_BITS;
@@ -1110,7 +1182,7 @@ void ToshibaAbClimate::process_received_data_wrapped_(const struct DataFrame *fr
     return;
   }
 
-  log_raw_data("Wrapped data: ", frame->raw, size);
+  this->log_raw_data_("Wrapped data: ", frame->raw, size);
 }
 
 bool ToshibaAbClimate::receive_data(const std::vector<uint8_t> data) {
@@ -1126,7 +1198,7 @@ bool ToshibaAbClimate::receive_data(const std::vector<uint8_t> data) {
 bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
   if (!frame->is_wrapped() && frame->crc() != frame->calculate_crc()) {
     ESP_LOGW(TAG, "CRC check failed");
-    log_data_frame("Failed frame", frame);
+    this->log_data_frame_("Failed frame", frame);
 
     if (this->failed_crcs_sensor_ != nullptr) {
       this->failed_crcs_sensor_->publish_state(this->failed_crcs_sensor_->state + 1);
@@ -1155,12 +1227,14 @@ void ToshibaAbClimate::loop() {
   // TODO: check if last_unconfirmed_command_ was not confirmed after a timeout
   // and log warning/error
 
+  this->stop_boot_log_if_expired_();
+
   if (!this->write_queue_.empty() && (millis() - last_received_frame_millis_) >= FRAME_SEND_MILLIS_FROM_LAST_RECEIVE &&
       (millis() - last_sent_frame_millis_) >= FRAME_SEND_MILLIS_FROM_LAST_SEND) {
     last_sent_frame_millis_ = millis();
     auto frame = this->write_queue_.front();
     last_unconfirmed_command_ = frame;
-    log_data_frame("Write frame", &frame);
+    this->log_data_frame_("Write frame", &frame);
     if (frame.is_wrapped()) {
       const size_t raw_size = frame.size();
       uint8_t wrapped[DATA_FRAME_MAX_SIZE + 3];
@@ -1391,7 +1465,7 @@ void ToshibaAbClimate::send_command(const struct DataFrame command) {
     }
   }
 
-  log_data_frame("Enqueue command", &command);
+  this->log_data_frame_("Enqueue command", &command);
   this->write_queue_.push(command);
 }
 

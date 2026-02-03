@@ -1,9 +1,11 @@
 #pragma once
 
 #include "esphome/components/binary_sensor/binary_sensor.h"
+#include "esphome/components/button/button.h"
 #include "esphome/components/climate/climate.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/switch/switch.h"
+#include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/uart/uart.h"
 #include <algorithm>
 #include <bitset>
@@ -485,6 +487,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_read_only_switch(switch_::Switch *read_only_switch) { read_only_switch_ = read_only_switch; }
 
   void set_failed_crcs_sensor(sensor::Sensor *failed_crcs_sensor) { this->failed_crcs_sensor_ = failed_crcs_sensor; }
+  void set_boot_log_text_sensor(text_sensor::TextSensor *sensor) { boot_log_text_sensor_ = sensor; }
 
   void send_command(struct DataFrame command);
   
@@ -522,6 +525,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
     this->set_data_received_callback_.add(std::move(callback));
   }
 
+  void replay_boot_log();
+
  protected:
   climate::ClimateTraits traits_;
 
@@ -534,6 +539,10 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void sync_from_received_state();
   bool is_own_tx_echo_(const DataFrame *f) const; //used to filter echo after sending frame
   void update_frame_validation_();
+  void log_data_frame_(const std::string &msg, const struct DataFrame *frame, size_t length = 0);
+  void log_raw_data_(const std::string &prefix, const uint8_t raw[], size_t size);
+  void record_boot_log_(const std::string &line);
+  void stop_boot_log_if_expired_();
 
 
   std::vector<DataFrame> create_commands(const struct TccState *new_state);
@@ -568,6 +577,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   sensor::Sensor *ext_temp_sensor_{nullptr};
   uint32_t ext_temp_interval_ms_{300000};  // 5 min default
   bool ext_temp_enabled_{false};
+  text_sensor::TextSensor *boot_log_text_sensor_{nullptr};
   // Flag set when a broadcast announce ACK containing 0x0D is received
   bool announce_ack_received_{false};
   // If true, component will not send any commands to the central unit
@@ -598,7 +608,11 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
 
   uint32_t last_temp_log_time_ = 0;  // Counter for BME280 temperature logging
   float last_sent_temp_ = 1; // Last sent room temperature to the unit
-
+  std::vector<std::string> boot_log_lines_;
+  uint32_t boot_log_start_ms_{0};
+  uint32_t boot_log_capture_ms_{10000};
+  size_t boot_log_max_lines_{200};
+  bool boot_log_active_{false};
 
 };
 
@@ -626,6 +640,20 @@ class ToshibaAbReadOnlySwitch : public switch_::Switch, public Component {
   ToshibaAbReadOnlySwitch(ToshibaAbClimate *climate) { climate_ = climate; }
  protected:
   void write_state(bool state) override;
+  ToshibaAbClimate *climate_;
+};
+
+class ToshibaAbBootLogReplayButton : public button::Button {
+ public:
+  explicit ToshibaAbBootLogReplayButton(ToshibaAbClimate *climate) : climate_(climate) {}
+
+ protected:
+  void press_action() override {
+    if (climate_ != nullptr) {
+      climate_->replay_boot_log();
+    }
+  }
+
   ToshibaAbClimate *climate_;
 };
 
