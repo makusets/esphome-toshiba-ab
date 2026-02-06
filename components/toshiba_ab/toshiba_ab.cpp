@@ -1075,7 +1075,8 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
       size >= 3 && frame->raw[size - 3] == 0x00 && frame->raw[size - 2] == 0x3A;
 
   if (frame_length == 0x0A && has_tail_signature) {
-    log_raw_data("TU2C master keepalive: ", frame->raw, size);
+    log_raw_data("Master keepalive: ", frame->raw, size);
+    ESP_LOGD(TAG, "Master %02X keepalive", source);
     last_master_alive_millis_ = millis();
     if (this->connected_binary_sensor_) {
       this->connected_binary_sensor_->publish_state(true);
@@ -1139,7 +1140,7 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
     tcc_state.filter_alert = (payload[STATUS_DATA_FLAGS_BYTE] & 0b10000000) >> 7;
 
     ESP_LOGD(TAG,
-             "TU2C status power=%d mode=%02X fan=%02X vent=%02X target=%.1f room=%.1f preheat=%d filter=%d",
+             "TU2C status: power=%d mode=%02X fan=%02X vent=%02X target=%.1f room=%.1f preheat=%d filter=%d",
              tcc_state.power, tcc_state.mode, tcc_state.fan, tcc_state.vent, tcc_state.target_temp,
              tcc_state.room_temp, tcc_state.preheating, tcc_state.filter_alert);
     sync_from_received_state();
