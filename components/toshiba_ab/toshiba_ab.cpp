@@ -572,6 +572,17 @@ climate::ClimateMode to_climate_mode(const struct TccState *state) {
   return climate::CLIMATE_MODE_OFF;
 }
 
+uint8_t decode_status_mode(const uint8_t mode_power, const bool wrapped_frame) {
+  uint8_t mode = (mode_power & STATUS_DATA_MODE_MASK) >> STATUS_DATA_MODE_SHIFT_BITS;
+
+  // Wrapped status frames encode AUTO as 0b110 instead of 0b101.
+  if (wrapped_frame && mode == 0x06) {
+    mode = MODE_AUTO;
+  }
+
+  return mode;
+}
+
 climate::ClimateFanMode to_climate_fan(const struct TccState *state) {
   if (state->power == 0)
     return climate::CLIMATE_FAN_OFF;
@@ -1111,8 +1122,7 @@ void ToshibaAbClimate::process_received_data_wrapped_(const struct DataFrame *fr
     const uint8_t *payload = &frame->raw[payload_offset];
     log_raw_data("Wrapped status: ", frame->raw, size);
     tcc_state.power = (payload[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_POWER_MASK);
-    tcc_state.mode =
-        (payload[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_MODE_MASK) >> STATUS_DATA_MODE_SHIFT_BITS;
+    tcc_state.mode = decode_status_mode(payload[STATUS_DATA_MODEPOWER_BYTE], true);
     tcc_state.fan = (payload[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_FAN_MASK) >> STATUS_DATA_FAN_SHIFT_BITS;
     tcc_state.vent =
         (payload[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_VENT_MASK) >> STATUS_DATA_VENT_SHIFT_BITS;
