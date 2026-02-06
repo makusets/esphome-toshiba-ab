@@ -1077,6 +1077,32 @@ void ToshibaAbClimate::process_received_data_wrapped_(const struct DataFrame *fr
     return;
   }
 
+  if (frame_length == 0x0C && source == this->wrapped_master_address_ && payload_available >= 4 &&
+      frame->raw[payload_offset] == 0x80) {
+    log_raw_data("Master ACK frame: ", frame->raw, size);
+    ESP_LOGD(TAG, "ACK from master %02X with counter: %02X:%02X", source, frame->raw[payload_offset + 2],
+             frame->raw[payload_offset + 3]);
+    return;
+  }
+
+  if (frame_length == 0x0C && payload_available >= 2 && frame->raw[payload_offset] == 0x41 &&
+      frame->raw[payload_offset + 1] == 0x5C) {
+    log_raw_data("Remote keepalive frame: ", frame->raw, size);
+    ESP_LOGD(TAG, "Remote %02X keepalive", source);
+    return;
+  }
+
+  if (frame_length == 0x0D && payload_available >= 4 && frame->raw[payload_offset] == 0x61 &&
+      frame->raw[payload_offset + 1] == 0x38 && size > 7) {
+    log_raw_data("Remote room temp frame: ", frame->raw, size);
+    const uint8_t raw_temp = frame->raw[7];
+    const float room_temp =
+        static_cast<float>(raw_temp) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
+    tcc_state.room_temp = room_temp;
+    ESP_LOGD(TAG, "Remote %02X room temp: %.1f", source, room_temp);
+    return;
+  }
+
   if (dest == 0xFF && payload_available >= STATUS_DATA_TARGET_TEMP_BYTE + 1) {
     if (frame->raw[payload_offset] != 0xC0 || frame->raw[payload_offset + 1] != 0x38) {
       log_raw_data("Wrapped data: ", frame->raw, size);
