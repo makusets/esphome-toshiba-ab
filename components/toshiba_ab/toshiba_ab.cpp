@@ -628,7 +628,7 @@ ToshibaAbClimate::ToshibaAbClimate() {
 climate::ClimateTraits ToshibaAbClimate::traits() { return traits_; }
 
 void ToshibaAbClimate::dump_config() {
-  ESP_LOGCONFIG(TAG, "TCC-Link:");
+  ESP_LOGCONFIG(TAG, "Toshiba AB:");
 #ifdef LOG_UART_DEVICE
   LOG_UART_DEVICE(this);
 #else
