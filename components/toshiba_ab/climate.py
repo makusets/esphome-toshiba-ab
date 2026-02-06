@@ -73,7 +73,11 @@ ToshibaAbOnDataReceivedTrigger = toshiba_ab_ns.class_(
 FrameFormat = toshiba_ab_ns.enum("FrameFormat")
 FRAME_FORMATS = {
     "n": FrameFormat.NORMAL,
-    "u": FrameFormat.WRAPPED,
+    "normal": FrameFormat.NORMAL,
+    "u": FrameFormat.TU2C,
+    "wrapped": FrameFormat.TU2C,
+    "tu2c": FrameFormat.TU2C,
+    "tcc-link": FrameFormat.NORMAL,
 }
 
 

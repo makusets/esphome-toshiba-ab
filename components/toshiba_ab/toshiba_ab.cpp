@@ -77,7 +77,7 @@ uint8_t get_fan_bit_mask_for_mode(uint8_t mode) {
   return 0;
 }
 
-uint8_t calculate_wrapped_set_parameter_flags_crc(const uint8_t *data, size_t size) {
+uint8_t calculate_tu2c_set_parameter_flags_crc(const uint8_t *data, size_t size) {
   constexpr uint8_t crc_seed = 0xB8;
   uint16_t sum = crc_seed;
   for (size_t i = 0; i < size; i++) {
@@ -178,20 +178,20 @@ void write_set_parameter_flags(struct DataFrame *command, uint8_t master_address
   write_set_parameter(command, master_address, command_mode_read, OPCODE2_SET_TEMP_WITH_FAN, payload, sizeof(payload));
 }
 
-void write_set_parameter_flags_wrapped(struct DataFrame *command, uint8_t remote_address, uint8_t master_address,
+void write_set_parameter_flags_tu2c(struct DataFrame *command, uint8_t remote_address, uint8_t master_address,
                                        const struct TccState *state, uint8_t set_flags) {
   constexpr uint8_t payload_length = 0x08;
-  constexpr uint8_t wrapped_length = 0x10;
-  constexpr uint8_t wrapped_header_marker_msb = 0x01;
-  constexpr uint8_t wrapped_header_marker_lsb = 0x2C;
+  constexpr uint8_t tu2c_length = 0x10;
+  constexpr uint8_t tu2c_header_marker_msb = 0x01;
+  constexpr uint8_t tu2c_header_marker_lsb = 0x2C;
 
-  command->set_wrapped(true);
-  command->raw[0] = wrapped_length;
+  command->set_tu2c(true);
+  command->raw[0] = tu2c_length;
   command->raw[1] = remote_address;
   command->raw[2] = master_address;
   command->raw[3] = payload_length;
-  command->raw[4] = wrapped_header_marker_msb;
-  command->raw[5] = wrapped_header_marker_lsb;
+  command->raw[4] = tu2c_header_marker_msb;
+  command->raw[5] = tu2c_header_marker_lsb;
   command->raw[6] = static_cast<uint8_t>(state->mode | set_flags);
   command->raw[7] = static_cast<uint8_t>(state->fan | get_fan_bit_mask_for_mode(state->mode));
   command->raw[8] = temp_celcius_to_payload(state->target_temp);
@@ -199,7 +199,7 @@ void write_set_parameter_flags_wrapped(struct DataFrame *command, uint8_t remote
   command->raw[10] = get_heat_cool_bits(state->mode);
   command->raw[11] = get_heat_cool_bits(state->mode);
 
-  command->raw[12] = calculate_wrapped_set_parameter_flags_crc(command->raw, 12);
+  command->raw[12] = calculate_tu2c_set_parameter_flags_crc(command->raw, 12);
 }
 
 void write_set_parameter_mode(struct DataFrame *command, uint8_t master_address, uint8_t command_mode_read,
@@ -572,11 +572,11 @@ climate::ClimateMode to_climate_mode(const struct TccState *state) {
   return climate::CLIMATE_MODE_OFF;
 }
 
-uint8_t decode_status_mode(const uint8_t mode_power, const bool wrapped_frame) {
+uint8_t decode_status_mode(const uint8_t mode_power, const bool tu2c_frame) {
   uint8_t mode = (mode_power & STATUS_DATA_MODE_MASK) >> STATUS_DATA_MODE_SHIFT_BITS;
 
-  // Wrapped status frames encode AUTO as 0b110 instead of 0b101.
-  if (wrapped_frame && mode == 0x06) {
+  // TU2C status frames encode AUTO as 0b110 instead of 0b101.
+  if (tu2c_frame && mode == 0x06) {
     mode = MODE_AUTO;
   }
 
@@ -628,7 +628,7 @@ ToshibaAbClimate::ToshibaAbClimate() {
 climate::ClimateTraits ToshibaAbClimate::traits() { return traits_; }
 
 void ToshibaAbClimate::dump_config() {
-  ESP_LOGCONFIG(TAG, "TCC Link:");
+  ESP_LOGCONFIG(TAG, "TCC-Link:");
 #ifdef LOG_UART_DEVICE
   LOG_UART_DEVICE(this);
 #else
@@ -640,7 +640,7 @@ void ToshibaAbClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "  Command mode read: 0x%02X", this->command_mode_read_);
   ESP_LOGCONFIG(TAG, "  Command mode write: 0x%02X", this->command_mode_write_);
   ESP_LOGCONFIG(TAG, "  Frame format: %s",
-                this->data_reader.frame_format() == FrameFormat::WRAPPED ? "wrapped" : "normal");
+                this->data_reader.frame_format() == FrameFormat::TU2C ? "TU2C (U series)" : "TCC-Link");
   ESP_LOGCONFIG(TAG, "  Autonomous mode: %s", this->autonomous_ ? "true" : "false");
   ESP_LOGCONFIG(TAG, "  Read only: %s", this->read_only_ ? "true" : "false");
   const bool has_ext_temp = this->ext_temp_sensor_ != nullptr;
@@ -1055,14 +1055,14 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
     } 
   }
 
-void ToshibaAbClimate::process_received_data_wrapped_(const struct DataFrame *frame) {
+void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame) {
   if (frame == nullptr) {
     return;
   }
 
   const size_t size = frame->size();
   if (size < 4) {
-    log_raw_data("Wrapped frame too short: ", frame->raw, size);
+    log_raw_data("TU2C frame too short: ", frame->raw, size);
     return;
   }
 
@@ -1075,20 +1075,20 @@ void ToshibaAbClimate::process_received_data_wrapped_(const struct DataFrame *fr
       size >= 3 && frame->raw[size - 3] == 0x00 && frame->raw[size - 2] == 0x3A;
 
   if (frame_length == 0x0A && has_tail_signature) {
-    log_raw_data("Wrapped master keepalive: ", frame->raw, size);
+    log_raw_data("TU2C master keepalive: ", frame->raw, size);
     last_master_alive_millis_ = millis();
     if (this->connected_binary_sensor_) {
       this->connected_binary_sensor_->publish_state(true);
     }
 
     if (this->master_address_auto_ && this->master_address_ == 0x00 && source != 0x00) {
-      ESP_LOGI(TAG, "Auto-detected master address from wrapped keepalive: 0x%02X", source);
+      ESP_LOGI(TAG, "Auto-detected master address from TU2C keepalive: 0x%02X", source);
       this->set_master_address(source);
     }
     return;
   }
 
-  if (frame_length == 0x0C && source == this->wrapped_master_address_ && payload_available >= 4 &&
+  if (frame_length == 0x0C && source == this->tu2c_master_address_ && payload_available >= 4 &&
       frame->raw[payload_offset] == 0x80) {
     log_raw_data("Master ACK frame: ", frame->raw, size);
     ESP_LOGD(TAG, "ACK from master %02X with counter: %02X:%02X", source, frame->raw[payload_offset + 2],
@@ -1116,11 +1116,11 @@ void ToshibaAbClimate::process_received_data_wrapped_(const struct DataFrame *fr
 
   if (dest == 0xFF && payload_available >= STATUS_DATA_TARGET_TEMP_BYTE + 1) {
     if (frame->raw[payload_offset] != 0xC0 || frame->raw[payload_offset + 1] != 0x38) {
-      log_raw_data("Wrapped data: ", frame->raw, size);
+      log_raw_data("TU2C data: ", frame->raw, size);
       return;
     }
     const uint8_t *payload = &frame->raw[payload_offset];
-    log_raw_data("Wrapped status: ", frame->raw, size);
+    log_raw_data("TU2C status: ", frame->raw, size);
     tcc_state.power = (payload[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_POWER_MASK);
     tcc_state.mode = decode_status_mode(payload[STATUS_DATA_MODEPOWER_BYTE], true);
     tcc_state.fan = (payload[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_FAN_MASK) >> STATUS_DATA_FAN_SHIFT_BITS;
@@ -1139,14 +1139,14 @@ void ToshibaAbClimate::process_received_data_wrapped_(const struct DataFrame *fr
     tcc_state.filter_alert = (payload[STATUS_DATA_FLAGS_BYTE] & 0b10000000) >> 7;
 
     ESP_LOGD(TAG,
-             "Wrapped status power=%d mode=%02X fan=%02X vent=%02X target=%.1f room=%.1f preheat=%d filter=%d",
+             "TU2C status power=%d mode=%02X fan=%02X vent=%02X target=%.1f room=%.1f preheat=%d filter=%d",
              tcc_state.power, tcc_state.mode, tcc_state.fan, tcc_state.vent, tcc_state.target_temp,
              tcc_state.room_temp, tcc_state.preheating, tcc_state.filter_alert);
     sync_from_received_state();
     return;
   }
 
-  log_raw_data("Wrapped data: ", frame->raw, size);
+  log_raw_data("TU2C data: ", frame->raw, size);
 }
 
 bool ToshibaAbClimate::receive_data(const std::vector<uint8_t> data) {
@@ -1160,7 +1160,7 @@ bool ToshibaAbClimate::receive_data(const std::vector<uint8_t> data) {
 }
 
 bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
-  if (!frame->is_wrapped() && frame->crc() != frame->calculate_crc()) {
+  if (!frame->is_tu2c() && frame->crc() != frame->calculate_crc()) {
     ESP_LOGW(TAG, "CRC check failed");
     log_data_frame("Failed frame", frame);
 
@@ -1178,8 +1178,8 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
 
   // still notify any listeners of real frames
   this->set_data_received_callback_.call(frame);
-  if (frame->is_wrapped()) {
-    process_received_data_wrapped_(frame);
+  if (frame->is_tu2c()) {
+    process_received_data_tu2c_(frame);
   } else {
     process_received_data(frame);
   }
@@ -1197,17 +1197,17 @@ void ToshibaAbClimate::loop() {
     auto frame = this->write_queue_.front();
     last_unconfirmed_command_ = frame;
     log_data_frame("Write frame", &frame);
-    if (frame.is_wrapped()) {
+    if (frame.is_tu2c()) {
       const size_t raw_size = frame.size();
-      uint8_t wrapped[DATA_FRAME_MAX_SIZE + 3];
-      wrapped[0] = 0xF0;
-      wrapped[1] = 0xF0;
-      if (raw_size + 3 <= sizeof(wrapped)) {
-        std::memcpy(&wrapped[2], frame.raw, raw_size);
-        wrapped[2 + raw_size] = 0xA0;
-        this->write_array(wrapped, raw_size + 3);
+      uint8_t tu2c_frame[DATA_FRAME_MAX_SIZE + 3];
+      tu2c_frame[0] = 0xF0;
+      tu2c_frame[1] = 0xF0;
+      if (raw_size + 3 <= sizeof(tu2c_frame)) {
+        std::memcpy(&tu2c_frame[2], frame.raw, raw_size);
+        tu2c_frame[2 + raw_size] = 0xA0;
+        this->write_array(tu2c_frame, raw_size + 3);
       } else {
-        ESP_LOGW(TAG, "Wrapped frame too large to send (size=%u)", static_cast<unsigned>(raw_size));
+        ESP_LOGW(TAG, "TU2C frame too large to send (size=%u)", static_cast<unsigned>(raw_size));
       }
     } else {
       this->write_array(frame.raw, frame.size());
@@ -1321,7 +1321,7 @@ size_t ToshibaAbClimate::send_new_state(const struct TccState *new_state) {
 
 std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *new_state) {
   auto commands = std::vector<DataFrame>();
-  const bool use_wrapped = this->data_reader.frame_format() == FrameFormat::WRAPPED;
+  const bool use_tu2c = this->data_reader.frame_format() == FrameFormat::TU2C;
 
   if (new_state->power != tcc_state.power) {
     if (new_state->power) {
@@ -1351,8 +1351,8 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
   if (new_state->fan != tcc_state.fan) {
     ESP_LOGD(TAG, "Changing fan");
     auto command = DataFrame{};
-    if (use_wrapped) {
-      write_set_parameter_flags_wrapped(&command, this->wrapped_remote_address_, this->wrapped_master_address_, new_state,
+    if (use_tu2c) {
+      write_set_parameter_flags_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_, new_state,
                                         COMMAND_SET_FAN);
     } else {
       write_set_parameter_flags(&command, this->master_address_, this->command_mode_read_, new_state, COMMAND_SET_FAN);
@@ -1363,8 +1363,8 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
   if (new_state->target_temp != tcc_state.target_temp) {
     ESP_LOGD(TAG, "Changing target temperature");
     auto command = DataFrame{};
-    if (use_wrapped) {
-      write_set_parameter_flags_wrapped(&command, this->wrapped_remote_address_, this->wrapped_master_address_, new_state,
+    if (use_tu2c) {
+      write_set_parameter_flags_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_, new_state,
                                         COMMAND_SET_TEMP);
     } else {
       write_set_parameter_flags(&command, this->master_address_, this->command_mode_read_, new_state, COMMAND_SET_TEMP);

@@ -21,8 +21,8 @@ const uint32_t FRAME_SEND_MILLIS_FROM_LAST_SEND = 500;
 
 // const uint8_t TOSHIBA_MASTER = 0x00;  replaced by master_address_ which is set up in yaml
 const uint8_t TOSHIBA_REMOTE = 0x40;
-const uint8_t TOSHIBA_WRAPPED_REMOTE_DEFAULT = 0x50;
-const uint8_t TOSHIBA_WRAPPED_MASTER_DEFAULT = 0x90;
+const uint8_t TOSHIBA_TU2C_REMOTE_DEFAULT = 0x50;
+const uint8_t TOSHIBA_TU2C_MASTER_DEFAULT = 0x90;
 const uint8_t TOSHIBA_TEMP_SENSOR = 0x42;
 const uint8_t TOSHIBA_BROADCAST = 0xF0;
 const uint8_t TOSHIBA_REPORT = 0x52;
@@ -175,8 +175,8 @@ struct DataFrame {
     return raw[size() - 1];
   }
 
-  void set_wrapped(bool wrapped) { wrapped_ = wrapped; }
-  bool is_wrapped() const { return wrapped_; }
+  void set_tu2c(bool tu2c) { tu2c_ = tu2c; }
+  bool is_tu2c() const { return tu2c_; }
 
   /**
    * Calculates CRC on the current data by creating an XOR sum
@@ -202,15 +202,15 @@ struct DataFrame {
   std::vector<uint8_t> get_data() const { return std::vector<uint8_t>(raw, raw + size()); }
 
  private:
-  bool wrapped_{false};
+  bool tu2c_{false};
 };
 
 enum class FrameFormat : uint8_t {
   NORMAL = 0,
-  WRAPPED = 1,
+  TU2C = 1,
 };
 constexpr FrameFormat NORMAL = FrameFormat::NORMAL;
-constexpr FrameFormat WRAPPED = FrameFormat::WRAPPED;
+constexpr FrameFormat TU2C = FrameFormat::TU2C;
 
 struct DataFrameReader {
   // Reads a data frame byte by byte, accumulating bytes until a complete frame is received
@@ -222,11 +222,11 @@ struct DataFrameReader {
   bool complete{false};
   uint8_t  data_index_{0};
   uint16_t expected_total_{0};  // header(4) + payload(len) + crc(1)
-  bool wrapped_{false};
+  bool tu2c_{false};
   uint8_t prefix_match_{0};
-  bool wrapped_len_pending_{false};
-  uint16_t wrapped_expected_total_{0};  // total bytes after length byte
-  uint16_t wrapped_bytes_seen_{0};
+  bool tu2c_len_pending_{false};
+  uint16_t tu2c_expected_total_{0};  // total bytes after length byte
+  uint16_t tu2c_bytes_seen_{0};
   bool allow_unknown_sources_{true};
   bool allow_same_source_dest_{false};
   FrameFormat frame_format_{FrameFormat::NORMAL};
@@ -241,23 +241,23 @@ struct DataFrameReader {
 
   void reset() {
     reset_frame_state_();
-    wrapped_      = false;
+    tu2c_      = false;
     prefix_match_ = 0;
-    wrapped_len_pending_ = false;
-    wrapped_expected_total_ = 0;
-    wrapped_bytes_seen_ = 0;
+    tu2c_len_pending_ = false;
+    tu2c_expected_total_ = 0;
+    tu2c_bytes_seen_ = 0;
   }
 
   bool put(uint8_t byte) {
-    const bool use_wrapped = frame_format_ == FrameFormat::WRAPPED;
-    if (data_index_ == 0 && use_wrapped && !wrapped_) {
+    const bool use_tu2c = frame_format_ == FrameFormat::TU2C;
+    if (data_index_ == 0 && use_tu2c && !tu2c_) {
       if (prefix_match_ == 1) {
         if (byte == 0xF0) {
-          wrapped_ = true;
+          tu2c_ = true;
           prefix_match_ = 0;
           reset_frame_state_();
-          frame.set_wrapped(true);
-          wrapped_len_pending_ = true;
+          frame.set_tu2c(true);
+          tu2c_len_pending_ = true;
           return false;
         }
         prefix_match_ = 0;
@@ -268,23 +268,23 @@ struct DataFrameReader {
       }
       return false;
     }
-    if (!use_wrapped) {
-      wrapped_ = false;
+    if (!use_tu2c) {
+      tu2c_ = false;
       prefix_match_ = 0;
     }
 
     uint8_t current_byte = byte;
-    if (use_wrapped && wrapped_) {
-      if (wrapped_len_pending_) {
-        // Wrapped frames: third byte is the length, and it includes the 3 wrapping bytes.
+    if (use_tu2c && tu2c_) {
+      if (tu2c_len_pending_) {
+        // TU2C frames: third byte is the length, and it includes the 3 wrapping bytes.
         // The total length includes the two 0xF0 prefix bytes, the length byte itself,
         // and the trailing 0xA0. We therefore expect (len - 3) bytes after consuming
         // the length byte here, with the final one being 0xA0.
-        wrapped_expected_total_ = current_byte > 3 ? current_byte - 3 : 0;
-        wrapped_bytes_seen_ = 0;
-        wrapped_len_pending_ = false;
-        if (wrapped_expected_total_ < 1 || (wrapped_expected_total_ - 1) > DATA_FRAME_MAX_SIZE) {
-          ESP_LOGV("READER", "Invalid wrapped length 0x%02X; resetting reader", current_byte);
+        tu2c_expected_total_ = current_byte > 3 ? current_byte - 3 : 0;
+        tu2c_bytes_seen_ = 0;
+        tu2c_len_pending_ = false;
+        if (tu2c_expected_total_ < 1 || (tu2c_expected_total_ - 1) > DATA_FRAME_MAX_SIZE) {
+          ESP_LOGV("READER", "Invalid TU2C length 0x%02X; resetting reader", current_byte);
           reset();
           return false;
         }
@@ -293,12 +293,12 @@ struct DataFrameReader {
         return false;
       }
 
-      wrapped_bytes_seen_++;
+      tu2c_bytes_seen_++;
 
-      if (wrapped_expected_total_ > 0 && wrapped_bytes_seen_ == wrapped_expected_total_) {
+      if (tu2c_expected_total_ > 0 && tu2c_bytes_seen_ == tu2c_expected_total_) {
         if (current_byte != 0xA0) {
-          ESP_LOGV("READER", "Wrapped frame ended without 0xA0 (seen=%u expected=%u); resetting",
-                   wrapped_bytes_seen_, wrapped_expected_total_);
+          ESP_LOGV("READER", "TU2C frame ended without 0xA0 (seen=%u expected=%u); resetting",
+                   tu2c_bytes_seen_, tu2c_expected_total_);
           reset();
           return false;
         }
@@ -312,15 +312,15 @@ struct DataFrameReader {
 
         data_index_     = 0;
         expected_total_ = 0;
-        wrapped_        = false;
-        wrapped_expected_total_ = 0;
-        wrapped_bytes_seen_ = 0;
+        tu2c_        = false;
+        tu2c_expected_total_ = 0;
+        tu2c_bytes_seen_ = 0;
 
         return true;
       }
 
-      if (wrapped_expected_total_ > 0 && wrapped_bytes_seen_ > wrapped_expected_total_) {
-        ESP_LOGV("READER", "Wrapped frame exceeded expected length; resetting");
+      if (tu2c_expected_total_ > 0 && tu2c_bytes_seen_ > tu2c_expected_total_) {
+        ESP_LOGV("READER", "TU2C frame exceeded expected length; resetting");
         reset();
         return false;
       }
@@ -343,7 +343,7 @@ struct DataFrameReader {
     // Store byte
     frame.raw[data_index_] = current_byte;
 
-    if (!use_wrapped && data_index_ == 1) {
+    if (!use_tu2c && data_index_ == 1) {
       // ignore frames where source == dest (likely noise or corrupted)
       if (!allow_same_source_dest_ && frame.raw[0] == frame.raw[1]) {
           ESP_LOGV("READER", "Ignoring packet where source == dest: 0x%02X", frame.raw[0]);
@@ -354,7 +354,7 @@ struct DataFrameReader {
     }
 
     // When the length byte arrives (raw[3]), compute the expected total size
-    if (!use_wrapped && data_index_ == 3) {
+    if (!use_tu2c && data_index_ == 3) {
       frame.data_length = frame.raw[3];  // keep DataFrame fields in sync
       if (!frame.validate_bounds()) {    // early length sanity check
         ESP_LOGV("READER", "Invalid length 0x%02X; resetting reader", frame.data_length);
@@ -369,7 +369,7 @@ struct DataFrameReader {
 
     // If we know how many bytes we expect, finish only when we have them all
     if (expected_total_ > 0 && data_index_ >= expected_total_) {
-      if (!use_wrapped) {
+      if (!use_tu2c) {
         // We have the whole frame (header + payload + CRC)
         crc_valid = frame.validate_crc();
         complete  = true;
@@ -408,14 +408,14 @@ struct DataFrameReader {
 private:
   void reset_frame_state_() {
     frame.reset();
-    frame.set_wrapped(false);
+    frame.set_tu2c(false);
     crc_valid       = false;
     complete        = false;
     data_index_     = 0;
     expected_total_ = 0;
-    wrapped_len_pending_ = false;
-    wrapped_expected_total_ = 0;
-    wrapped_bytes_seen_ = 0;
+    tu2c_len_pending_ = false;
+    tu2c_expected_total_ = 0;
+    tu2c_bytes_seen_ = 0;
   }
 };
 
@@ -458,8 +458,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   
   uint8_t master_address_ = 0x00;
   bool master_address_auto_{true};
-  uint8_t wrapped_remote_address_{TOSHIBA_WRAPPED_REMOTE_DEFAULT};
-  uint8_t wrapped_master_address_{TOSHIBA_WRAPPED_MASTER_DEFAULT};
+  uint8_t tu2c_remote_address_{TOSHIBA_TU2C_REMOTE_DEFAULT};
+  uint8_t tu2c_master_address_{TOSHIBA_TU2C_MASTER_DEFAULT};
   void set_master_address(uint8_t address);
   void set_master_address_auto(bool auto_detect) {
     master_address_auto_ = auto_detect;
@@ -529,7 +529,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   TccState tcc_state;
 
   void process_received_data(const struct DataFrame *frame);
-  void process_received_data_wrapped_(const struct DataFrame *frame);
+  void process_received_data_tu2c_(const struct DataFrame *frame);
   size_t send_new_state(const struct TccState *new_state);
   void sync_from_received_state();
   bool is_own_tx_echo_(const DataFrame *f) const; //used to filter echo after sending frame
