@@ -118,7 +118,7 @@ bool ToshibaAbClimate::is_ack_for_pending_command_(const DataFrame *frame) const
     return false;
   }
 
-  return frame->data[1] == pending.opcode1;
+  return frame->data[0] == this->command_mode_write_ && frame->data[1] == OPCODE2_PARAM_ACK;
 }
 
 bool ToshibaAbClimate::should_track_command_ack_(const DataFrame &frame) const {
