@@ -227,17 +227,9 @@ struct DataFrameReader {
   bool tu2c_len_pending_{false};
   uint16_t tu2c_expected_total_{0};  // total bytes after length byte
   uint16_t tu2c_bytes_seen_{0};
-  bool allow_unknown_sources_{true};
+  bool filter_frames_{true};
   bool allow_same_source_dest_{false};
   FrameFormat frame_format_{FrameFormat::NORMAL};
-  std::vector<uint8_t> allowed_sources_{
-      0x00,  // master (default)
-      0x01, 0x02, 0x03, 0x04, 0x05, 0x06,  // other possible masters
-      0x40,  // remote
-      0x41,  // possible remote
-      0x42,  // temp sensor
-      // Add more if needed
-  };
 
   void reset() {
     reset_frame_state_();
@@ -326,19 +318,10 @@ struct DataFrameReader {
       }
     }
 
-    // Ignore common noise byte at start
-    if (data_index_ == 0 && !allow_unknown_sources_) {
-      bool valid = false;
-      for (auto src : allowed_sources_) {
-          if (current_byte == src) {
-              valid = true;
-              break;
-          }
-      }
-      if (!valid) {
-          ESP_LOGV("READER", "Ignoring packet from unknown source: 0x%02X", current_byte);
-          return false;
-      }
+    // Optionally filter obvious invalid source values at frame start.
+    if (!use_tu2c && data_index_ == 0 && filter_frames_ && current_byte > 0xA0) {
+      ESP_LOGV("READER", "Ignoring packet with out-of-range source: 0x%02X", current_byte);
+      return false;
     }
     // Store byte
     frame.raw[data_index_] = current_byte;
@@ -391,13 +374,8 @@ struct DataFrameReader {
     return false;
   }
 
-  void add_allowed_source(uint8_t source) {
-    if (std::find(allowed_sources_.begin(), allowed_sources_.end(), source) == allowed_sources_.end()) {
-      allowed_sources_.push_back(source);
-    }
-  }
-
-  void set_allow_unknown_sources(bool allow_unknown) { allow_unknown_sources_ = allow_unknown; }
+  void set_filter_frames(bool filter_frames) { filter_frames_ = filter_frames; }
+  bool filter_frames() const { return filter_frames_; }
   void set_allow_same_source_dest(bool allow_same) { allow_same_source_dest_ = allow_same; }
   void set_frame_format(FrameFormat format) {
     frame_format_ = format;
@@ -460,12 +438,17 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool master_address_auto_{true};
   uint8_t tu2c_remote_address_{TOSHIBA_TU2C_REMOTE_DEFAULT};
   uint8_t tu2c_master_address_{TOSHIBA_TU2C_MASTER_DEFAULT};
+  bool filter_frames_{true};
   void set_master_address(uint8_t address);
   void set_master_address_auto(bool auto_detect) {
     master_address_auto_ = auto_detect;
-    data_reader.set_allow_unknown_sources(auto_detect);
   }
   bool get_master_address_auto() const { return master_address_auto_; }
+  void set_filter_frames(bool filter_frames) {
+    filter_frames_ = filter_frames;
+    data_reader.set_filter_frames(filter_frames);
+  }
+  bool get_filter_frames() const { return filter_frames_; }
   void set_command_mode_read(uint8_t value) { command_mode_read_ = value; }
   void set_command_mode_write(uint8_t value) { command_mode_write_ = value; }
   void set_filter_alert_sensor(binary_sensor::BinarySensor *sensor) { filter_alert_sensor_ = sensor; }

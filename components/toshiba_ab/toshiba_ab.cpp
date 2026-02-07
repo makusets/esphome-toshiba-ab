@@ -694,6 +694,7 @@ void ToshibaAbClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "  Command mode write: 0x%02X", this->command_mode_write_);
   ESP_LOGCONFIG(TAG, "  Frame format: %s",
                 this->data_reader.frame_format() == FrameFormat::TU2C ? "TU2C (U series)" : "TCC-Link");
+  ESP_LOGCONFIG(TAG, "  Filter frames: %s", this->filter_frames_ ? "true" : "false");
   ESP_LOGCONFIG(TAG, "  Autonomous mode: %s", this->autonomous_ ? "true" : "false");
   ESP_LOGCONFIG(TAG, "  Read only: %s", this->read_only_ ? "true" : "false");
   const bool has_ext_temp = this->ext_temp_sensor_ != nullptr;
@@ -1071,14 +1072,12 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
       if (this->master_address_auto_) {
       // First, check for announce ACK pattern from an unknown source: if the
       // raw frame contains 0x0D at byte index 5, treat that source as the new
-      // master and stop allowing unknown sources.
+      // master.
       if (frame->size() > 5 && frame->raw[5] == 0x0D) {
         // Only act on announce ACK if we haven't already seen one
         if (!this->announce_ack_received_) {
           ESP_LOGI(TAG, "Auto-detected master address from announce ACK: 0x%02X, updating master address", frame->source);
           this->master_address_ = frame->source;
-          this->data_reader.add_allowed_source(this->master_address_);
-          // this->data_reader.set_allow_unknown_sources(false);
           // Mark that we've received the announce ACK so we don't repeatedly auto-update
           this->announce_ack_received_ = true;
           this->update_frame_validation_();
@@ -1090,8 +1089,6 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         if (frame->opcode1 == OPCODE_PARAMETER && frame->data_length >= 4) {
           ESP_LOGI(TAG, "Auto-detected master address: 0x%02X, updating master address", frame->source);
           this->master_address_ = frame->source;
-          this->data_reader.add_allowed_source(this->master_address_);
-          // this->data_reader.set_allow_unknown_sources(false);
         }
       }
       }
@@ -1543,7 +1540,6 @@ void ToshibaAbReadOnlySwitch::write_state(bool state) {
 
 void ToshibaAbClimate::set_master_address(uint8_t address) {
   this->master_address_ = address;
-  this->data_reader.add_allowed_source(address);
 }
 
 }  // namespace toshiba_ab
