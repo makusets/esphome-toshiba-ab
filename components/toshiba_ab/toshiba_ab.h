@@ -530,6 +530,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
 
   void process_received_data(const struct DataFrame *frame);
   void process_received_data_tu2c_(const struct DataFrame *frame);
+  bool is_ack_for_pending_command_(const DataFrame *frame) const;
+  bool should_track_command_ack_(const DataFrame &frame) const;
+  void handle_pending_command_ack_(const DataFrame *frame);
   size_t send_new_state(const struct TccState *new_state);
   void sync_from_received_state();
   bool is_own_tx_echo_(const DataFrame *f) const; //used to filter echo after sending frame
@@ -593,6 +596,10 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   uint32_t last_sent_frame_millis_ = 0;
   std::queue<DataFrame> write_queue_;
   optional<DataFrame> last_unconfirmed_command_;
+  uint8_t last_unconfirmed_command_attempts_{0};
+  bool resend_last_unconfirmed_command_{false};
+
+  static const uint8_t MAX_COMMAND_SEND_ATTEMPTS = 5;
 
   uint32_t last_master_alive_millis_ = 0;
 

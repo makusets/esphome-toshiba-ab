@@ -98,6 +98,59 @@ void ToshibaAbClimate::update_frame_validation_() {
   this->data_reader.set_allow_same_source_dest(allow_same);
 }
 
+
+bool ToshibaAbClimate::is_ack_for_pending_command_(const DataFrame *frame) const {
+  if (frame == nullptr || !this->last_unconfirmed_command_.has_value()) {
+    return false;
+  }
+  const auto &pending = this->last_unconfirmed_command_.value();
+
+  // ACK/retry logic is only for classic TCCLink frames, not TU2C.
+  if (frame->is_tu2c() || pending.is_tu2c()) {
+    return false;
+  }
+
+  if (frame->source != pending.dest || frame->dest != pending.source) {
+    return false;
+  }
+
+  if (frame->opcode1 != OPCODE_ACK || frame->data_length < 2) {
+    return false;
+  }
+
+  return frame->data[1] == pending.opcode1;
+}
+
+bool ToshibaAbClimate::should_track_command_ack_(const DataFrame &frame) const {
+  if (frame.is_tu2c()) {
+    return false;
+  }
+
+  if (frame.opcode1 != OPCODE_PARAMETER || frame.data_length < 2) {
+    return false;
+  }
+
+  return frame.data[1] == OPCODE2_SET_MODE || frame.data[1] == OPCODE2_SET_TEMP_WITH_FAN;
+}
+
+void ToshibaAbClimate::handle_pending_command_ack_(const DataFrame *frame) {
+  if (!this->last_unconfirmed_command_.has_value()) {
+    return;
+  }
+
+  if (this->is_ack_for_pending_command_(frame)) {
+    ESP_LOGD(TAG, "Command ACK received for opcode 0x%02X after %u attempt(s)",
+             this->last_unconfirmed_command_->opcode1,
+             static_cast<unsigned>(this->last_unconfirmed_command_attempts_));
+    this->last_unconfirmed_command_.reset();
+    this->last_unconfirmed_command_attempts_ = 0;
+    this->resend_last_unconfirmed_command_ = false;
+    return;
+  }
+
+  this->resend_last_unconfirmed_command_ = true;
+}
+
 void log_data_frame(const std::string msg, const struct DataFrame *frame, size_t length = 0) {
   std::string res;
   char buf[5];
@@ -841,7 +894,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         case OPCODE_ACK: {
         // ACK (maps to 0x18)
         log_data_frame("ACK", frame);
-        if (last_unconfirmed_command_.has_value()) last_unconfirmed_command_.reset();
+        this->handle_pending_command_ack_(frame);
 
         // Check for announce ACK pattern: 6th raw byte == 0x0D (index 5)
         // When this is received after boot, the remote can stop announcing itself
@@ -882,15 +935,6 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           // component
 
           log_data_frame("STATUS", frame);
-
-          // this message means that the command sent to master was confirmed
-          // (may be it can return an error, but no idea how to read that at the
-          // moment)
-          if (last_unconfirmed_command_.has_value()) {
-            // TODO: check if this is the right command being confirmed
-
-            last_unconfirmed_command_ = {};  // reset last command
-          }
 
           tcc_state.power = (frame->data[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_POWER_MASK);
           tcc_state.mode =
@@ -1177,6 +1221,11 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
     return true;  // swallow quietly
   }
 
+  if (this->last_unconfirmed_command_.has_value() && !frame->is_tu2c() &&
+      !this->last_unconfirmed_command_->is_tu2c() && !this->is_ack_for_pending_command_(frame)) {
+    this->resend_last_unconfirmed_command_ = true;
+  }
+
   // still notify any listeners of real frames
   this->set_data_received_callback_.call(frame);
   if (frame->is_tu2c()) {
@@ -1192,30 +1241,66 @@ void ToshibaAbClimate::loop() {
   // TODO: check if last_unconfirmed_command_ was not confirmed after a timeout
   // and log warning/error
 
-  if (!this->write_queue_.empty() && (millis() - last_received_frame_millis_) >= FRAME_SEND_MILLIS_FROM_LAST_RECEIVE &&
-      (millis() - last_sent_frame_millis_) >= FRAME_SEND_MILLIS_FROM_LAST_SEND) {
-    last_sent_frame_millis_ = millis();
-    auto frame = this->write_queue_.front();
-    last_unconfirmed_command_ = frame;
-    log_data_frame("Write frame", &frame);
-    if (frame.is_tu2c()) {
-      const size_t raw_size = frame.size();
-      uint8_t tu2c_frame[DATA_FRAME_MAX_SIZE + 3];
-      tu2c_frame[0] = 0xF0;
-      tu2c_frame[1] = 0xF0;
-      if (raw_size + 3 <= sizeof(tu2c_frame)) {
-        std::memcpy(&tu2c_frame[2], frame.raw, raw_size);
-        tu2c_frame[2 + raw_size] = 0xA0;
-        this->write_array(tu2c_frame, raw_size + 3);
+  const bool bus_can_send = (millis() - last_received_frame_millis_) >= FRAME_SEND_MILLIS_FROM_LAST_RECEIVE &&
+                            (millis() - last_sent_frame_millis_) >= FRAME_SEND_MILLIS_FROM_LAST_SEND;
+
+  if (bus_can_send) {
+    optional<DataFrame> frame_to_send{};
+
+    if (this->resend_last_unconfirmed_command_ && this->last_unconfirmed_command_.has_value()) {
+      if (this->last_unconfirmed_command_attempts_ >= MAX_COMMAND_SEND_ATTEMPTS) {
+        ESP_LOGE(TAG, "Command opcode 0x%02X not acknowledged after %u attempts", this->last_unconfirmed_command_->opcode1,
+                 static_cast<unsigned>(this->last_unconfirmed_command_attempts_));
+        this->last_unconfirmed_command_.reset();
+        this->last_unconfirmed_command_attempts_ = 0;
+        this->resend_last_unconfirmed_command_ = false;
       } else {
-        ESP_LOGW(TAG, "TU2C frame too large to send (size=%u)", static_cast<unsigned>(raw_size));
+        frame_to_send = this->last_unconfirmed_command_.value();
+        this->last_unconfirmed_command_attempts_++;
+        this->resend_last_unconfirmed_command_ = false;
+        ESP_LOGW(TAG, "Resending command opcode 0x%02X (attempt %u/%u)", frame_to_send->opcode1,
+                 static_cast<unsigned>(this->last_unconfirmed_command_attempts_),
+                 static_cast<unsigned>(MAX_COMMAND_SEND_ATTEMPTS));
       }
-    } else {
-      this->write_array(frame.raw, frame.size());
     }
-    this->write_queue_.pop();
-    if (this->write_queue_.empty()) {
-      ESP_LOGD(TAG, "All frames written");
+
+    if (!frame_to_send.has_value() && !this->last_unconfirmed_command_.has_value() && !this->write_queue_.empty()) {
+      frame_to_send = this->write_queue_.front();
+      this->write_queue_.pop();
+      if (this->should_track_command_ack_(frame_to_send.value())) {
+        this->last_unconfirmed_command_ = frame_to_send.value();
+        this->last_unconfirmed_command_attempts_ = 1;
+        this->resend_last_unconfirmed_command_ = false;
+      } else {
+        this->last_unconfirmed_command_.reset();
+        this->last_unconfirmed_command_attempts_ = 0;
+        this->resend_last_unconfirmed_command_ = false;
+      }
+    }
+
+    if (frame_to_send.has_value()) {
+      last_sent_frame_millis_ = millis();
+      auto frame = frame_to_send.value();
+      log_data_frame("Write frame", &frame);
+      if (frame.is_tu2c()) {
+        const size_t raw_size = frame.size();
+        uint8_t tu2c_frame[DATA_FRAME_MAX_SIZE + 3];
+        tu2c_frame[0] = 0xF0;
+        tu2c_frame[1] = 0xF0;
+        if (raw_size + 3 <= sizeof(tu2c_frame)) {
+          std::memcpy(&tu2c_frame[2], frame.raw, raw_size);
+          tu2c_frame[2 + raw_size] = 0xA0;
+          this->write_array(tu2c_frame, raw_size + 3);
+        } else {
+          ESP_LOGW(TAG, "TU2C frame too large to send (size=%u)", static_cast<unsigned>(raw_size));
+        }
+      } else {
+        this->write_array(frame.raw, frame.size());
+      }
+
+      if (this->write_queue_.empty()) {
+        ESP_LOGD(TAG, "All frames written");
+      }
     }
   }
 
