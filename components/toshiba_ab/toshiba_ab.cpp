@@ -521,7 +521,7 @@ uint8_t to_tcc_fan(const climate::ClimateFanMode fan) {
     case climate::CLIMATE_FAN_HIGH:
       return FAN_PEED_HIGH;
     default:
-      return climate::CLIMATE_FAN_OFF;
+      return FAN_PEED_LOW;
   }
 }
 
