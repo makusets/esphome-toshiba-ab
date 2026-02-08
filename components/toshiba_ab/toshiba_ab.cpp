@@ -86,6 +86,17 @@ uint8_t calculate_tu2c_set_parameter_flags_crc(const uint8_t *data, size_t size)
   return static_cast<uint8_t>(sum & 0xFF);
 }
 
+uint8_t calculate_tu2c_power_off_crc(const uint8_t *data, size_t size) {
+  // Based on observed TU2C power-off frame:
+  // 0B:50:90:03:01:21:02:CF
+  constexpr uint8_t crc_seed = 0xBD;
+  uint16_t sum = crc_seed;
+  for (size_t i = 0; i < size; i++) {
+    sum += data[i];
+  }
+  return static_cast<uint8_t>(sum & 0xFF);
+}
+
 bool ToshibaAbClimate::is_own_tx_echo_(const DataFrame *f) const { // used to filter out echo from our last command sent
   if (!this->last_unconfirmed_command_.has_value() || f == nullptr) return false;
   const auto &tx = this->last_unconfirmed_command_.value();  // last frame we wrote
@@ -253,6 +264,24 @@ void write_set_parameter_flags_tu2c(struct DataFrame *command, uint8_t remote_ad
   command->raw[11] = get_heat_cool_bits(state->mode);
 
   command->raw[12] = calculate_tu2c_set_parameter_flags_crc(command->raw, 12);
+}
+
+void write_power_off_tu2c(struct DataFrame *command, uint8_t remote_address, uint8_t master_address) {
+  constexpr uint8_t tu2c_length = 0x0B;
+  constexpr uint8_t payload_length = 0x03;
+  constexpr uint8_t marker_msb = 0x01;
+  constexpr uint8_t marker_lsb = 0x21;
+  constexpr uint8_t power_off_code = 0x02;
+
+  command->set_tu2c(true);
+  command->raw[0] = tu2c_length;
+  command->raw[1] = remote_address;
+  command->raw[2] = master_address;
+  command->raw[3] = payload_length;
+  command->raw[4] = marker_msb;
+  command->raw[5] = marker_lsb;
+  command->raw[6] = power_off_code;
+  command->raw[7] = calculate_tu2c_power_off_crc(command->raw, 7);
 }
 
 void write_set_parameter_mode(struct DataFrame *command, uint8_t master_address, uint8_t command_mode_read,
@@ -1417,7 +1446,11 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
       // turn off
       ESP_LOGD(TAG, "Turning off");
       auto command = DataFrame{};
-      write_set_parameter_power(&command, this->master_address_, this->command_mode_read_, new_state);
+      if (use_tu2c) {
+        write_power_off_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_);
+      } else {
+        write_set_parameter_power(&command, this->master_address_, this->command_mode_read_, new_state);
+      }
       commands.push_back(command);
       // don't process other changes when turning off
       return commands;
