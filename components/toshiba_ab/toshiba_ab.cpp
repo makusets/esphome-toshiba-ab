@@ -186,7 +186,7 @@ void log_raw_data(const std::string& prefix, const uint8_t raw[], size_t size) {
     std::snprintf(buf, sizeof(buf), "%02X", raw[i]);
     res += buf;
   }
-  ESP_LOGD("RX", "%s", "%s", prefix.c_str(), res.c_str());
+  ESP_LOGD("RX", "%s: %s", prefix.c_str(), res.c_str());
 }
 
 
@@ -1132,7 +1132,7 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
 
   const size_t size = frame->size();
   if (size < 4) {
-    log_raw_data("TU2C frame too short: ", frame->raw, size);
+    log_raw_data("TU2C frame too short", frame->raw, size);
     return;
   }
 
@@ -1145,7 +1145,7 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
       size >= 3 && frame->raw[size - 3] == 0x00 && frame->raw[size - 2] == 0x3A;
 
   if (frame_length == 0x0A && has_tail_signature) {
-    log_raw_data("Master keepalive: ", frame->raw, size);
+    log_raw_data("Master keepalive", frame->raw, size);
     ESP_LOGD(TAG, "Master %02X keepalive", source);
     last_master_alive_millis_ = millis();
     if (this->connected_binary_sensor_) {
@@ -1161,7 +1161,7 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
 
   if (frame_length == 0x0C && source == this->tu2c_master_address_ && payload_available >= 4 &&
       frame->raw[payload_offset] == 0x80) {
-    log_raw_data("Master ACK frame: ", frame->raw, size);
+    log_raw_data("Master ACK frame", frame->raw, size);
     ESP_LOGD(TAG, "ACK from master %02X with counter: %02X:%02X", source, frame->raw[payload_offset + 2],
              frame->raw[payload_offset + 3]);
     return;
@@ -1169,14 +1169,14 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
 
   if (frame_length == 0x0C && payload_available >= 2 && frame->raw[payload_offset] == 0x41 &&
       frame->raw[payload_offset + 1] == 0x5C) {
-    log_raw_data("Remote keepalive frame: ", frame->raw, size);
+    log_raw_data("Remote keepalive frame", frame->raw, size);
     ESP_LOGD(TAG, "Remote %02X keepalive", source);
     return;
   }
 
   if (frame_length == 0x0D && payload_available >= 4 && frame->raw[payload_offset] == 0x61 &&
       frame->raw[payload_offset + 1] == 0x38 && size > 7) {
-    log_raw_data("Remote room temp frame: ", frame->raw, size);
+    log_raw_data("Remote room temp frame", frame->raw, size);
     const uint8_t raw_temp = frame->raw[7];
     const float room_temp =
         static_cast<float>(raw_temp) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
@@ -1187,11 +1187,11 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
 
   if (dest == 0xFF && payload_available >= STATUS_DATA_TARGET_TEMP_BYTE + 1) {
     if (frame->raw[payload_offset] != 0xC0 || frame->raw[payload_offset + 1] != 0x38) {
-      log_raw_data("TU2C data: ", frame->raw, size);
+      log_raw_data("TU2C data", frame->raw, size);
       return;
     }
     const uint8_t *payload = &frame->raw[payload_offset];
-    log_raw_data("TU2C status: ", frame->raw, size);
+    log_raw_data("TU2C status", frame->raw, size);
     tcc_state.power = (payload[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_POWER_MASK);
     tcc_state.mode = decode_status_mode(payload[STATUS_DATA_MODEPOWER_BYTE], true);
     tcc_state.fan = (payload[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_FAN_MASK) >> STATUS_DATA_FAN_SHIFT_BITS;
@@ -1217,7 +1217,7 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
     return;
   }
 
-  log_raw_data("TU2C data: ", frame->raw, size);
+  log_raw_data("TU2C data", frame->raw, size);
 }
 
 bool ToshibaAbClimate::receive_data(const std::vector<uint8_t> data) {
