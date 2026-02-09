@@ -1,3 +1,15 @@
+# v3.2 is here!
+
+Improvements over v3:
+- Changed GPIO Pins for the UART component to improve stability and compatibility, GPI10 was not the best choice
+- Increased the size of the 3.3V rail capacitor to 3300uF, within the supported parameters of the DEXU DC-DC, better noise suppression
+- Changed the USB-C port to an easier to solder one.
+- Removed some components that allowed to flash the unit without having to press a boot button, and added a boot and reset button
+- Changed the slide switch to a jumper, for safety, as it makes sure the board is depowered before changing power source
+- Changed the big electrolytic capacitors to through-hole on the bottom side of the board. Makes it easy to solder and bend flat.
+- Overall easier to assemble and cheaper to build.
+- Fits in the same case as v3.
+
 # Updated code (Jan 2026) - New Autonomous Mode
 - Added the option of using the board without any other controller or wall remote (autonomous mode). Details in "complete_example.yaml"
 - Added the option of changing read/write codes needed for some comercial systems.
