@@ -140,14 +140,14 @@ You will need to build the esphome compatible hardware. Instructions below.
 
 # Hardware design
 
-This is the schematic of the V3 board, it is powered by the AB line
+This is the schematic of the V3.2 board, it is powered by the AB line
 
-![image](hardware/v3/v3.png)
+![image](hardware/v3.2/v3_2 Schematic.png)
 
 
 It should look something like this:
 
-![image](hardware/v3/v3_3D.png)
+![image](hardware/v3.2/v3_2.png)
 
 
 I2C headers have been added for the BME280 I2C sensor option, also for future inclusion of a screen or other I2C device
