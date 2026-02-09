@@ -38,7 +38,7 @@ The two big capacitors are meant to be soldered at the back of the board and ben
 
 This is the schematic of the board.
 
-<img src="v3_2.png" width="99%">
+<img src="v3_2 Schematic.png" width="99%">
 
 # Final product
 
