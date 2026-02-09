@@ -142,12 +142,12 @@ You will need to build the esphome compatible hardware. Instructions below.
 
 This is the schematic of the V3.2 board, it is powered by the AB line
 
-<img src="v3_2 Schematic.png" width="70%">
+<img src="hardware/v3.2/v3_2 Schematic.png" width="99%">
 
 
 It should look something like this:
 
-<img src="v3_2.png" width="70%">
+<img src="hardware/v3.2/v3_2.png" width="70%">
 
 
 I2C headers have been added for the BME280 I2C sensor option, also for future inclusion of a screen or other I2C device
