@@ -73,7 +73,7 @@ external_components:
     refresh: 0s  #optional, how often to download fresh files from source, defaults to 1 day, use 0 to force updates 
 
 uart:
-  tx_pin: GPIO10  #GPIO15 if using v1 board
+  tx_pin: GPIO12  #GPIO10 if using v3 board or GPIO15 if using v1 board
   rx_pin: GPIO13
   baud_rate: 2400
   parity: EVEN
@@ -97,7 +97,7 @@ The option of a BME280 sensor is added to give the option of reading the tempera
 # If installed, it will report the BME280 temp, humidity and pressure values
 
 i2c:
-  sda: GPIO2
+  sda: GPIO4 #GPIO02 if using v3 or v1 board
   scl: GPIO14
   scan: True
 
@@ -127,7 +127,7 @@ sensor:
 
 You will need to build the esphome compatible hardware. Instructions below.
 
-- Most likely, the first time, you will have to flash the board with the firmware via USB, typical ESPHome process. Once working, OTA updates will work.
+- Most likely, the first time, you will have to flash the board with the firmware via USB, typical ESPHome process. If using v3.2 board, you will need to hold the boot button while plugging usb power for the board to boot into flashing mode. Once up and running, OTA updates will work.
   - More information on first connection here: https://esphome.io/guides/physical_device_connection/#connecting-to-the-esp
   - **While connected to USB, the board needs to have the Power Selector set to USB**
 - Isolate the AC unit completely off (at the electrical distribution board ideally)
