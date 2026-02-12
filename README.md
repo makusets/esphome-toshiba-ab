@@ -19,27 +19,6 @@ Improvements over v3:
 - Improved logs.
 - Other small changes.
 
-## TU2C short-query CRC note
-
-For observed TU2C short queries in the form:
-
-`0A:50:90:02:XX:YY:CRC`
-
-the CRC matches an 8-bit sum with a constant offset:
-
-`CRC = (sum(bytes[0..5]) - 0x42) & 0xFF`
-
-Equivalent form:
-
-`CRC = (sum(bytes[0..5]) + 0xBE) & 0xFF`
-
-Example checks:
-
-- `0A:50:90:02:49:0D -> sum=0x42 -> CRC=0x00`
-- `0A:50:90:02:41:0A -> sum=0x37 -> CRC=0xF5`
-- `0A:50:90:02:41:0F -> sum=0x3C -> CRC=0xFA`
-- `0A:50:90:02:41:10 -> sum=0x3D -> CRC=0xFB`
-
 # v3 is here!
 v3 board is here (v2 never saw the light)
 
