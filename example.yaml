@@ -37,7 +37,7 @@ captive_portal:
 
 #I2C bus for optional temperature sensor
 i2c:
-  sda: GPIO2
+  sda: GPIO4  # GPIO2 for v3 and v1 boards
   scl: GPIO14
   scan: True
 
@@ -50,11 +50,11 @@ external_components:
 
 # Serial bus for the Toshiba AB protocol
 uart:
-  tx_pin: GPIO15
+  tx_pin: GPIO12 # GPIO10 for v3 or GPIO15 for v1 board
   rx_pin: GPIO13
   baud_rate: 2400
-  parity: EVEN
-  rx_buffer_size: 2048    # increase buffer to avoid dropped bytes, optional
+  parity: EVEN 
+  rx_buffer_size: 2048    # optionally increase buffer to avoid dropped bytes
 
 climate:
   - platform: toshiba_ab
@@ -62,7 +62,8 @@ climate:
     id: toshiba_ac
     connected:
       name: "Toshiba AC Connected"  # optional, binary sensor that monitors link with AC
-    master: 0x00  # Master ID in Toshiba protocol, optional, default is 0x00, for some units needs to be set to 0x01, 0x04 and possibly others, leave blank if in doubt
+    # --- Address of the AC master ---
+    master: 0x00                # optional, will autodetect if omitted (recommended)
 
 
 
@@ -86,5 +87,6 @@ sensor:
     update_interval: 30s
 
     
+
 
 
