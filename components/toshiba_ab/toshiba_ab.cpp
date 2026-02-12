@@ -97,6 +97,27 @@ uint8_t calculate_tu2c_power_off_crc(const uint8_t *data, size_t size) {
   return static_cast<uint8_t>(sum & 0xFF);
 }
 
+uint8_t calculate_tu2c_registration_query_crc(const uint8_t *data, size_t size) {
+  // Observed for short query frames like 0A:50:90:02:49:0D:00
+  // CRC = (sum(bytes) - 0x42) & 0xFF
+  constexpr uint8_t crc_seed = 0xBE;
+  uint16_t sum = crc_seed;
+  for (size_t i = 0; i < size; i++) {
+    sum += data[i];
+  }
+  return static_cast<uint8_t>(sum & 0xFF);
+}
+
+uint8_t calculate_tu2c_keepalive_crc(const uint8_t *data, size_t size) {
+  // Observed for keepalive frames like 0C:50:90:04:41:5C:90:F3:CC
+  constexpr uint8_t crc_seed = 0xBC;
+  uint16_t sum = crc_seed;
+  for (size_t i = 0; i < size; i++) {
+    sum += data[i];
+  }
+  return static_cast<uint8_t>(sum & 0xFF);
+}
+
 bool ToshibaAbClimate::is_own_tx_echo_(const DataFrame *f) const { // used to filter out echo from our last command sent
   if (!this->last_unconfirmed_command_.has_value() || f == nullptr) return false;
   const auto &tx = this->last_unconfirmed_command_.value();  // last frame we wrote
@@ -405,6 +426,63 @@ void ToshibaAbClimate::remote_announce() {
   cmd.data[cmd.data_length] = cmd.calculate_crc();
   ESP_LOGV(TAG, "remote_announce: enqueuing announce to broadcast (0x%02X)", TOSHIBA_BROADCAST);
   this->send_command(cmd);
+}
+
+void ToshibaAbClimate::tu2c_remote_announce() {
+  DataFrame cmd{};
+  const uint8_t source = this->tu2c_remote_address_;
+  const uint8_t dest = this->tu2c_master_address_;
+
+  cmd.set_tu2c(true);
+  cmd.raw[0] = 0x0A;
+  cmd.raw[1] = source;
+  cmd.raw[2] = dest;
+  cmd.raw[3] = 0x02;
+  cmd.raw[4] = 0x49;
+  cmd.raw[5] = 0x0D;
+  cmd.raw[6] = calculate_tu2c_registration_query_crc(cmd.raw, 6);
+
+  this->send_command(cmd);
+}
+
+void ToshibaAbClimate::tu2c_send_ping() {
+  DataFrame cmd{};
+  const uint8_t source = this->tu2c_remote_address_;
+  const uint8_t dest = this->tu2c_master_address_;
+
+  cmd.set_tu2c(true);
+  cmd.raw[0] = 0x0C;
+  cmd.raw[1] = source;
+  cmd.raw[2] = dest;
+  cmd.raw[3] = 0x04;
+  cmd.raw[4] = 0x41;
+  cmd.raw[5] = 0x5C;
+  cmd.raw[6] = 0x90;
+  cmd.raw[7] = 0xF3;
+  cmd.raw[8] = calculate_tu2c_keepalive_crc(cmd.raw, 8);
+
+  this->send_command(cmd);
+}
+
+bool ToshibaAbClimate::is_tu2c_registration_ack_(const DataFrame *frame) const {
+  if (frame == nullptr || !frame->is_tu2c()) {
+    return false;
+  }
+
+  const size_t size = frame->size();
+  if (size < 7) {
+    return false;
+  }
+
+  return frame->raw[1] == this->tu2c_master_address_ && frame->raw[4] == 0x80 && frame->raw[5] == 0x0D;
+}
+
+bool ToshibaAbClimate::is_tu2c_registration_query_(const DataFrame &frame) const {
+  if (!frame.is_tu2c() || frame.size() < 7) {
+    return false;
+  }
+  return frame.raw[0] == 0x0A && frame.raw[1] == this->tu2c_remote_address_ && frame.raw[2] == this->tu2c_master_address_ &&
+         frame.raw[4] == 0x49 && frame.raw[5] == 0x0D;
 }
 
 void ToshibaAbClimate::add_polled_sensor(uint8_t id, float scale, uint32_t interval_ms, sensor::Sensor *sensor) {
@@ -754,61 +832,68 @@ void ToshibaAbClimate::setup() {
   // If autonomous mode is enabled, we need to send ping, E8 read, and external temp periodically
   // Send all these if autonomous mode is enabled using set_interval calls
   if (this->autonomous_) {
-  this->set_interval(this->ping_interval_ms_, [this]() { //30s
-    // Ping (keep-alive) from remote
-    this->send_ping();  // just enqueues; loop() will transmit
-    ESP_LOGV(TAG, "Autonomous: enqueued PING (keep-alive)");
+    if (this->data_reader.frame_format() == FrameFormat::TU2C) {
+      this->announce_ack_received_ = false;
+      this->set_interval(2000, [this]() {
+        if (!this->announce_ack_received_) {
+          ESP_LOGV(TAG, "Autonomous TU2C: sending registration query");
+          this->tu2c_remote_announce();
+        }
+      });
 
-    // Send remote temperature along with ping in the remote format (source=0x40,
-    // opcode=OPCODE_TEMPERATURE, payload: 08 81 00 <raw> 00, CRC). Prefer
-    // configured external sensor, otherwise use current target temperature,
-    // otherwise default to 20°C.
-    // This should still work if the AC is configured to use return duct temp sensor for room temp,
-    // as the value here will be disregarded by the master unit in that case.
-
-    float t = NAN;
-    if (this->ext_temp_sensor_ && this->ext_temp_sensor_->has_state()) {
-      t = this->ext_temp_sensor_->state;
-    } else if (!std::isnan(this->target_temperature)) {
-      t = this->target_temperature;
+      this->set_interval(this->ping_interval_ms_, [this]() {
+        if (this->announce_ack_received_) {
+          ESP_LOGV(TAG, "Autonomous TU2C: sending keepalive");
+          this->tu2c_send_ping();
+        }
+      });
     } else {
-      t = 20.0f;
+      this->set_interval(this->ping_interval_ms_, [this]() { //30s
+        // Ping (keep-alive) from remote
+        this->send_ping();  // just enqueues; loop() will transmit
+        ESP_LOGV(TAG, "Autonomous: enqueued PING (keep-alive)");
+
+        float t = NAN;
+        if (this->ext_temp_sensor_ && this->ext_temp_sensor_->has_state()) {
+          t = this->ext_temp_sensor_->state;
+        } else if (!std::isnan(this->target_temperature)) {
+          t = this->target_temperature;
+        } else {
+          t = 20.0f;
+        }
+
+        if (std::isfinite(t)) {
+          const uint8_t raw = temp_celcius_to_payload(t);
+          ESP_LOGV(TAG, "Autonomous: enqueuing remote temperature %.1f°C (raw=0x%02X)", t, raw);
+          DataFrame cmd{};
+          cmd.source = TOSHIBA_REMOTE;
+          cmd.dest = this->master_address_;
+          cmd.opcode1 = OPCODE_TEMPERATURE;
+          cmd.data_length = 5;
+          cmd.data[0] = this->command_mode_read_;
+          cmd.data[1] = 0x81;
+          cmd.data[2] = 0x00;
+          cmd.data[3] = raw;
+          cmd.data[4] = 0x00;
+          cmd.data[cmd.data_length] = cmd.calculate_crc();
+          this->send_command(cmd);
+          ESP_LOGV(TAG, "Autonomous: remote temperature frame enqueued (dest=0x%02X)", this->master_address_);
+        }
+      });
+      this->set_interval(this->read08_interval_ms, [this]() {
+        ESP_LOGV(TAG, "Autonomous: enqueuing read hourly counter block E8");
+        this->send_read_block(0xE8, 0x0001, 0x009E);
+      });
+
+      this->announce_ack_received_ = false;
+      this->set_interval(2000, [this]() {
+        if (!this->announce_ack_received_) {
+          ESP_LOGV(TAG, "Autonomous announce: sending broadcast announce");
+          this->remote_announce();
+        }
+      });
     }
-
-    if (std::isfinite(t)) {
-      const uint8_t raw = temp_celcius_to_payload(t);
-      ESP_LOGV(TAG, "Autonomous: enqueuing remote temperature %.1f°C (raw=0x%02X)", t, raw);
-      DataFrame cmd{};
-      cmd.source = TOSHIBA_REMOTE;                 // 0x40
-      cmd.dest = this->master_address_;
-      cmd.opcode1 = OPCODE_TEMPERATURE;            // 0x55
-      cmd.data_length = 5;                         // 08 81 00 <raw> 00
-      cmd.data[0] = this->command_mode_read_;
-      cmd.data[1] = 0x81;
-      cmd.data[2] = 0x00;
-      cmd.data[3] = raw;
-      cmd.data[4] = 0x00;
-      cmd.data[cmd.data_length] = cmd.calculate_crc();
-      this->send_command(cmd);
-      ESP_LOGV(TAG, "Autonomous: remote temperature frame enqueued (dest=0x%02X)", this->master_address_);
-    }
-    });
-  this->set_interval(this->read08_interval_ms, [this]() { // send 40:00:15:06:08:E8:00:01:00:9E:2C every min as remote does
-
-    ESP_LOGV(TAG, "Autonomous: enqueuing read hourly counter block E8");
-    this->send_read_block(0xE8, 0x0001, 0x009E);  // enqueues; loop() will transmit
-
-    });
-
-  // Announce loop: broadcast remote_announce() every 2s until an ACK with 0x0D is seen
-  this->announce_ack_received_ = false;
-  this->set_interval(2000, [this]() {
-    if (!this->announce_ack_received_) {
-      ESP_LOGV(TAG, "Autonomous announce: sending broadcast announce");
-      this->remote_announce();
-    } 
-  });
-  } 
+  }
 
   this->update_frame_validation_();
 
@@ -1156,6 +1241,13 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
       ESP_LOGI(TAG, "Auto-detected master address from TU2C keepalive: 0x%02X", source);
       this->set_master_address(source);
     }
+    return;
+  }
+
+  if (frame_length == 0x12 && this->is_tu2c_registration_ack_(frame)) {
+    log_raw_data("Master registration ACK frame", frame->raw, size);
+    ESP_LOGD(TAG, "Registration ACK from master %02X", source);
+    this->announce_ack_received_ = true;
     return;
   }
 
@@ -1527,19 +1619,24 @@ void ToshibaAbClimate::send_command(const struct DataFrame command) {
     ESP_LOGW(TAG, "Read-only mode enabled: dropping command");
     return;
   }
-  // While waiting for announce ACK, only allow the broadcast announce frame.
-  // This restriction is only relevant when autonomous mode is enabled.
-  if (this->autonomous_ && !this->announce_ack_received_) {
-    bool is_announce = false;
-    if (command.source == TOSHIBA_REMOTE && command.dest == TOSHIBA_BROADCAST &&
-        command.opcode1 == OPCODE_ERROR_HISTORY && command.data_length == 2 &&
-        command.data[1] == 0x0D) {
-      is_announce = true;
-    }
+  if (this->autonomous_) {
+    if (this->data_reader.frame_format() == FrameFormat::TU2C) {
+      if (!this->announce_ack_received_ && !this->is_tu2c_registration_query_(command)) {
+        ESP_LOGW(TAG, "Dropping TU2C command while awaiting registration ACK (autonomous mode)");
+        return;
+      }
+    } else if (!this->announce_ack_received_) {
+      bool is_announce = false;
+      if (command.source == TOSHIBA_REMOTE && command.dest == TOSHIBA_BROADCAST &&
+          command.opcode1 == OPCODE_ERROR_HISTORY && command.data_length == 2 &&
+          command.data[1] == 0x0D) {
+        is_announce = true;
+      }
 
-    if (!is_announce) {
-      ESP_LOGW(TAG, "Dropping command while awaiting announce ACK (autonomous mode)");
-      return;
+      if (!is_announce) {
+        ESP_LOGW(TAG, "Dropping command while awaiting announce ACK (autonomous mode)");
+        return;
+      }
     }
   }
 

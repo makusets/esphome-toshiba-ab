@@ -477,6 +477,10 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void send_ping();
   void send_read_block(uint8_t opcode2, uint16_t start, uint16_t length);
   void remote_announce();
+  void tu2c_remote_announce();
+  void tu2c_send_ping();
+  bool is_tu2c_registration_ack_(const DataFrame *frame) const;
+  bool is_tu2c_registration_query_(const DataFrame &frame) const;
   void set_read_only(bool en) { read_only_ = en; }
   
   // Reporting external sensor temperature to AC *************************
