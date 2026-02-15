@@ -36,6 +36,7 @@ CONF_COMMAND_MODE_READ = "command_mode_read"
 CONF_COMMAND_MODE_WRITE = "command_mode_write"
 CONF_FRAME_FORMAT = "frame_format"
 CONF_FILTER_FRAMES = "filter_frames"
+CONF_FRAME = "frame"
 
 CONF_AUTONOMOUS = "autonomous"
 CONF_READ_ONLY = "read_only"
@@ -69,6 +70,10 @@ ToshibaAbReadOnlySwitch = toshiba_ab_ns.class_(
 
 ToshibaAbOnDataReceivedTrigger = toshiba_ab_ns.class_(
     "ToshibaAbOnDataReceivedTrigger", automation.Trigger.template()
+)
+
+ToshibaAbSendRawFrameAction = toshiba_ab_ns.class_(
+    "ToshibaAbSendRawFrameAction", automation.Action
 )
 
 FrameFormat = toshiba_ab_ns.enum("FrameFormat")
@@ -217,3 +222,20 @@ async def to_code(config):
         cg.add(var.set_ext_temp_enabled(rst["enabled"]))
         cg.add(var.set_ext_temp_interval(cg.uint32(rst[CONF_INTERVAL])))
         cg.add(var.set_ext_temp_sensor_name(rst[CONF_SENSOR].id))
+
+
+@automation.register_action(
+    "toshiba_ab.send_raw_frame",
+    ToshibaAbSendRawFrameAction,
+    cv.Schema(
+        {
+            cv.Required(CONF_ID): cv.use_id(ToshibaAbClimate),
+            cv.Required(CONF_FRAME): cv.templatable(cv.string_strict),
+        }
+    ),
+)
+async def to_code_send_raw_frame(config, action_id, template_arg, args):
+    var = cg.new_Pvariable(action_id, template_arg, await cg.get_variable(config[CONF_ID]))
+    template_ = await cg.templatable(config[CONF_FRAME], args, cg.std_string)
+    cg.add(var.set_frame(template_))
+    return var
