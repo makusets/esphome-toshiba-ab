@@ -28,7 +28,7 @@ namespace esphome
 
       TEMPLATABLE_VALUE(std::string, frame)
 
-      void play(Ts... x) override {
+      void play(const Ts &... x) override {
         this->climate_->send_raw_frame_from_text(this->frame_.value(x...));
       }
 
