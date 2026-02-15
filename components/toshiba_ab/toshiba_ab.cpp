@@ -120,10 +120,41 @@ uint8_t calculate_tu2c_keepalive_crc(const uint8_t *data, size_t size) {
 }
 
 bool ToshibaAbClimate::is_own_tx_echo_(const DataFrame *f) const { // used to filter out echo from our last command sent
-  if (!this->last_unconfirmed_command_.has_value() || f == nullptr) return false;
-  const auto &tx = this->last_unconfirmed_command_.value();  // last frame we wrote
+  if (!this->last_tx_frame_for_echo_.has_value() || f == nullptr) return false;
+  if ((millis() - this->last_tx_frame_millis_) > ECHO_MATCH_WINDOW_MS) return false;
+  const auto &tx = this->last_tx_frame_for_echo_.value();  // last frame we wrote
   if (f->size() != tx.size()) return false;
   return std::memcmp(f->raw, tx.raw, f->size()) == 0;
+}
+
+void ToshibaAbClimate::remember_tx_frame_for_echo_(const uint8_t *bytes, size_t size, bool tu2c) {
+  if (bytes == nullptr || size == 0 || size > DATA_FRAME_MAX_SIZE + 3) {
+    return;
+  }
+
+  const uint8_t *payload = bytes;
+  size_t payload_size = size;
+  bool payload_tu2c = tu2c;
+
+  if (size >= 4 && bytes[0] == 0xF0 && bytes[1] == 0xF0 && bytes[size - 1] == 0xA0) {
+    payload = bytes + 2;
+    payload_size = size - 3;
+    payload_tu2c = true;
+  }
+
+  if (payload_size == 0 || payload_size > DATA_FRAME_MAX_SIZE) {
+    return;
+  }
+
+  DataFrame tx{};
+  std::memcpy(tx.raw, payload, payload_size);
+  if (tx.size() == 0 || tx.size() != payload_size) {
+    return;
+  }
+
+  tx.set_tu2c(payload_tu2c);
+  this->last_tx_frame_for_echo_ = tx;
+  this->last_tx_frame_millis_ = millis();
 }
 
 void ToshibaAbClimate::update_frame_validation_() {
@@ -1356,8 +1387,8 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
     return false;
   }
   // >>> Drop our own TX echo frames (remote-labeled, identical bytes)
-  if (frame->source == TOSHIBA_REMOTE && this->is_own_tx_echo_(frame)) {
-    ESP_LOGV(TAG, "echo detected: [%s]", frame_to_hex_string(frame).c_str());
+  if (this->is_own_tx_echo_(frame)) {
+    ESP_LOGV(TAG, "Echo detected and ignored: [%s]", frame_to_hex_string(frame).c_str());
     return true;  // swallow quietly
   }
 
@@ -1421,6 +1452,7 @@ void ToshibaAbClimate::loop() {
       }
 
       ESP_LOGD(TAG, "Write raw frame: %s", payload.c_str());
+      this->remember_tx_frame_for_echo_(raw_frame.data(), raw_frame.size(), false);
       this->write_array(raw_frame.data(), raw_frame.size());
 
       if (this->raw_write_queue_.empty() && this->write_queue_.empty()) {
@@ -1446,6 +1478,7 @@ void ToshibaAbClimate::loop() {
       last_sent_frame_millis_ = millis();
       auto frame = frame_to_send.value();
       log_data_frame("Write frame", &frame);
+      this->remember_tx_frame_for_echo_(frame.raw, frame.size(), frame.is_tu2c());
 
       auto log_tx_bytes = [this](const uint8_t *bytes, size_t size) {
         std::string payload;
