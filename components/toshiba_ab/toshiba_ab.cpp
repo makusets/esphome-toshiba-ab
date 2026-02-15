@@ -211,6 +211,27 @@ void log_raw_data(const std::string& prefix, const uint8_t raw[], size_t size) {
   ESP_LOGD("RX", "%s: %s", prefix.c_str(), res.c_str());
 }
 
+std::string frame_to_hex_string(const DataFrame *frame) {
+  if (frame == nullptr) {
+    return "";
+  }
+
+  const size_t size = frame->size();
+  std::string payload;
+  payload.reserve(size ? (size * 3 - 1) : 0);
+
+  for (size_t i = 0; i < size; i++) {
+    if (i > 0) {
+      payload += ':';
+    }
+    char buf[3];
+    std::snprintf(buf, sizeof(buf), "%02X", frame->raw[i]);
+    payload += buf;
+  }
+
+  return payload;
+}
+
 
 void write_set_parameter(struct DataFrame *command, uint8_t master_address, uint8_t command_mode_read, uint8_t opcode2,
                          uint8_t payload[], size_t payload_size) {
@@ -1336,7 +1357,7 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
   }
   // >>> Drop our own TX echo frames (remote-labeled, identical bytes)
   if (frame->source == TOSHIBA_REMOTE && this->is_own_tx_echo_(frame)) {
-    ESP_LOGV(TAG, "Ignoring TX echo of our own frame");
+    ESP_LOGV(TAG, "echo detected: [%s]", frame_to_hex_string(frame).c_str());
     return true;  // swallow quietly
   }
 
