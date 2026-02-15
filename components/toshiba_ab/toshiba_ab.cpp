@@ -1400,6 +1400,21 @@ void ToshibaAbClimate::loop() {
       last_sent_frame_millis_ = millis();
       auto frame = frame_to_send.value();
       log_data_frame("Write frame", &frame);
+
+      auto log_tx_bytes = [this](const uint8_t *bytes, size_t size) {
+        std::string payload;
+        payload.reserve(size ? (size * 3 - 1) : 0);
+        char buf[3];
+        for (size_t i = 0; i < size; i++) {
+          if (i > 0) {
+            payload += ':';
+          }
+          std::snprintf(buf, sizeof(buf), "%02X", bytes[i]);
+          payload += buf;
+        }
+        ESP_LOGV(TAG, "TX bytes: %s", payload.c_str());
+      };
+
       if (frame.is_tu2c()) {
         const size_t raw_size = frame.size();
         uint8_t tu2c_frame[DATA_FRAME_MAX_SIZE + 3];
@@ -1408,11 +1423,13 @@ void ToshibaAbClimate::loop() {
         if (raw_size + 3 <= sizeof(tu2c_frame)) {
           std::memcpy(&tu2c_frame[2], frame.raw, raw_size);
           tu2c_frame[2 + raw_size] = 0xA0;
+          log_tx_bytes(tu2c_frame, raw_size + 3);
           this->write_array(tu2c_frame, raw_size + 3);
         } else {
           ESP_LOGW(TAG, "TU2C frame too large to send (size=%u)", static_cast<unsigned>(raw_size));
         }
       } else {
+        log_tx_bytes(frame.raw, frame.size());
         this->write_array(frame.raw, frame.size());
       }
 
