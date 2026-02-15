@@ -7,6 +7,7 @@
 #include "esphome/components/uart/uart.h"
 #include <algorithm>
 #include <bitset>
+#include <cctype>
 #include <queue>
 
 namespace esphome {
@@ -470,6 +471,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_failed_crcs_sensor(sensor::Sensor *failed_crcs_sensor) { this->failed_crcs_sensor_ = failed_crcs_sensor; }
 
   void send_command(struct DataFrame command);
+  bool send_raw_frame_from_text(const std::string &frame_text);
   
   // Autonomous mode **********************************
   
@@ -582,6 +584,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   uint32_t last_received_frame_millis_ = 0;
   uint32_t last_sent_frame_millis_ = 0;
   std::queue<DataFrame> write_queue_;
+  std::queue<std::vector<uint8_t>> raw_write_queue_;
   optional<DataFrame> last_unconfirmed_command_;
   uint8_t last_unconfirmed_command_attempts_{0};
   bool resend_last_unconfirmed_command_{false};

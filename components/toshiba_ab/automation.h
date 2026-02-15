@@ -22,5 +22,19 @@ namespace esphome
       }
     };
 
+    template<typename... Ts> class ToshibaAbSendRawFrameAction : public Action<Ts...> {
+     public:
+      ToshibaAbSendRawFrameAction(ToshibaAbClimate *climate) : climate_(climate) {}
+
+      TEMPLATABLE_VALUE(std::string, frame)
+
+      void play(const Ts &... x) override {
+        this->climate_->send_raw_frame_from_text(this->frame_.value(x...));
+      }
+
+     protected:
+      ToshibaAbClimate *climate_;
+    };
+
   } // namespace toshiba_ab
 } // namespace esphome
