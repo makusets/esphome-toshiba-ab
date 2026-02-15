@@ -525,6 +525,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   size_t send_new_state(const struct TccState *new_state);
   void sync_from_received_state();
   bool is_own_tx_echo_(const DataFrame *f) const; //used to filter echo after sending frame
+  void remember_tx_frame_for_echo_(const uint8_t *bytes, size_t size, bool tu2c);
   void update_frame_validation_();
 
 
@@ -588,6 +589,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   optional<DataFrame> last_unconfirmed_command_;
   uint8_t last_unconfirmed_command_attempts_{0};
   bool resend_last_unconfirmed_command_{false};
+  optional<DataFrame> last_tx_frame_for_echo_;
+  uint32_t last_tx_frame_millis_{0};
+  static const uint32_t ECHO_MATCH_WINDOW_MS = 1500;
 
   static const uint8_t MAX_COMMAND_SEND_ATTEMPTS = 5;
 
