@@ -2,6 +2,7 @@
 #include "esphome.h"
 #include <inttypes.h>
 #include <cstring>
+#include <cstdlib>
 
 
 namespace esphome {
@@ -1382,6 +1383,30 @@ void ToshibaAbClimate::loop() {
       }
     }
 
+    if (!frame_to_send.has_value() && !this->raw_write_queue_.empty()) {
+      last_sent_frame_millis_ = millis();
+      auto raw_frame = this->raw_write_queue_.front();
+      this->raw_write_queue_.pop();
+
+      std::string payload;
+      payload.reserve(raw_frame.empty() ? 0 : raw_frame.size() * 3 - 1);
+      char buf[3];
+      for (size_t i = 0; i < raw_frame.size(); i++) {
+        if (i > 0) {
+          payload += ':';
+        }
+        std::snprintf(buf, sizeof(buf), "%02X", raw_frame[i]);
+        payload += buf;
+      }
+
+      ESP_LOGD(TAG, "Write raw frame: %s", payload.c_str());
+      this->write_array(raw_frame.data(), raw_frame.size());
+
+      if (this->raw_write_queue_.empty() && this->write_queue_.empty()) {
+        ESP_LOGD(TAG, "All frames written");
+      }
+    }
+
     if (!frame_to_send.has_value() && !this->last_unconfirmed_command_.has_value() && !this->write_queue_.empty()) {
       frame_to_send = this->write_queue_.front();
       this->write_queue_.pop();
@@ -1659,6 +1684,65 @@ void ToshibaAbClimate::send_command(const struct DataFrame command) {
 
   log_data_frame("Enqueue command", &command);
   this->write_queue_.push(command);
+}
+
+bool ToshibaAbClimate::send_raw_frame_from_text(const std::string &frame_text) {
+  std::vector<uint8_t> raw_frame;
+  raw_frame.reserve(frame_text.size() / 2 + 1);
+
+  auto is_hex = [](char c) { return std::isxdigit(static_cast<unsigned char>(c)) != 0; };
+
+  size_t i = 0;
+  while (i < frame_text.size()) {
+    while (i < frame_text.size() && std::isspace(static_cast<unsigned char>(frame_text[i])) != 0) {
+      i++;
+    }
+
+    if (i >= frame_text.size()) {
+      break;
+    }
+
+    if (i + 1 >= frame_text.size() || !is_hex(frame_text[i]) || !is_hex(frame_text[i + 1])) {
+      ESP_LOGW(TAG, "Invalid raw frame format at position %u: %s", static_cast<unsigned>(i), frame_text.c_str());
+      return false;
+    }
+
+    const std::string byte_str = frame_text.substr(i, 2);
+    raw_frame.push_back(static_cast<uint8_t>(std::strtoul(byte_str.c_str(), nullptr, 16)));
+    i += 2;
+
+    while (i < frame_text.size() && std::isspace(static_cast<unsigned char>(frame_text[i])) != 0) {
+      i++;
+    }
+
+    if (i < frame_text.size()) {
+      if (frame_text[i] != ':') {
+        ESP_LOGW(TAG, "Invalid raw frame separator at position %u: %s", static_cast<unsigned>(i), frame_text.c_str());
+        return false;
+      }
+      i++;
+    }
+  }
+
+  if (raw_frame.empty()) {
+    ESP_LOGW(TAG, "Raw frame is empty, nothing queued");
+    return false;
+  }
+
+  std::string payload;
+  payload.reserve(raw_frame.size() * 3 - 1);
+  char buf[3];
+  for (size_t idx = 0; idx < raw_frame.size(); idx++) {
+    if (idx > 0) {
+      payload += ':';
+    }
+    std::snprintf(buf, sizeof(buf), "%02X", raw_frame[idx]);
+    payload += buf;
+  }
+
+  ESP_LOGI(TAG, "Queue raw frame from HA: %s", payload.c_str());
+  this->raw_write_queue_.push(std::move(raw_frame));
+  return true;
 }
 
 bool ToshibaAbClimate::control_vent(bool state) {
