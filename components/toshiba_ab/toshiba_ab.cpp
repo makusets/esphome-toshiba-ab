@@ -798,7 +798,7 @@ uint8_t decode_status_mode(const uint8_t mode_power, const bool tu2c_frame) {
 
 climate::ClimateFanMode to_climate_fan(const struct TccState *state) {
   if (state->power == 0)
-    return climate::CLIMATE_FAN_OFF;
+    return climate::CLIMATE_FAN_AUTO;
 
   switch (state->fan) {
     case FAN_PEED_AUTO:
@@ -827,7 +827,6 @@ ToshibaAbClimate::ToshibaAbClimate() {
       climate::CLIMATE_MODE_HEAT_COOL,
   });
   this->traits_.set_supported_fan_modes({
-      climate::CLIMATE_FAN_OFF,
       climate::CLIMATE_FAN_AUTO,
       climate::CLIMATE_FAN_LOW,
       climate::CLIMATE_FAN_MEDIUM,
