@@ -520,6 +520,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void process_received_data(const struct DataFrame *frame);
   void process_received_data_tu2c_(const struct DataFrame *frame);
   bool is_ack_for_pending_command_(const DataFrame *frame) const;
+  bool is_tu2c_command_ack_frame_(const DataFrame *frame) const;
+  bool should_track_tu2c_command_ack_(const DataFrame &frame) const;
   bool should_track_command_ack_(const DataFrame &frame) const;
   void handle_pending_command_ack_(const DataFrame *frame);
   size_t send_new_state(const struct TccState *new_state);
