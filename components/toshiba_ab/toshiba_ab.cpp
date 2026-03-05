@@ -169,9 +169,16 @@ bool ToshibaAbClimate::is_ack_for_pending_command_(const DataFrame *frame) const
   }
   const auto &pending = this->last_unconfirmed_command_.value();
 
-  // ACK/retry logic is only for classic TCCLink frames, not TU2C.
   if (frame->is_tu2c() || pending.is_tu2c()) {
-    return false;
+    if (!frame->is_tu2c() || !pending.is_tu2c()) {
+      return false;
+    }
+
+    if (frame->raw[1] != pending.raw[2] || frame->raw[2] != pending.raw[1]) {
+      return false;
+    }
+
+    return this->is_tu2c_command_ack_frame_(frame);
   }
 
   if (frame->source != pending.dest || frame->dest != pending.source) {
@@ -185,9 +192,39 @@ bool ToshibaAbClimate::is_ack_for_pending_command_(const DataFrame *frame) const
   return frame->data[0] == this->command_mode_write_ && frame->data[1] == OPCODE2_PARAM_ACK;
 }
 
+bool ToshibaAbClimate::is_tu2c_command_ack_frame_(const DataFrame *frame) const {
+  if (frame == nullptr || !frame->is_tu2c()) {
+    return false;
+  }
+
+  const size_t size = frame->size();
+  if (size < 7) {
+    return false;
+  }
+
+  return frame->raw[0] == 0x0A && frame->raw[4] == 0x80 && frame->raw[5] == 0xA1;
+}
+
+bool ToshibaAbClimate::should_track_tu2c_command_ack_(const DataFrame &frame) const {
+  if (!frame.is_tu2c() || frame.size() < 7) {
+    return false;
+  }
+
+  if (frame.raw[1] != this->tu2c_remote_address_ || frame.raw[2] != this->tu2c_master_address_) {
+    return false;
+  }
+
+  if (frame.raw[4] != 0x01) {
+    return false;
+  }
+
+  // Track ACKs for TU2C write commands (currently power-off and set-parameter flags).
+  return frame.raw[5] == 0x21 || frame.raw[5] == 0x2C;
+}
+
 bool ToshibaAbClimate::should_track_command_ack_(const DataFrame &frame) const {
   if (frame.is_tu2c()) {
-    return false;
+    return this->should_track_tu2c_command_ack_(frame);
   }
 
   if (frame.opcode1 != OPCODE_PARAMETER || frame.data_length < 2) {
@@ -1392,10 +1429,7 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
     return true;  // swallow quietly
   }
 
-  if (this->last_unconfirmed_command_.has_value() && !frame->is_tu2c() &&
-      !this->last_unconfirmed_command_->is_tu2c() && !this->is_ack_for_pending_command_(frame)) {
-    this->resend_last_unconfirmed_command_ = true;
-  }
+  this->handle_pending_command_ack_(frame);
 
   // still notify any listeners of real frames
   this->set_data_received_callback_.call(frame);
@@ -1429,9 +1463,15 @@ void ToshibaAbClimate::loop() {
         frame_to_send = this->last_unconfirmed_command_.value();
         this->last_unconfirmed_command_attempts_++;
         this->resend_last_unconfirmed_command_ = false;
-        ESP_LOGW(TAG, "Resending command opcode 0x%02X (attempt %u/%u)", frame_to_send->opcode1,
-                 static_cast<unsigned>(this->last_unconfirmed_command_attempts_),
-                 static_cast<unsigned>(MAX_COMMAND_SEND_ATTEMPTS));
+        if (frame_to_send->is_tu2c()) {
+          ESP_LOGD(TAG, "Resending TU2C command (attempt %u/%u)",
+                   static_cast<unsigned>(this->last_unconfirmed_command_attempts_),
+                   static_cast<unsigned>(MAX_COMMAND_SEND_ATTEMPTS));
+        } else {
+          ESP_LOGD(TAG, "Resending command opcode 0x%02X (attempt %u/%u)", frame_to_send->opcode1,
+                   static_cast<unsigned>(this->last_unconfirmed_command_attempts_),
+                   static_cast<unsigned>(MAX_COMMAND_SEND_ATTEMPTS));
+        }
       }
     }
 
