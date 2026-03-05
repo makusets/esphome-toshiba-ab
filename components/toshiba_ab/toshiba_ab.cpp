@@ -1367,12 +1367,16 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
   }
 
   if (dest == 0xFF && payload_available >= STATUS_DATA_TARGET_TEMP_BYTE + 1) {
-    if (frame->raw[payload_offset] != 0xC0 || frame->raw[payload_offset + 1] != 0x38) {
+    const uint8_t status_group = frame->raw[payload_offset];
+    const bool is_status_frame = status_group == 0xC0;
+    const bool is_extended_status_frame = status_group == 0xA0;
+
+    if ((!is_status_frame && !is_extended_status_frame) || frame->raw[payload_offset + 1] != 0x38) {
       log_raw_data("TU2C data", frame->raw, size);
       return;
     }
     const uint8_t *payload = &frame->raw[payload_offset];
-    log_raw_data("TU2C status", frame->raw, size);
+    log_raw_data(is_extended_status_frame ? "TU2C extended status" : "TU2C status", frame->raw, size);
     tcc_state.power = (payload[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_POWER_MASK);
     tcc_state.mode = decode_status_mode(payload[STATUS_DATA_MODEPOWER_BYTE], true);
     tcc_state.fan = (payload[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_FAN_MASK) >> STATUS_DATA_FAN_SHIFT_BITS;
@@ -1391,7 +1395,8 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
     tcc_state.filter_alert = (payload[STATUS_DATA_FLAGS_BYTE] & 0b10000000) >> 7;
 
     ESP_LOGD(TAG,
-             "TU2C status: power=%d mode=%02X fan=%02X vent=%02X target=%.1f room=%.1f preheat=%d filter=%d",
+             "TU2C %sstatus: power=%d mode=%02X fan=%02X vent=%02X target=%.1f room=%.1f preheat=%d filter=%d",
+             is_extended_status_frame ? "extended " : "",
              tcc_state.power, tcc_state.mode, tcc_state.fan, tcc_state.vent, tcc_state.target_temp,
              tcc_state.room_temp, tcc_state.preheating, tcc_state.filter_alert);
     sync_from_received_state();
