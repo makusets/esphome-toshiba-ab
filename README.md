@@ -22,6 +22,8 @@ Improvements over v3:
 - Overall easier to assemble and cheaper to build.
 - Fits in the same case as v3.
 
+<img src="hardware/v3.2/v3_2.png" width="30%">
+
 # Updated code (Jan 2026) - New Autonomous Mode
 - Added the option of using the board without any other controller or wall remote (autonomous mode). Details in "complete_example.yaml"
 - Added the option of changing read/write codes needed for some comercial systems.
