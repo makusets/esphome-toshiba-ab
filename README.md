@@ -1,3 +1,12 @@
+# D1 mini board variant
+
+In collaboration with @issalig, the initial developer of this project, we have designed a simpler board to be used with a D1 mini.
+
+- The board will work with this code or with @issalig code.
+- UART pins are different. RX: D7 / TX: D8
+- Have a look at issalig project: https://github.com/issalig/toshiba_air_cond
+- Files here: https://github.com/makusets/esphome-toshiba-ab/tree/main/hardware/D1%20mini
+
 # v3.2 is here!
 
 Improvements over v3:
