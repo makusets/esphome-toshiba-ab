@@ -56,7 +56,14 @@ The circuit board was designed in easyEDA and all necessary files are included h
 
 Most of the work is based on previous work, hard bits of decoding and initial board design by @issalig https://github.com/issalig/toshiba_air_cond and an initial esphome component from @muxa: https://github.com/muxa/esphome-tcc-link
 
+## Toshiba protocol compatibility
 
+Toshiba system using the AB line communications system emply at least two known protocol variations. This project was initially designed and tested for the initial TCC-Link protocol. The compatibilty with the newer TU2C protocol variant is a work-in-progress and is not yet finalised. If your system model name includes a "U", it will most likely use the newer TU2C. For example: RAS-M16U2MUVG or M07U2DVG-E
+
+Toshiba explains that the protocol in newer units can be changed back to TCC-Link, from the unit mainboard or in cases by using the DN Code "FC" and setting it back to "0000". But I have not tested it.
+For more info see: https://github.com/makusets/esphome-toshiba-ab/blob/main/50598241NOTICE2.pdf
+
+If you want to help test the TU2C protocol, see: https://github.com/makusets/esphome-toshiba-ab/issues/24
 
 ## To install, add or modify these sections in your esphome device yaml file
 
