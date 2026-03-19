@@ -7,6 +7,9 @@ In collaboration with @issalig, the initial developer of this project, we have d
 - Have a look at issalig project: https://github.com/issalig/toshiba_air_cond
 - Files here: https://github.com/makusets/esphome-toshiba-ab/tree/main/hardware/D1%20mini
 
+<img src="hardware/D1%20mini/D1Mini.JPG" width="30%">
+
+
 # v3.2 is here!
 
 Improvements over v3:
