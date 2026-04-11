@@ -1,5 +1,6 @@
 #include "toshiba_ab.h"
 #include "esphome.h"
+#include "esphome/components/network/util.h"
 #include <inttypes.h>
 #include <cstring>
 #include <cstdlib>
@@ -276,7 +277,7 @@ void log_raw_data(const std::string& prefix, const uint8_t raw[], size_t size) {
     std::snprintf(buf, sizeof(buf), "%02X", raw[i]);
     res += buf;
   }
-  ESP_LOGD("RX", "%s: %s", prefix.c_str(), res.c_str());
+  ESP_LOGV("RX", "%s: %s", prefix.c_str(), res.c_str());
 }
 
 std::string frame_to_hex_string(const DataFrame *frame) {
@@ -889,6 +890,7 @@ void ToshibaAbClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "  Command mode read: 0x%02X", this->command_mode_read_);
   ESP_LOGCONFIG(TAG, "  Command mode write: 0x%02X", this->command_mode_write_);
   ESP_LOGCONFIG(TAG, "  Frame format: %s",
+                this->data_reader.frame_format() == FrameFormat::A0 ? "A0-protocol" :
                 this->data_reader.frame_format() == FrameFormat::TU2C ? "TU2C (U series)" : "TCC-Link");
   ESP_LOGCONFIG(TAG, "  Filter frames: %s", this->filter_frames_ ? "true" : "false");
   ESP_LOGCONFIG(TAG, "  Autonomous mode: %s", this->autonomous_ ? "true" : "false");
@@ -912,6 +914,20 @@ void ToshibaAbClimate::setup() {
     this->failed_crcs_sensor_->publish_state(0);
   }
   ESP_LOGD("toshiba", "Setting up ToshibaClimate...");
+
+  // Override traits for Estia heat pump
+  if (this->data_reader.frame_format() == FrameFormat::A0) {
+    this->traits_.set_supported_modes({
+        climate::CLIMATE_MODE_OFF,
+        climate::CLIMATE_MODE_HEAT,
+        climate::CLIMATE_MODE_COOL,
+    });
+    this->traits_.set_supported_fan_modes({});
+    this->traits_.set_supported_swing_modes({});
+    this->traits_.set_visual_min_temperature(20);
+    this->traits_.set_visual_max_temperature(65);
+    this->traits_.set_visual_temperature_step(0.5);
+  }
   
 
 
@@ -921,7 +937,9 @@ void ToshibaAbClimate::setup() {
   // If autonomous mode is enabled, we need to send ping, E8 read, and external temp periodically
   // Send all these if autonomous mode is enabled using set_interval calls
   if (this->autonomous_) {
-    if (this->data_reader.frame_format() == FrameFormat::TU2C) {
+    if (this->data_reader.frame_format() == FrameFormat::A0) {
+      // Estia polling is handled in loop() so it respects runtime autonomous_ toggle
+    } else if (this->data_reader.frame_format() == FrameFormat::TU2C) {
       this->announce_ack_received_ = false;
       this->set_interval(2000, [this]() {
         if (!this->announce_ack_received_) {
@@ -1417,6 +1435,438 @@ bool ToshibaAbClimate::receive_data(const std::vector<uint8_t> data) {
 }
 
 bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
+  if (frame->is_estia()) {
+    // Estia A0-protocol: CRC-16/MCRF4XX
+    size_t fsz = frame->estia_size();
+    if (!frame->validate_estia_crc()) {
+      ESP_LOGD(TAG, "CRC FAIL (recv=0x%04X calc=0x%04X size=%d)",
+               frame->estia_crc_received(), frame->calculate_estia_crc(), fsz);
+      // Dump full frame with decode attempt
+      {
+        std::string hex;
+        char hbuf[4];
+        // Reconstruct full frame with A0:00 prefix
+        hex += "A0:00:";
+        for (size_t i = 0; i < fsz; i++) {
+          if (i > 0) hex += ':';
+          snprintf(hbuf, sizeof(hbuf), "%02X", frame->raw[i]);
+          hex += hbuf;
+        }
+        ESP_LOGD(TAG, "  raw: %s", hex.c_str());
+
+        uint8_t ft = frame->raw[0];
+        uint8_t fl = frame->raw[1];
+        const char *type_name = "???";
+        switch (ft) {
+          case 0x10: type_name = "HEARTBEAT"; break;
+          case 0x11: type_name = "COMMAND"; break;
+          case 0x15: type_name = "DATA_REQ"; break;
+          case 0x18: type_name = "ACK/RESP"; break;
+          case 0x1C: type_name = "STATE_CHG"; break;
+          case 0x55: type_name = "STATUS_SHORT"; break;
+          case 0x58: type_name = "STATUS"; break;
+        }
+        uint16_t src = (fsz > 4) ? ((frame->raw[3] << 8) | frame->raw[4]) : 0;
+        uint16_t dst = (fsz > 6) ? ((frame->raw[5] << 8) | frame->raw[6]) : 0;
+        const char *src_name = "???";
+        if (src == 0x0800) src_name = "MASTER";
+        else if (src == 0x0040) src_name = "REMOTE";
+        else if (src == 0x0041) src_name = "0-10V";
+        else if (src == 0x0390) src_name = "KNX-GW";
+        const char *dst_name = "???";
+        if (dst == 0x0800) dst_name = "MASTER";
+        else if (dst == 0x0040) dst_name = "REMOTE";
+        else if (dst == 0x0041) dst_name = "0-10V";
+        else if (dst == 0x00FE) dst_name = "BROADCAST";
+        else if (dst == 0x0390) dst_name = "KNX-GW";
+        ESP_LOGD(TAG, "  type=0x%02X(%s) len=%u src=0x%04X(%s) dst=0x%04X(%s)",
+                 ft, type_name, fl, src, src_name, dst, dst_name);
+        if (fsz > 8) {
+          ESP_LOGD(TAG, "  dtype=%02X:%02X", frame->raw[7], frame->raw[8]);
+        }
+      }
+      if (this->failed_crcs_sensor_ != nullptr) {
+        this->failed_crcs_sensor_->publish_state(this->failed_crcs_sensor_->state + 1);
+      }
+      return false;
+    }
+    uint8_t frame_type = frame->raw[0];
+    uint8_t frame_len = frame->raw[1];
+    ESP_LOGV(TAG, "RX frame: type=0x%02X len=%d src=0x%02X%02X dst=0x%02X%02X",
+             frame_type, frame_len,
+             frame->raw[3], frame->raw[4],
+             frame->raw[5], frame->raw[6]);
+    log_raw_data("Estia", frame->raw, fsz);
+
+    // Verbose decode of all Estia frames
+    {
+      uint16_t src_addr = (frame->raw[3] << 8) | frame->raw[4];
+      uint16_t dst_addr = (frame->raw[5] << 8) | frame->raw[6];
+      uint16_t dtype = (frame_len >= 7) ? ((frame->raw[7] << 8) | frame->raw[8]) : 0;
+
+      const char *src_name = "???";
+      if (src_addr == 0x0800) src_name = "MASTER";
+      else if (src_addr == 0x0040) src_name = "REMOTE";
+      else if (src_addr == 0x0041) src_name = "0-10V";
+      else if (src_addr == 0x0390) src_name = "KNX-GW";
+
+      const char *dst_name = "???";
+      if (dst_addr == 0x0800) dst_name = "MASTER";
+      else if (dst_addr == 0x0040) dst_name = "REMOTE";
+      else if (dst_addr == 0x0041) dst_name = "0-10V";
+      else if (dst_addr == 0x00FE) dst_name = "BROADCAST";
+      else if (dst_addr == 0x0390) dst_name = "KNX-GW";
+
+      const char *type_name = "???";
+      switch (frame_type) {
+        case 0x10: type_name = "HEARTBEAT"; break;
+        case 0x11: type_name = "COMMAND"; break;
+        case 0x15: type_name = "DATA_REQ"; break;
+        case 0x18: type_name = "ACK/DATA_RESP"; break;
+        case 0x1C: type_name = "STATE_CHANGE"; break;
+        case 0x55: type_name = "STATUS_SHORT"; break;
+        case 0x58: type_name = "STATUS"; break;
+      }
+
+      ESP_LOGV(TAG, "  %s(0x%02X) %s(0x%04X)->%s(0x%04X) dtype=%02X:%02X",
+               type_name, frame_type, src_name, src_addr, dst_name, dst_addr,
+               frame->raw[7], frame->raw[8]);
+
+      // Decode known dtype payloads
+      if (dtype == 0x03C6 && frame_len >= 15) {
+        // Status/state change with temperatures
+        uint8_t flags = frame->raw[9];
+        float current = frame->raw[12] / 2.0f - 16.0f;
+        float setpoint = frame->raw[13] / 2.0f - 16.0f;
+        float outdoor = frame->raw[14] / 2.0f - 16.0f;
+        ESP_LOGV(TAG, "    flags=0x%02X [%s%s%s] mode=0x%02X unknown=0x%02X",
+                 flags,
+                 (flags & 0x01) ? "POWER " : "",
+                 (flags & 0x20) ? "COOL " : "",
+                 (flags & 0x40) ? "HEAT " : "",
+                 frame->raw[10], frame->raw[11]);
+        ESP_LOGV(TAG, "    current=%.1f°C(0x%02X) setpoint=%.1f°C(0x%02X) outdoor=%.1f°C(0x%02X)",
+                 current, frame->raw[12], setpoint, frame->raw[13], outdoor, frame->raw[14]);
+        if (frame_len >= 18) {
+          float r15 = frame->raw[15] / 2.0f - 16.0f;
+          float r16 = frame->raw[16] / 2.0f - 16.0f;
+          float r17 = frame->raw[17] / 2.0f - 16.0f;
+          ESP_LOGV(TAG, "    repeat: [15]=%.1f°C(0x%02X) [16]=%.1f°C(0x%02X) [17]=%.1f°C(0x%02X)",
+                   r15, frame->raw[15], r16, frame->raw[16], r17, frame->raw[17]);
+        }
+      } else if (dtype == 0x03C1 && frame_len >= 10) {
+        // Setpoint command
+        uint8_t subcmd = frame->raw[9];
+        uint8_t temp_enc = frame->raw[10];
+        float temp = temp_enc / 2.0f - 16.0f;
+        ESP_LOGV(TAG, "    SETPOINT %s temp=%.1f°C(0x%02X)",
+                 subcmd == 0x01 ? "COOL" : "HEAT", temp, temp_enc);
+      } else if (dtype == 0x03C0) {
+        // Mode command
+        uint8_t cmd = frame->raw[9];
+        ESP_LOGV(TAG, "    MODE %s(0x%02X)", cmd == 0x01 ? "COOL" : (cmd == 0x02 ? "HEAT" : "???"), cmd);
+      } else if (dtype == 0x0041) {
+        // Power command
+        uint8_t cmd = frame->raw[9];
+        ESP_LOGV(TAG, "    POWER %s(0x%02X)", cmd == 0x23 ? "ON" : (cmd == 0x22 ? "OFF" : "???"), cmd);
+      } else if (dtype == 0x00A1) {
+        // ACK — decode what was acknowledged
+        uint8_t ack_d1 = frame->raw[9];
+        uint8_t ack_d2 = frame->raw[10];
+        const char *ack_what = "???";
+        if (ack_d1 == 0x03 && ack_d2 == 0xC0) ack_what = "MODE";
+        else if (ack_d1 == 0x03 && ack_d2 == 0xC1) ack_what = "SETPOINT";
+        else if (ack_d1 == 0x00 && ack_d2 == 0x41) ack_what = "POWER";
+        else if (ack_d1 == 0x00 && ack_d2 == 0x5F) ack_what = "DEMAND";
+        ESP_LOGV(TAG, "    ACK for %s(%02X:%02X)", ack_what, ack_d1, ack_d2);
+      } else if (dtype == 0x005F) {
+        // 0-10V demand command
+        uint8_t demand = frame->raw[9];
+        ESP_LOGV(TAG, "    DEMAND cmd=%u/15 -> setpoint=%d°C", demand, demand > 0 ? 10 + demand * 3 : 20);
+      } else if (dtype == 0x009F) {
+        // 0-10V status
+        uint8_t demand = frame->raw[10];
+        uint8_t min_temp = frame->raw[11];
+        ESP_LOGV(TAG, "    DEMAND status=%u/15 min_temp=%u°C -> setpoint=%d°C",
+                 demand, min_temp, demand > 0 ? 10 + demand * 3 : 20);
+      } else if (dtype == 0x00E8 && frame_len >= 10) {
+        uint8_t subtype = frame->raw[9];
+        if (frame_type == 0x15) {
+          ESP_LOGV(TAG, "    DATA_REQ E8:%02X (%s)", subtype,
+                   subtype == 0xC0 ? "temperatures" : (subtype == 0xC1 ? "operating hours" : "???"));
+        } else if (frame_type == 0x18 && subtype == 0xC1 && frame_len >= 26) {
+          uint16_t comp_h = (frame->raw[18] << 8) | frame->raw[19];
+          uint16_t pump_h = (frame->raw[20] << 8) | frame->raw[21];
+          uint16_t heat_h = (frame->raw[26] << 8) | frame->raw[27];
+          ESP_LOGV(TAG, "    E8:C1 compressor=%uh waterpump=%uh backup_heater=%uh", comp_h, pump_h, heat_h);
+          // Dump all data bytes for further analysis
+          std::string data_hex;
+          char hbuf[4];
+          for (size_t i = 12; i < fsz - 2; i++) {
+            snprintf(hbuf, sizeof(hbuf), "%02X ", frame->raw[i]);
+            data_hex += hbuf;
+          }
+          ESP_LOGV(TAG, "    E8:C1 data[12..]: %s", data_hex.c_str());
+        } else if (frame_type == 0x18 && subtype == 0xC0) {
+          // E8:C0 temperature response — dump all bytes with temp decode attempt
+          std::string decode;
+          char dbuf[32];
+          for (size_t i = 12; i < fsz - 2; i++) {
+            float t = frame->raw[i] / 2.0f - 16.0f;
+            snprintf(dbuf, sizeof(dbuf), "[%zu]=0x%02X(%.1f°C) ", i, frame->raw[i], t);
+            decode += dbuf;
+          }
+          ESP_LOGV(TAG, "    E8:C0 data: %s", decode.c_str());
+        }
+      } else if (frame_type == 0x10) {
+        // Heartbeat — just note it
+        ESP_LOGV(TAG, "    heartbeat from master");
+      } else if (dtype == 0x0049 || (frame_len >= 8 && frame->raw[8] == 0x49)) {
+        // Possible error/alarm frame
+        ESP_LOGV(TAG, "    ALARM/ERROR dtype=%02X:%02X", frame->raw[7], frame->raw[8]);
+        for (size_t i = 9; i < fsz - 2 && i < (size_t)(frame_len + 2); i++) {
+          ESP_LOGV(TAG, "    data[%zu]=0x%02X", i, frame->raw[i]);
+        }
+      } else {
+        // Unknown dtype — dump payload
+        if (frame_len > 7) {
+          std::string payload_hex;
+          char pbuf[4];
+          for (size_t i = 9; i < fsz - 2; i++) {
+            snprintf(pbuf, sizeof(pbuf), "%02X ", frame->raw[i]);
+            payload_hex += pbuf;
+          }
+          ESP_LOGV(TAG, "    payload: %s", payload_hex.c_str());
+        }
+      }
+    }
+
+    // Heartbeat (0x10) — mark as connected
+    if (frame_type == 0x10) {
+      last_master_alive_millis_ = millis();
+      if (this->connected_binary_sensor_) {
+        this->connected_binary_sensor_->publish_state(true);
+      }
+    }
+
+    // Master Status broadcast (0x58) with dtype 03:C6 — main status with temperatures
+    // Layout after A0:00 prefix (raw[]):
+    //   [0]=type [1]=len [2]=00 [3:4]=src [5:6]=dst
+    //   [7:8]=dtype(03:C6) [9]=flags [10]=mode [11]=???
+    //   [12]=current_temp [13]=setpoint [14]=outdoor_temp
+    //   [15:17]=repeat of [12:14]
+    if (frame_type == 0x58 && frame_len >= 15 && frame->raw[7] == 0x03 && frame->raw[8] == 0xC6) {
+      uint8_t flags = frame->raw[9];
+      uint8_t estia_mode = frame->raw[10];
+      float current_temp = frame->raw[12] / 2.0f - 16.0f;
+      float setpoint = frame->raw[13] / 2.0f - 16.0f;
+      float outdoor_temp = frame->raw[14] / 2.0f - 16.0f;
+
+      bool power_on = (flags & 0x01) != 0;
+      bool is_cooling = (flags & 0x20) != 0;
+      bool is_heating = (flags & 0x40) != 0;
+
+      ESP_LOGV(TAG, "Status: power=%s flags=0x%02X %s current=%.1f°C setpoint=%.1f°C outdoor=%.1f°C",
+               power_on ? "ON" : "OFF", flags,
+               is_cooling ? "COOL" : (is_heating ? "HEAT" : "???"),
+               current_temp, setpoint, outdoor_temp);
+
+      // Initial status on first 0x58 after network is ready
+      if (!estia_was_connected_ && network::is_connected()) {
+        const char *mode_str = is_cooling ? "COOL" : (is_heating ? "HEAT" : "???");
+        ESP_LOGI(TAG, "Heat pump connected — power: %s, mode: %s, setpoint: %.1f°C, current: %.1f°C, outdoor: %.1f°C",
+                 power_on ? "ON" : "OFF", mode_str, setpoint, current_temp, outdoor_temp);
+        estia_was_connected_ = true;
+      }
+
+      int changes = 0;
+
+      // Mode
+      climate::ClimateMode new_mode;
+      if (!power_on) {
+        new_mode = climate::CLIMATE_MODE_OFF;
+      } else if (is_cooling) {
+        new_mode = climate::CLIMATE_MODE_COOL;
+      } else {
+        new_mode = climate::CLIMATE_MODE_HEAT;
+      }
+      if (this->mode != new_mode) {
+        const char *mode_str = (new_mode == climate::CLIMATE_MODE_OFF) ? "OFF" :
+                               (new_mode == climate::CLIMATE_MODE_COOL) ? "COOL" : "HEAT";
+        ESP_LOGI(TAG, "Status: mode=%s", mode_str);
+        this->mode = new_mode;
+        changes++;
+      }
+
+      // Target temperature
+      if (this->target_temperature != setpoint) {
+        ESP_LOGI(TAG, "Status: setpoint zone 1=%.1f°C", setpoint);
+        this->target_temperature = setpoint;
+        changes++;
+      }
+
+      // Current temperature (Vorlauf)
+      if (this->current_temperature != current_temp) {
+        this->current_temperature = current_temp;
+        changes++;
+      }
+
+      // Track last active mode for power-on with mode change
+      if (power_on) {
+        estia_last_active_mode_ = new_mode;
+      }
+
+      if (changes > 0) {
+        this->publish_state();
+      }
+
+      // Outdoor temperature sensor
+      if (this->outdoor_temp_sensor_ != nullptr) {
+        this->outdoor_temp_sensor_->publish_state(outdoor_temp);
+      }
+
+      last_master_alive_millis_ = millis();
+      if (this->connected_binary_sensor_) {
+        this->connected_binary_sensor_->publish_state(true);
+      }
+    }
+
+    // State change broadcast (0x1C) with dtype 03:C6 — immediate update after power/mode/setpoint change
+    // Layout same as 0x58: [9]=flags [12]=current [13]=setpoint [14]=outdoor
+    if (frame_type == 0x1C && frame_len >= 15 && frame->raw[7] == 0x03 && frame->raw[8] == 0xC6) {
+      uint8_t flags = frame->raw[9];
+      bool power_on = (flags & 0x01) != 0;
+      bool is_cooling = (flags & 0x20) != 0;
+      bool is_heating = (flags & 0x40) != 0;
+      float setpoint = frame->raw[13] / 2.0f - 16.0f;
+
+      climate::ClimateMode new_mode;
+      if (!power_on) {
+        new_mode = climate::CLIMATE_MODE_OFF;
+      } else if (is_cooling) {
+        new_mode = climate::CLIMATE_MODE_COOL;
+      } else {
+        new_mode = climate::CLIMATE_MODE_HEAT;
+      }
+
+      ESP_LOGV(TAG, "State change: flags=0x%02X power=%s %s setpoint=%.1f°C",
+               flags, power_on ? "ON" : "OFF",
+               is_cooling ? "COOL" : (is_heating ? "HEAT" : "???"), setpoint);
+
+      int changes = 0;
+      if (this->mode != new_mode) {
+        const char *mode_str = (new_mode == climate::CLIMATE_MODE_OFF) ? "OFF" :
+                               (new_mode == climate::CLIMATE_MODE_COOL) ? "COOL" : "HEAT";
+        ESP_LOGI(TAG, "Status: mode=%s", mode_str);
+        this->mode = new_mode;
+        changes++;
+      }
+      if (this->target_temperature != setpoint) {
+        ESP_LOGI(TAG, "Status: setpoint zone 1=%.1f°C", setpoint);
+        this->target_temperature = setpoint;
+        changes++;
+      }
+      if (changes > 0) {
+        this->publish_state();
+      }
+    }
+
+    // ACK (0x18) with dtype 00:A1 — general ACK handler
+    // Format: 18:LL:00:SRC:DST:00:A1:XX:YY:CRC where XX:YY = acknowledged dtype
+    if (frame_type == 0x18 && frame_len >= 9 && frame->raw[7] == 0x00 && frame->raw[8] == 0xA1) {
+      uint16_t acked_dtype = (frame->raw[9] << 8) | frame->raw[10];
+      ESP_LOGD(TAG, "ACK for dtype %02X:%02X", frame->raw[9], frame->raw[10]);
+
+      // Clear pending command if this ACK matches
+      if (!estia_pending_cmd_.empty() && acked_dtype == estia_pending_ack_dtype_) {
+        ESP_LOGD(TAG, "Command acknowledged (attempt %u)", estia_cmd_attempts_);
+        estia_pending_cmd_.clear();
+        estia_cmd_attempts_ = 0;
+      }
+
+      // Mode ACK triggers deferred power on
+      if (acked_dtype == 0x03C0 && this->estia_power_on_pending_) {
+        ESP_LOGD(TAG, "Mode ACK received, sending power on");
+        this->estia_power_on_pending_ = false;
+        this->cancel_timeout("estia_poweron");
+        this->send_estia_power(true);
+      }
+    }
+
+    // E8:C1 data response (0x18) — operating hours
+    // Frame: 18:26:00:SRC:DST:00:E8:C1:01:00:DATA...
+    // DATA offsets (16-bit big-endian, in hours):
+    //   [6-7] = Heating_Compressor_Hours
+    //   [8-9] = WaterPump_Hours
+    //   [14-15] = BackupHeater_Hours
+    if (frame_type == 0x18 && frame_len >= 26 &&
+        frame->raw[7] == 0x00 && frame->raw[8] == 0xE8 &&
+        frame->raw[9] == 0xC1) {
+      // raw[]: 18:26:00:src:src:dst:dst:00:E8:C1:01:00:data...
+      // Confirmed offsets (raw[]): [18:19]=compressor, [20:21]=waterpump, [26:27]=backup
+      uint16_t compressor_h = (frame->raw[18] << 8) | frame->raw[19];
+      uint16_t waterpump_h  = (frame->raw[20] << 8) | frame->raw[21];
+      uint16_t backup_h     = (frame->raw[26] << 8) | frame->raw[27];
+
+      ESP_LOGD(TAG, "E8:C1: compressor=%uh waterpump=%uh backup_heater=%uh",
+               compressor_h, waterpump_h, backup_h);
+
+      if (this->compressor_hours_sensor_ != nullptr) {
+        this->compressor_hours_sensor_->publish_state(compressor_h);
+      }
+      if (this->waterpump_hours_sensor_ != nullptr) {
+        this->waterpump_hours_sensor_->publish_state(waterpump_h);
+      }
+      if (this->backup_heater_hours_sensor_ != nullptr) {
+        this->backup_heater_hours_sensor_->publish_state(backup_h);
+      }
+    }
+
+    // 0-10V interface status (0x55 from 0x0041, dtype 00:9F)
+    // Frame: 55:0C:00:00:41:08:00:00:9F:00:DD:14:00:00  (DD=demand, 0x14=min temp config)
+    if (frame_type == 0x55 && frame->raw[3] == 0x00 && frame->raw[4] == 0x41 &&
+        frame->raw[7] == 0x00 && frame->raw[8] == 0x9F) {
+      uint8_t demand = frame->raw[10];
+      ESP_LOGV(TAG, "0-10V status: demand=%u/15", demand);
+      if (demand != estia_demand_value_) {
+        estia_demand_value_ = demand;
+        ESP_LOGI(TAG, "Status: demand=%u/15 (setpoint %d°C)", demand, demand > 0 ? 10 + demand * 3 : 20);
+      }
+      if (this->demand_sensor_ != nullptr) {
+        this->demand_sensor_->publish_state(demand);
+      }
+    }
+
+    // 0-10V interface command (0x11 from 0x0041, dtype 00:5F) — immediate demand update
+    // Frame: 11:0A:00:00:41:08:00:00:5F:DD:00:00
+    if (frame_type == 0x11 && frame->raw[3] == 0x00 && frame->raw[4] == 0x41 &&
+        frame->raw[7] == 0x00 && frame->raw[8] == 0x5F) {
+      uint8_t demand = frame->raw[9];
+      ESP_LOGV(TAG, "0-10V command: demand=%u/15", demand);
+      if (demand != estia_demand_value_) {
+        estia_demand_value_ = demand;
+        ESP_LOGI(TAG, "Status: demand=%u/15 (setpoint %d°C)", demand, demand > 0 ? 10 + demand * 3 : 20);
+      }
+      if (this->demand_sensor_ != nullptr) {
+        this->demand_sensor_->publish_state(demand);
+      }
+    }
+
+    // Alarm/error frames (dtype xx:49) — log at WARN level
+    if (frame_len >= 8 && (frame->raw[8] == 0x49 || frame->raw[7] == 0x49)) {
+      uint8_t error_byte = (frame_len > 9) ? frame->raw[9] : 0;
+      const char *error_desc = "unknown";
+      if (error_byte >= 0x01 && error_byte <= 0x0D) error_desc = "hydro unit (A-series)";
+      else if (error_byte >= 0x41 && error_byte <= 0x52) error_desc = "communication (E-series)";
+      else if (error_byte >= 0x63 && error_byte <= 0x7F) error_desc = "sensor (F-series)";
+      else if (error_byte >= 0x81 && error_byte <= 0x84) error_desc = "compressor (H-series)";
+      else if (error_byte >= 0xC2 && error_byte <= 0xDD) error_desc = "configuration (L-series)";
+      else if (error_byte >= 0xE3 && error_byte <= 0xFF) error_desc = "protection (P-series)";
+      ESP_LOGW(TAG, "ALARM: error=0x%02X (%s)", error_byte, error_desc);
+    }
+
+    return true;
+  }
   if (!frame->is_tu2c() && frame->crc() != frame->calculate_crc()) {
     ESP_LOGW(TAG, "CRC check failed");
     log_data_frame("Failed frame", frame);
@@ -1500,7 +1950,7 @@ void ToshibaAbClimate::loop() {
       this->write_array(raw_frame.data(), raw_frame.size());
 
       if (this->raw_write_queue_.empty() && this->write_queue_.empty()) {
-        ESP_LOGD(TAG, "All frames written");
+        ESP_LOGV(TAG, "All frames written");
       }
     }
 
@@ -1557,8 +2007,48 @@ void ToshibaAbClimate::loop() {
       }
 
       if (this->write_queue_.empty()) {
-        ESP_LOGD(TAG, "All frames written");
+        ESP_LOGV(TAG, "All frames written");
       }
+    }
+  }
+
+  // Estia command ACK timeout and retry
+  if (!estia_pending_cmd_.empty() && (millis() - estia_cmd_sent_ms_) > ESTIA_CMD_ACK_TIMEOUT_MS) {
+    if (estia_cmd_attempts_ >= ESTIA_MAX_CMD_ATTEMPTS) {
+      ESP_LOGW(TAG, "Command not acknowledged after %u attempts (dtype %02X:%02X)",
+               estia_cmd_attempts_,
+               (estia_pending_ack_dtype_ >> 8) & 0xFF, estia_pending_ack_dtype_ & 0xFF);
+      estia_pending_cmd_.clear();
+      estia_cmd_attempts_ = 0;
+    } else {
+      estia_cmd_attempts_++;
+      ESP_LOGD(TAG, "Command retry %u/%u (dtype %02X:%02X)",
+               estia_cmd_attempts_, ESTIA_MAX_CMD_ATTEMPTS,
+               (estia_pending_ack_dtype_ >> 8) & 0xFF, estia_pending_ack_dtype_ & 0xFF);
+      estia_cmd_sent_ms_ = millis();
+      this->raw_write_queue_.push(estia_pending_cmd_);
+    }
+  }
+
+  // Estia autonomous polling (runtime-toggleable)
+  if (this->autonomous_ && this->data_reader.frame_format() == FrameFormat::A0) {
+    uint32_t now = millis();
+    if (now - estia_last_e8c0_ms_ >= ESTIA_E8C0_INTERVAL_MS) {
+      estia_last_e8c0_ms_ = now;
+      this->send_estia_data_request(0xC0);
+    }
+    if (now - estia_last_e8c1_ms_ >= ESTIA_E8C1_INTERVAL_MS) {
+      estia_last_e8c1_ms_ = now;
+      this->send_estia_data_request(0xC1);
+    }
+  }
+
+  // 0-10V demand emulation: periodic heartbeat as 0x0041
+  if (this->demand_enabled_ && this->data_reader.frame_format() == FrameFormat::A0) {
+    uint32_t now = millis();
+    if (now - estia_last_demand_heartbeat_ms_ >= ESTIA_DEMAND_HEARTBEAT_MS) {
+      estia_last_demand_heartbeat_ms_ = now;
+      this->send_estia_demand_heartbeat();
     }
   }
 
@@ -1642,7 +2132,10 @@ void ToshibaAbClimate::loop() {
   }
 
   if (last_master_alive_millis_ > 0 && (millis() - last_master_alive_millis_) > LAST_ALIVE_TIMEOUT_MILLIS) {
-    // not connected
+    if (estia_was_connected_) {
+      ESP_LOGW(TAG, "Heat pump disconnected");
+      estia_was_connected_ = false;
+    }
     if (this->connected_binary_sensor_) {
       this->connected_binary_sensor_->publish_state(false);
     }
@@ -1731,6 +2224,52 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
 }
 
 void ToshibaAbClimate::control(const climate::ClimateCall &call) {
+  // Estia A0-protocol: power, mode, setpoint control
+  // Only one command at a time on the half-duplex AB-bus.
+  // When powering on with a mode change, send mode first, then power on
+  // after a delay so the WP starts in the correct mode.
+  if (this->data_reader.frame_format() == FrameFormat::A0) {
+    if (call.get_mode().has_value()) {
+      ESP_LOGD(TAG, "Control: mode=%s", LOG_STR_ARG(climate::climate_mode_to_string(*call.get_mode())));
+    }
+    if (call.get_target_temperature().has_value()) {
+      ESP_LOGD(TAG, "Control: setpoint zone 1=%.1f°C", *call.get_target_temperature());
+    }
+    if (call.get_mode().has_value()) {
+      auto new_mode = call.get_mode().value();
+      if (new_mode == climate::CLIMATE_MODE_OFF) {
+        this->send_estia_power(false);
+      } else if (this->mode == climate::CLIMATE_MODE_OFF) {
+        if (new_mode != estia_last_active_mode_) {
+          // Mode differs: send mode command first, power on after ACK
+          // Retry mode command up to 3 times if no ACK received
+          estia_pending_mode_cmd_ = (new_mode == climate::CLIMATE_MODE_COOL) ? 0x01 : 0x02;
+          estia_power_on_pending_ = true;
+          estia_mode_retries_ = 0;
+          this->send_estia_mode(estia_pending_mode_cmd_);
+          this->set_timeout("estia_poweron", 3000, [this]() {
+            this->estia_mode_retry_timeout_();
+          });
+        } else {
+          // Same mode: just power on
+          this->send_estia_power(true);
+        }
+      } else {
+        // Already on → switch mode (HEAT↔COOL)
+        if (new_mode == climate::CLIMATE_MODE_HEAT) {
+          this->send_estia_mode(0x02);
+        } else if (new_mode == climate::CLIMATE_MODE_COOL) {
+          this->send_estia_mode(0x01);
+        }
+      }
+    }
+    if (call.get_target_temperature().has_value()) {
+      float temp = call.get_target_temperature().value();
+      this->send_estia_setpoint(temp);
+    }
+    return;
+  }
+
   TccState new_state = TccState{tcc_state};
 
   if (call.get_mode().has_value()) {
@@ -1841,6 +2380,251 @@ bool ToshibaAbClimate::send_raw_frame_from_text(const std::string &frame_text) {
   ESP_LOGI(TAG, "Queue raw frame from HA: %s", payload.c_str());
   this->raw_write_queue_.push(std::move(raw_frame));
   return true;
+}
+
+// ── Estia A0-protocol: build and enqueue raw frame ──
+
+static uint16_t estia_crc16(const uint8_t *data, size_t len) {
+  uint16_t crc = 0xFFFF;
+  for (size_t i = 0; i < len; i++) {
+    crc ^= data[i];
+    for (uint8_t b = 0; b < 8; b++) {
+      if (crc & 1)
+        crc = (crc >> 1) ^ 0x8408;
+      else
+        crc >>= 1;
+    }
+  }
+  return crc;
+}
+
+void ToshibaAbClimate::send_estia_tracked_(const uint8_t *frame, size_t len, uint16_t ack_dtype) {
+  std::vector<uint8_t> raw(frame, frame + len);
+  this->raw_write_queue_.push(raw);
+  // Track for ACK/retry (only for commands, not heartbeats/requests)
+  if (ack_dtype != 0) {
+    estia_pending_cmd_ = std::move(raw);
+    estia_pending_ack_dtype_ = ack_dtype;
+    estia_cmd_attempts_ = 1;
+    estia_cmd_sent_ms_ = millis();
+  }
+}
+
+void ToshibaAbClimate::send_estia_setpoint(float target_temp) {
+  if (this->read_only_) {
+    ESP_LOGW(TAG, "Read-only mode: not sending Estia setpoint");
+    return;
+  }
+
+  // Encode temperature: val = (°C + 16) * 2
+  uint8_t encoded = static_cast<uint8_t>((target_temp + 16.0f) * 2.0f);
+  uint16_t src = this->estia_source_address_;
+
+  // Sub-command: 0x02 = heating setpoint, 0x01 = cooling setpoint
+  uint8_t subcmd = (this->mode == climate::CLIMATE_MODE_COOL) ? 0x01 : 0x02;
+
+  // Command frame: A0:00:11:0C:00:SRC_H:SRC_L:08:00:03:C1:SUBCMD:TEMP:00:00:00
+  uint8_t frame[] = {
+    0xA0, 0x00,                         // prefix
+    0x11,                               // type: command
+    0x0C,                               // length: 12
+    0x00,                               // fixed
+    (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),  // source
+    0x08, 0x00,                         // dest: master
+    0x03, 0xC1,                         // command type: setpoint
+    subcmd,                             // 0x02=heat, 0x01=cool
+    encoded,                            // target temperature
+    0x00, 0x00, 0x00,                   // padding
+    0x00, 0x00                          // CRC placeholder
+  };
+
+  size_t crc_len = sizeof(frame) - 2;
+  uint16_t crc = estia_crc16(frame, crc_len);
+  frame[crc_len]     = (crc >> 8) & 0xFF;
+  frame[crc_len + 1] = crc & 0xFF;
+
+  ESP_LOGD(TAG, "TX: setpoint=%.1f°C (0x%02X) subcmd=0x%02X", target_temp, encoded, subcmd);
+  log_raw_data("Estia TX", frame, sizeof(frame));
+
+  this->send_estia_tracked_(frame, sizeof(frame), 0x03C1);  // ACK: 00:A1:03:C1
+}
+
+void ToshibaAbClimate::send_estia_power(bool on) {
+  if (this->read_only_) {
+    ESP_LOGW(TAG, "Read-only mode: not sending Estia power command");
+    return;
+  }
+
+  uint16_t src = this->estia_source_address_;
+  uint8_t power_cmd = on ? 0x23 : 0x22;
+
+  // Power command: A0:00:11:08:00:SRC:08:00:00:41:CMD:CRC
+  // Captured: 11:08:00:00:40:08:00:00:41:22 (power off from remote)
+  uint8_t frame[] = {
+    0xA0, 0x00,                         // prefix
+    0x11,                               // type: command
+    0x08,                               // length: 8
+    0x00,                               // fixed
+    (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),  // source
+    0x08, 0x00,                         // dest: master
+    0x00, 0x41,                         // dtype: power control
+    power_cmd,                          // 0x23=ON, 0x22=OFF
+    0x00, 0x00                          // CRC placeholder
+  };
+
+  size_t crc_len = sizeof(frame) - 2;
+  uint16_t crc = estia_crc16(frame, crc_len);
+  frame[crc_len]     = (crc >> 8) & 0xFF;
+  frame[crc_len + 1] = crc & 0xFF;
+
+  ESP_LOGD(TAG, "TX: power %s (cmd=0x%02X)", on ? "ON" : "OFF", power_cmd);
+  log_raw_data("Estia TX", frame, sizeof(frame));
+
+  this->send_estia_tracked_(frame, sizeof(frame), 0x0041);  // ACK: 00:A1:00:41
+}
+
+void ToshibaAbClimate::send_estia_mode(uint8_t mode_cmd) {
+  if (this->read_only_) {
+    ESP_LOGW(TAG, "Read-only mode: not sending Estia mode command");
+    return;
+  }
+
+  uint16_t src = this->estia_source_address_;
+
+  // Mode command: A0:00:11:08:00:SRC:08:00:03:C0:CMD:CRC
+  // 0x02=heating, 0x01=cooling
+  uint8_t frame[] = {
+    0xA0, 0x00,                         // prefix
+    0x11,                               // type: command
+    0x08,                               // length: 8
+    0x00,                               // fixed
+    (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),  // source
+    0x08, 0x00,                         // dest: master
+    0x03, 0xC0,                         // dtype: mode control
+    mode_cmd,                           // 0x02=heat, 0x01=cool
+    0x00, 0x00                          // CRC placeholder
+  };
+
+  size_t crc_len = sizeof(frame) - 2;
+  uint16_t crc = estia_crc16(frame, crc_len);
+  frame[crc_len]     = (crc >> 8) & 0xFF;
+  frame[crc_len + 1] = crc & 0xFF;
+
+  ESP_LOGD(TAG, "TX: mode=%s (cmd=0x%02X)", mode_cmd == 0x01 ? "COOL" : "HEAT", mode_cmd);
+  log_raw_data("Estia TX", frame, sizeof(frame));
+
+  this->send_estia_tracked_(frame, sizeof(frame), 0x03C0);  // ACK: 00:A1:03:C0
+}
+
+void ToshibaAbClimate::estia_mode_retry_timeout_() {
+  if (!this->estia_power_on_pending_) return;
+
+  estia_mode_retries_++;
+  if (estia_mode_retries_ < 3) {
+    ESP_LOGW(TAG, "No mode ACK, retry %d/3", estia_mode_retries_);
+    this->send_estia_mode(estia_pending_mode_cmd_);
+    this->set_timeout("estia_poweron", 3000, [this]() {
+      this->estia_mode_retry_timeout_();
+    });
+  } else {
+    ESP_LOGW(TAG, "No mode ACK after 3 retries, sending power on anyway");
+    this->estia_power_on_pending_ = false;
+    this->send_estia_power(true);
+  }
+}
+
+void ToshibaAbClimate::send_estia_demand(uint8_t demand) {
+  if (this->read_only_) {
+    ESP_LOGW(TAG, "Read-only mode: not sending Estia demand command");
+    return;
+  }
+  if (demand > 15) demand = 15;
+  estia_demand_value_ = demand;
+
+  // 0-10V demand command: A0:00:11:0A:00:00:41:08:00:00:5F:DD:00:00:CRC
+  // Uses source address 0x0041 (0-10V interface address)
+  uint8_t frame[] = {
+    0xA0, 0x00,                         // prefix
+    0x11,                               // type: command
+    0x0A,                               // length: 10
+    0x00,                               // fixed
+    0x00, 0x41,                         // source: 0-10V interface address
+    0x08, 0x00,                         // dest: master
+    0x00, 0x5F,                         // dtype: demand control
+    demand,                             // demand value (0..15)
+    0x00, 0x00,                         // padding
+    0x00, 0x00                          // CRC placeholder
+  };
+
+  size_t crc_len = sizeof(frame) - 2;
+  uint16_t crc = estia_crc16(frame, crc_len);
+  frame[crc_len]     = (crc >> 8) & 0xFF;
+  frame[crc_len + 1] = crc & 0xFF;
+
+  ESP_LOGV(TAG, "TX: demand=%u/15", demand);
+  log_raw_data("Estia TX", frame, sizeof(frame));
+
+  this->send_estia_tracked_(frame, sizeof(frame), 0x005F);  // ACK: 00:A1:00:5F
+}
+
+void ToshibaAbClimate::send_estia_demand_heartbeat() {
+  // Emulate 0-10V interface periodic status (0x55 from 0x0041)
+  // Captured: 55:0C:00:00:41:08:00:00:9F:00:DD:14:00:00:CRC
+  // raw[10]=demand, raw[11]=0x14 (min temp config = 20°C)
+  uint8_t frame[] = {
+    0xA0, 0x00,                         // prefix
+    0x55,                               // type: remote status
+    0x0C,                               // length: 12
+    0x00,                               // fixed
+    0x00, 0x41,                         // source: 0-10V interface address
+    0x08, 0x00,                         // dest: master
+    0x00, 0x9F,                         // dtype: 0-10V status
+    0x00, estia_demand_value_,          // 0x00 + demand value
+    0x14,                               // min temp config (20°C)
+    0x00, 0x00,                         // padding
+    0x00, 0x00                          // CRC placeholder
+  };
+
+  size_t crc_len = sizeof(frame) - 2;
+  uint16_t crc = estia_crc16(frame, crc_len);
+  frame[crc_len]     = (crc >> 8) & 0xFF;
+  frame[crc_len + 1] = crc & 0xFF;
+
+  ESP_LOGV(TAG, "TX: demand heartbeat (demand=%u/15)", estia_demand_value_);
+  log_raw_data("Estia TX", frame, sizeof(frame));
+
+  std::vector<uint8_t> raw(frame, frame + sizeof(frame));
+  this->raw_write_queue_.push(std::move(raw));
+}
+
+void ToshibaAbClimate::send_estia_data_request(uint8_t subtype) {
+  uint16_t src = this->estia_source_address_;
+
+  // Data request frame: A0:00:15:0A:00:SRC:DST:00:E8:Cx:01:00:CRC
+  // Mirrors what KNX gateway sends as 0x15 request
+  uint8_t frame[] = {
+    0xA0, 0x00,                         // prefix
+    0x15,                               // type: data request
+    0x0A,                               // length: 10
+    0x00,                               // fixed
+    (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),  // source
+    0x08, 0x00,                         // dest: master
+    0x00, 0xE8,                         // data type
+    subtype,                            // C0=temperatures, C1=counters
+    0x01, 0x00,                         // request params
+    0x00, 0x00                          // CRC placeholder
+  };
+
+  size_t crc_len = sizeof(frame) - 2;
+  uint16_t crc = estia_crc16(frame, crc_len);
+  frame[crc_len]     = (crc >> 8) & 0xFF;
+  frame[crc_len + 1] = crc & 0xFF;
+
+  ESP_LOGV(TAG, "TX: data request E8:%02X", subtype);
+  log_raw_data("Estia TX", frame, sizeof(frame));
+
+  std::vector<uint8_t> raw(frame, frame + sizeof(frame));
+  this->raw_write_queue_.push(std::move(raw));
 }
 
 bool ToshibaAbClimate::control_vent(bool state) {

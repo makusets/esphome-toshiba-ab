@@ -14,8 +14,13 @@ from esphome.const import (
     CONF_SWING_MODE,
     CONF_TRIGGER_ID,
     DEVICE_CLASS_CONNECTIVITY,
+    DEVICE_CLASS_DURATION,
+    DEVICE_CLASS_TEMPERATURE,
     ENTITY_CATEGORY_DIAGNOSTIC,
     STATE_CLASS_MEASUREMENT,
+    STATE_CLASS_TOTAL_INCREASING,
+    UNIT_CELSIUS,
+    UNIT_HOUR,
 )
 
 DEPENDENCIES = ["uart"]
@@ -40,6 +45,14 @@ CONF_FRAME = "frame"
 
 CONF_AUTONOMOUS = "autonomous"
 CONF_READ_ONLY = "read_only"
+
+# Estia-specific sensors
+CONF_OUTDOOR_TEMPERATURE = "outdoor_temperature"
+CONF_COMPRESSOR_HOURS = "compressor_hours"
+CONF_WATERPUMP_HOURS = "waterpump_hours"
+CONF_BACKUP_HEATER_HOURS = "backup_heater_hours"
+CONF_DEMAND = "demand"
+CONF_DEMAND_ENABLED = "demand_enabled"
 
 #AC Sensors addresses
 
@@ -84,6 +97,8 @@ FRAME_FORMATS = {
     "wrapped": FrameFormat.TU2C,
     "tu2c": FrameFormat.TU2C,
     "tcc-link": FrameFormat.NORMAL,
+    "a0": FrameFormat.A0,
+    "estia_a0": FrameFormat.A0,
 }
 
 
@@ -146,6 +161,39 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
         cv.Optional(CONF_SENSORS, default=[]): cv.ensure_list(SENSOR_ITEM_SCHEMA),
         cv.Optional(CONF_REPORT_SENSOR_TEMP): REPORT_SENSOR_TEMP_SCHEMA,
         cv.Optional(CONF_FILTER_ALERT): binary_sensor.binary_sensor_schema(),
+        # Estia sensors
+        cv.Optional(CONF_OUTDOOR_TEMPERATURE): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS,
+            accuracy_decimals=1,
+            device_class=DEVICE_CLASS_TEMPERATURE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_COMPRESSOR_HOURS): sensor.sensor_schema(
+            unit_of_measurement=UNIT_HOUR,
+            accuracy_decimals=0,
+            device_class=DEVICE_CLASS_DURATION,
+            state_class=STATE_CLASS_TOTAL_INCREASING,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
+        cv.Optional(CONF_WATERPUMP_HOURS): sensor.sensor_schema(
+            unit_of_measurement=UNIT_HOUR,
+            accuracy_decimals=0,
+            device_class=DEVICE_CLASS_DURATION,
+            state_class=STATE_CLASS_TOTAL_INCREASING,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
+        cv.Optional(CONF_BACKUP_HEATER_HOURS): sensor.sensor_schema(
+            unit_of_measurement=UNIT_HOUR,
+            accuracy_decimals=0,
+            device_class=DEVICE_CLASS_DURATION,
+            state_class=STATE_CLASS_TOTAL_INCREASING,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
+        cv.Optional(CONF_DEMAND_ENABLED, default=False): cv.boolean,
+        cv.Optional(CONF_DEMAND): sensor.sensor_schema(
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
     }
 ).extend(uart.UART_DEVICE_SCHEMA).extend(cv.COMPONENT_SCHEMA)
 
@@ -207,6 +255,25 @@ async def to_code(config):
     if CONF_FILTER_ALERT in config:
         sens = await binary_sensor.new_binary_sensor(config[CONF_FILTER_ALERT])
         cg.add(var.set_filter_alert_sensor(sens))
+
+    # Estia sensors
+    if CONF_OUTDOOR_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_OUTDOOR_TEMPERATURE])
+        cg.add(var.set_outdoor_temp_sensor(sens))
+    if CONF_COMPRESSOR_HOURS in config:
+        sens = await sensor.new_sensor(config[CONF_COMPRESSOR_HOURS])
+        cg.add(var.set_compressor_hours_sensor(sens))
+    if CONF_WATERPUMP_HOURS in config:
+        sens = await sensor.new_sensor(config[CONF_WATERPUMP_HOURS])
+        cg.add(var.set_waterpump_hours_sensor(sens))
+    if CONF_BACKUP_HEATER_HOURS in config:
+        sens = await sensor.new_sensor(config[CONF_BACKUP_HEATER_HOURS])
+        cg.add(var.set_backup_heater_hours_sensor(sens))
+    if CONF_DEMAND_ENABLED in config:
+        cg.add(var.set_demand_enabled(config[CONF_DEMAND_ENABLED]))
+    if CONF_DEMAND in config:
+        sens = await sensor.new_sensor(config[CONF_DEMAND])
+        cg.add(var.set_demand_sensor(sens))
     
     for item in config.get(CONF_SENSORS, []):
         sens = await sensor.new_sensor(item["sensor"])  # creates the Sensor with name/units/etc.

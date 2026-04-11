@@ -186,6 +186,81 @@ The case looks like this:
 <img src="hardware/v3/toshiba_top_case.png" width="49%"> <img src="hardware/v3/toshiba_bot_case.png" width="49%">
 
 
+# Toshiba Estia Heat Pump Support
+
+This component also supports Toshiba Estia heat pumps using the A0-protocol on the AB-bus. This is a different protocol from TCC-Link and TU2C, used by Estia R32 and similar models.
+
+<img src="docs/estia-esphome.png" width="45%"> <img src="docs/estia-log.png" width="45%">
+
+## Features
+
+- Full bidirectional control: power on/off, mode (heat/cool), setpoint
+- Autonomous polling mode: reads temperatures (E8:C0) and operating hours (E8:C1) without a KNX gateway
+- 0-10V demand interface emulation in software (address 0x0041)
+- Sensors: outdoor temperature, compressor hours, water pump hours, backup heater hours
+- ACK tracking with automatic retry (3 attempts)
+- Robust frame synchronization with inter-byte timeout
+
+## Estia YAML configuration
+
+```yaml
+logger:
+  baud_rate: 0    # Free hardware UART for AB-protocol
+  level: INFO
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/makusets/esphome-toshiba-ab
+    refresh: 0s
+
+uart:
+  tx_pin: GPIO15    # Adjust for your board variant
+  rx_pin: GPIO13
+  baud_rate: 2400
+  parity: EVEN
+  rx_buffer_size: 2048
+
+climate:
+  - platform: toshiba_ab
+    name: "Toshiba Estia"
+    id: toshiba_estia
+    frame_format: a0
+    filter_frames: false
+    read_only: false
+    autonomous: true
+    demand_enabled: false
+    connected:
+      name: "Estia Connected"
+    failed_crcs:
+      name: "Estia Failed CRCs"
+    outdoor_temperature:
+      name: "Estia Outdoor Temperature"
+    compressor_hours:
+      name: "Estia Compressor Hours"
+    waterpump_hours:
+      name: "Estia Water Pump Hours"
+    backup_heater_hours:
+      name: "Estia Backup Heater Hours"
+```
+
+See `example_estia.yaml` for a complete configuration including optional 0-10V demand emulation and runtime switches.
+
+## Estia protocol details
+
+- **UART**: 2400 baud, 8E1 (EVEN parity)
+- **Frame format**: `A0:00:TYPE:LEN:00:SRC:DST:DTYPE:[DATA]:CRC_H:CRC_L`
+- **CRC**: CRC-16/MCRF4XX (init 0xFFFF, poly 0x8408 reflected), big-endian
+- **Addresses**: Master=0x0800, Remote=0x0040, 0-10V=0x0041, Broadcast=0x00FE
+- **Temperature encoding**: `°C = value / 2 - 16`
+
+## Tested with
+
+- Toshiba Estia HWT-1101HRW-E outdoor unit (2023, R32)
+- Toshiba Estia HWT-1101XWHT9W-E indoor unit (2023)
+- makusets "Toshiba AB D1 Mini" board (LMV331TP comparator)
+
+
 # More options and complete yaml
 
 Have a look at the complete_example.yaml file for more options available for the component. It includes details about reporting a chosen temperature to the AC central unit or reading extra sensors (power, pressure, runtime, temp...)
