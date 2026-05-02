@@ -179,6 +179,57 @@ struct DataFrame {
   void set_tu2c(bool tu2c) { tu2c_ = tu2c; }
   bool is_tu2c() const { return tu2c_; }
 
+  void set_estia(bool estia) { estia_ = estia; }
+  bool is_estia() const { return estia_; }
+  void set_estia_len(uint8_t len) { estia_len_ = len; }
+  uint8_t estia_len() const { return estia_len_; }
+
+  // Estia A0-protocol: raw[] stores bytes AFTER the A0:00 prefix
+  // raw[0]=Type, raw[1]=Len(LL), raw[2]=0x00, raw[3:4]=Src, raw[5:6]=Dst, raw[7:8]=DataType, ..., CRC16
+  // Bytes in raw[] = LL + 4 (type + len + 0x00 + src/dst/dtype header + payload + CRC)
+  size_t estia_size() const {
+    if (!estia_ || estia_len_ < 4) return 0;
+    return estia_len_ + 4;  // TT + LL + LL_payload + CRC(2)
+  }
+
+  uint16_t estia_crc_received() const {
+    size_t s = estia_size();
+    if (s < 6) return 0;
+    return (raw[s - 2] << 8) | raw[s - 1];
+  }
+
+  uint16_t calculate_estia_crc() const {
+    size_t s = estia_size();
+    if (s < 6) return 0;
+
+    // CRC-16/MCRF4XX: poly 0x8408 (reflected 0x1021), init 0xFFFF
+    auto crc_byte = [](uint16_t crc, uint8_t b) -> uint16_t {
+      crc ^= b;
+      for (uint8_t i = 0; i < 8; i++) {
+        if (crc & 1)
+          crc = (crc >> 1) ^ 0x8408;
+        else
+          crc >>= 1;
+      }
+      return crc;
+    };
+
+    uint16_t crc = 0xFFFF;
+    // A0:00 prefix is NOT stored in raw[] but IS part of the CRC
+    crc = crc_byte(crc, 0xA0);
+    crc = crc_byte(crc, 0x00);
+    // Then the frame data (excluding the 2-byte CRC at the end)
+    size_t len = s - 2;
+    for (size_t i = 0; i < len; i++) {
+      crc = crc_byte(crc, raw[i]);
+    }
+    return crc;
+  }
+
+  bool validate_estia_crc() const {
+    return estia_crc_received() == calculate_estia_crc();
+  }
+
   /**
    * Calculates CRC on the current data by creating an XOR sum
    */
@@ -204,14 +255,18 @@ struct DataFrame {
 
  private:
   bool tu2c_{false};
+  bool estia_{false};
+  uint8_t estia_len_{0};  // LL byte from A0-protocol (not in union, won't be clobbered)
 };
 
 enum class FrameFormat : uint8_t {
   NORMAL = 0,
   TU2C = 1,
+  A0 = 2,
 };
 constexpr FrameFormat NORMAL = FrameFormat::NORMAL;
 constexpr FrameFormat TU2C = FrameFormat::TU2C;
+constexpr FrameFormat A0 = FrameFormat::A0;
 
 struct DataFrameReader {
   // Reads a data frame byte by byte, accumulating bytes until a complete frame is received
@@ -231,6 +286,10 @@ struct DataFrameReader {
   bool filter_frames_{true};
   bool allow_same_source_dest_{false};
   FrameFormat frame_format_{FrameFormat::NORMAL};
+  bool estia_{false};
+  uint16_t estia_expected_total_{0};
+  uint32_t estia_last_byte_ms_{0};
+  static const uint32_t ESTIA_BYTE_TIMEOUT_MS = 20;  // inter-byte timeout: ~4 byte-times at 2400 baud
 
   void reset() {
     reset_frame_state_();
@@ -239,9 +298,84 @@ struct DataFrameReader {
     tu2c_len_pending_ = false;
     tu2c_expected_total_ = 0;
     tu2c_bytes_seen_ = 0;
+    estia_ = false;
+    estia_expected_total_ = 0;
   }
 
   bool put(uint8_t byte) {
+    const bool use_estia = frame_format_ == FrameFormat::A0;
+
+    // ── Estia A0-protocol: prefix A0:00, then Type:Len:...:CRC16 ──
+    if (use_estia) {
+      // Timeout: if collecting a frame takes too long, a byte was lost — resync
+      if (estia_ && (millis() - estia_last_byte_ms_) > ESTIA_BYTE_TIMEOUT_MS) {
+        ESP_LOGV("READER", "Estia inter-byte timeout after %ums gap (%u/%u bytes); resync",
+                 (unsigned)(millis() - estia_last_byte_ms_), data_index_, estia_expected_total_);
+        estia_ = false;
+        data_index_ = 0;
+        estia_expected_total_ = 0;
+        prefix_match_ = 0;
+        // Don't return — process this byte as potential new frame start below
+      }
+      // Wait for A0 prefix
+      if (!estia_ && prefix_match_ == 0) {
+        if (byte == 0xA0) {
+          prefix_match_ = 1;
+        }
+        return false;
+      }
+      // Wait for 0x00 after A0
+      if (!estia_ && prefix_match_ == 1) {
+        if (byte == 0x00) {
+          estia_ = true;
+          prefix_match_ = 0;
+          reset_frame_state_();
+          frame.set_estia(true);
+          data_index_ = 0;
+          estia_expected_total_ = 0;
+          estia_last_byte_ms_ = millis();
+          return false;
+        }
+        prefix_match_ = 0;
+        return false;
+      }
+      // Reading frame bytes (after A0:00 prefix)
+      if (estia_) {
+        estia_last_byte_ms_ = millis();  // update inter-byte timer
+        if (data_index_ < DATA_FRAME_MAX_SIZE) {
+          frame.raw[data_index_] = byte;
+        } else {
+          ESP_LOGV("READER", "Estia frame buffer overflow; resetting");
+          reset();
+          return false;
+        }
+
+        // Byte 1 = LL (length). After A0:00 prefix, frame = LL + 4 bytes
+        if (data_index_ == 1) {
+          estia_expected_total_ = byte + 4;
+          frame.set_estia_len(byte);  // store outside union so raw[3] won't clobber it
+          if (estia_expected_total_ < 6 || estia_expected_total_ > DATA_FRAME_MAX_SIZE) {
+            ESP_LOGV("READER", "Invalid Estia length 0x%02X; resetting", byte);
+            reset();
+            return false;
+          }
+        }
+
+        data_index_++;
+
+        // Check if frame complete
+        if (estia_expected_total_ > 0 && data_index_ >= estia_expected_total_) {
+          crc_valid = frame.validate_estia_crc();
+          complete = true;
+          data_index_ = 0;
+          estia_ = false;
+          estia_expected_total_ = 0;
+          return true;
+        }
+      }
+      return false;
+    }
+
     const bool use_tu2c = frame_format_ == FrameFormat::TU2C;
     if (data_index_ == 0 && use_tu2c && !tu2c_) {
       if (prefix_match_ == 1) {
@@ -388,6 +522,7 @@ private:
   void reset_frame_state_() {
     frame.reset();
     frame.set_tu2c(false);
+    frame.set_estia(false);
     crc_valid       = false;
     complete        = false;
     data_index_     = 0;
@@ -453,6 +588,11 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_command_mode_read(uint8_t value) { command_mode_read_ = value; }
   void set_command_mode_write(uint8_t value) { command_mode_write_ = value; }
   void set_filter_alert_sensor(binary_sensor::BinarySensor *sensor) { filter_alert_sensor_ = sensor; }
+  void set_outdoor_temp_sensor(sensor::Sensor *sensor) { outdoor_temp_sensor_ = sensor; }
+  void set_compressor_hours_sensor(sensor::Sensor *sensor) { compressor_hours_sensor_ = sensor; }
+  void set_waterpump_hours_sensor(sensor::Sensor *sensor) { waterpump_hours_sensor_ = sensor; }
+  void set_backup_heater_hours_sensor(sensor::Sensor *sensor) { backup_heater_hours_sensor_ = sensor; }
+  void set_demand_sensor(sensor::Sensor *sensor) { demand_sensor_ = sensor; }
   void set_frame_format(FrameFormat format) { data_reader.set_frame_format(format); }
 
 
@@ -484,6 +624,15 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool is_tu2c_registration_ack_(const DataFrame *frame) const;
   bool is_tu2c_registration_query_(const DataFrame &frame) const;
   void set_read_only(bool en) { read_only_ = en; }
+  void set_estia_source_address(uint16_t addr) { estia_source_address_ = addr; }
+  void send_estia_setpoint(float target_temp);
+  void send_estia_power(bool on);
+  void send_estia_mode(uint8_t mode_cmd);  // 0x02=heat, 0x01=cool
+  void send_estia_demand(uint8_t demand);  // 0-10V demand (0..15)
+  void send_estia_demand_heartbeat();      // periodic 0x55 as 0x0041
+  void set_demand_enabled(bool en) { demand_enabled_ = en; }
+  void send_estia_data_request(uint8_t subtype);
+  void send_estia_tracked_(const uint8_t *frame, size_t len, uint16_t ack_dtype);
   
   // Reporting external sensor temperature to AC *************************
 
@@ -546,6 +695,13 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
 
   sensor::Sensor *current_sensor_{nullptr}; // Sensor for current, x10 A
 
+  // Estia sensors
+  sensor::Sensor *outdoor_temp_sensor_{nullptr};
+  sensor::Sensor *compressor_hours_sensor_{nullptr};
+  sensor::Sensor *waterpump_hours_sensor_{nullptr};
+  sensor::Sensor *backup_heater_hours_sensor_{nullptr};
+  sensor::Sensor *demand_sensor_{nullptr};  // 0-10V interface demand (0..15)
+
   // rx handler for 0x1A (sensor) replies (called from process_received_data)
   void process_sensor_value_(const DataFrame *frame);
   std::vector<PolledSensor> polled_sensors_;
@@ -597,7 +753,30 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
 
   static const uint8_t MAX_COMMAND_SEND_ATTEMPTS = 5;
 
+  // Estia raw command ACK tracking
+  std::vector<uint8_t> estia_pending_cmd_;        // last sent raw command (for retry)
+  uint16_t estia_pending_ack_dtype_{0};            // expected ACK dtype (e.g. 0x03C0, 0x03C1, 0x0041, 0x005F)
+  uint8_t estia_cmd_attempts_{0};
+  uint32_t estia_cmd_sent_ms_{0};
+  static const uint8_t ESTIA_MAX_CMD_ATTEMPTS = 3;
+  static const uint32_t ESTIA_CMD_ACK_TIMEOUT_MS = 3000;
+
   uint32_t last_master_alive_millis_ = 0;
+  bool estia_was_connected_{false};
+  uint16_t estia_source_address_{0x0040};  // default: mimic remote controller
+  climate::ClimateMode estia_last_active_mode_{climate::CLIMATE_MODE_HEAT};  // last known mode while powered on
+  bool estia_power_on_pending_{false};  // waiting for mode ACK before sending power on
+  uint8_t estia_pending_mode_cmd_{0};   // mode command to retry (0x01=cool, 0x02=heat)
+  uint8_t estia_mode_retries_{0};       // retry counter for mode command
+  void estia_mode_retry_timeout_();
+  uint32_t estia_last_e8c0_ms_{0};
+  uint32_t estia_last_e8c1_ms_{0};
+  static const uint32_t ESTIA_E8C0_INTERVAL_MS = 30000;
+  static const uint32_t ESTIA_E8C1_INTERVAL_MS = 60000;
+  static const uint32_t ESTIA_DEMAND_HEARTBEAT_MS = 5000;  // 0-10V heartbeat every 5s
+  bool demand_enabled_{false};
+  uint8_t estia_demand_value_{0};         // current demand value (0..15)
+  uint32_t estia_last_demand_heartbeat_ms_{0};
 
   uint32_t last_temp_log_time_ = 0;  // Counter for BME280 temperature logging
   float last_sent_temp_ = 1; // Last sent room temperature to the unit
