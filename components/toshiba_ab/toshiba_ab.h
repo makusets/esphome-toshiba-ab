@@ -6,6 +6,7 @@
 #include "esphome/components/switch/switch.h"
 #include "esphome/components/uart/uart.h"
 #include <algorithm>
+#include <array>
 #include <bitset>
 #include <cctype>
 #include <queue>
@@ -38,6 +39,7 @@ const uint8_t OPCODE_STATUS = 0x1C;
 const uint8_t OPCODE_TEMPERATURE = 0x55;
 const uint8_t OPCODE_EXTENDED_STATUS = 0x58;
 
+// Classic TCC-Link STATUS / EXTENDED_STATUS data byte offsets.
 const uint8_t STATUS_DATA_MODEPOWER_BYTE = 2;
 const uint8_t STATUS_DATA_POWER_MASK = 0b00000001;
 const uint8_t STATUS_DATA_MODE_MASK = 0b11100000;
@@ -263,10 +265,31 @@ enum class FrameFormat : uint8_t {
   NORMAL = 0,
   TU2C = 1,
   A0 = 2,
+  // HM-range dialect (RAV-RM/HM indoors paired with TU2C-Link-capable
+  // outdoors). On-wire layout for master broadcasts and remote→master
+  // frames is:
+  //
+  //   A0 00 OPCODE LEN <00 [src_mode] SRC [dst_mode] DST 00> opcode2 ... CRC
+  //
+  // The 6-byte interlude `00 [src_mode] SRC [dst_mode] DST 00` lives at
+  // wire offsets 4..9 and embeds the source and destination addresses
+  // at offsets 6 and 8 respectively. SRC=0x00 master / 0x40 remote /
+  // 0xFE broadcast — the same identifiers as classic TCC-Link, just at
+  // different byte positions. The reader normalises HM frames to the
+  // standard `src dst opcode len opcode2 ... crc` layout in put(), so
+  // the rest of the pipeline (status decoding, ACK matching, master
+  // detection) works unchanged.
+  //
+  // CRC is not validated for HM frames — the algorithm hasn't been
+  // derived (see makusets/esphome-toshiba-ab#76). Frames are accepted
+  // unconditionally and crc_valid is set to false so callers can
+  // distinguish if needed.
+  HM = 3,
 };
 constexpr FrameFormat NORMAL = FrameFormat::NORMAL;
 constexpr FrameFormat TU2C = FrameFormat::TU2C;
 constexpr FrameFormat A0 = FrameFormat::A0;
+constexpr FrameFormat HM = FrameFormat::HM;
 
 struct DataFrameReader {
   // Reads a data frame byte by byte, accumulating bytes until a complete frame is received
@@ -488,8 +511,56 @@ struct DataFrameReader {
     // If we know how many bytes we expect, finish only when we have them all
     if (expected_total_ > 0 && data_index_ >= expected_total_) {
       if (!use_tu2c) {
-        // We have the whole frame (header + payload + CRC)
-        crc_valid = frame.validate_crc();
+        // We have the whole frame (header + payload + CRC).
+        //
+        // HM dialect: master broadcasts and remote→master frames arrive
+        // with an A0:00 sync delimiter and a 6-byte interlude that
+        // embeds the real source/dest at wire offsets 6 and 8. Canonicalise
+        // in place so the rest of the pipeline sees the standard layout
+        // `src dst opcode len opcode2 PAD payload ... crc`. Sensor-reply
+        // frames (e.g. 00:40:1A:...) lack the A0:00 prefix and are passed
+        // through unchanged.
+        //
+        // We strip the 6-byte HM wrapper (wire offsets 4..9) and then
+        // inject a single 0x00 padding byte right after opcode2 so the
+        // mode/power, fan/vent, flags and target_temp bytes land at
+        // exactly the same data[] offsets as classic TCC-Link
+        // (STATUS_DATA_*_BYTE constants). Net change to the frame size
+        // is therefore −5 bytes (strip 6 wrapper + insert 1 padding).
+        if (frame_format_ == FrameFormat::HM
+            && frame.raw[0] == 0xA0 && frame.raw[1] == 0x00
+            && frame.data_length >= 7) {
+          const uint16_t total = expected_total_;
+          const uint8_t crc_byte = frame.raw[total - 1];
+          const uint8_t new_src = frame.raw[6];
+          const uint8_t new_dst = frame.raw[8];
+          const uint8_t new_data_length = frame.data_length - 5;
+          const uint8_t opcode2 = frame.raw[10];
+          // Real payload after opcode2 in the wire frame is
+          // (data_length - 7) bytes, located at wire raw[11..total-2].
+          const uint8_t tail_len = frame.data_length - 7;
+          // raw[4] = opcode2, raw[5] = 0x00 padding, raw[6..] = tail.
+          // Source range raw[11..] is to the RIGHT of destination range
+          // raw[6..]; iterate forward so each source byte is read before
+          // any subsequent write could overwrite it.
+          for (uint8_t i = 0; i < tail_len; i++) {
+            frame.raw[DATA_OFFSET_FROM_START + 2 + i] = frame.raw[11 + i];
+          }
+          frame.raw[DATA_OFFSET_FROM_START + 0] = opcode2;
+          frame.raw[DATA_OFFSET_FROM_START + 1] = 0x00;
+          frame.raw[0] = new_src;
+          frame.raw[1] = new_dst;
+          // raw[2] (opcode1) is at the same wire offset in HM as in
+          // NORMAL; only the length value changes.
+          frame.raw[3] = new_data_length;
+          frame.data_length = new_data_length;
+          frame.raw[DATA_OFFSET_FROM_START + new_data_length] = crc_byte;
+          // CRC algorithm for HM hasn't been derived yet — accept the
+          // frame but flag the CRC as unvalidated so callers can decide.
+          crc_valid = false;
+        } else {
+          crc_valid = frame.validate_crc();
+        }
         complete  = true;
 
         // Prepare reader for the next frame
@@ -569,7 +640,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void dump_config() override;
   void setup() override;
   void loop() override;
-  
+
   uint8_t master_address_ = 0x00;
   bool master_address_auto_{true};
   uint8_t tu2c_remote_address_{TOSHIBA_TU2C_REMOTE_DEFAULT};
@@ -594,8 +665,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_backup_heater_hours_sensor(sensor::Sensor *sensor) { backup_heater_hours_sensor_ = sensor; }
   void set_demand_sensor(sensor::Sensor *sensor) { demand_sensor_ = sensor; }
   void set_frame_format(FrameFormat format) { data_reader.set_frame_format(format); }
-
-
+  bool is_hm_variant() const { return data_reader.frame_format() == FrameFormat::HM; }
 
   climate::ClimateTraits traits() override;
   void control(const climate::ClimateCall &call) override;
@@ -714,6 +784,26 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   uint32_t last_sensor_query_ms_{0};
   uint32_t sensor_query_timeout_ms_{1000};  // 3s default; adjust if needed
   uint32_t sensor_query_timeouts_{0};       // (optional) stats
+
+  // Pending-query ring buffer. Periodic intervals push sensor IDs here;
+  // the loop drains one at a time once the previous query has been
+  // answered (or timed out). Strict serialisation prevents the response
+  // misattribution that occurs when multiple short-form 0x1A replies
+  // (which carry no sensor ID) collide with a back-to-back set of 0x17
+  // queries. Capacity is a power of two so head advancement uses a
+  // bitmask instead of modulo. Fixed std::array (vs std::deque) keeps
+  // it on the object — zero heap, ~18 bytes total.
+  static constexpr size_t MAX_PENDING_SENSOR_QUERIES = 16;
+  static_assert((MAX_PENDING_SENSOR_QUERIES & (MAX_PENDING_SENSOR_QUERIES - 1)) == 0,
+                "MAX_PENDING_SENSOR_QUERIES must be a power of two");
+  std::array<uint8_t, MAX_PENDING_SENSOR_QUERIES> pending_sensor_queries_{};
+  uint8_t pending_head_{0};
+  uint8_t pending_count_{0};
+  // TX back-pressure threshold reused from the original sensor-query
+  // gating; sensor queries are throttled when the write queue is this
+  // deep so we don't pile commands behind a slow bus.
+  static constexpr size_t WRITE_QUEUE_THROTTLE = 3;
+  void drain_sensor_query_queue_();
 
   // room temperature sensor reporting to AC  ******************************
   sensor::Sensor *ext_temp_sensor_{nullptr};

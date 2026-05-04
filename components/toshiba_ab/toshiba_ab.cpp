@@ -342,16 +342,36 @@ void write_set_parameter(struct DataFrame *command, uint8_t master_address, uint
 }
 
 void write_set_parameter_flags(struct DataFrame *command, uint8_t master_address, uint8_t command_mode_read,
-                               const struct TccState *state, uint8_t set_flags) {
-  uint8_t payload[6] = {
-      static_cast<uint8_t>(state->mode | set_flags),
-      static_cast<uint8_t>(state->fan | get_fan_bit_mask_for_mode(state->mode)),
-      temp_celcius_to_payload(state->target_temp),
-      EMPTY_DATA,
-      get_heat_cool_bits(state->mode),
-      get_heat_cool_bits(state->mode),
-  };
-  write_set_parameter(command, master_address, command_mode_read, OPCODE2_SET_TEMP_WITH_FAN, payload, sizeof(payload));
+                               const struct TccState *state, uint8_t set_flags, bool hm_variant) {
+  // The first six payload bytes are identical in both variants. The HM
+  // variant appends three trailing zero bytes that the RBC-ASCU11-E wired
+  // remote sends; without them, the AC controller silently rejects the
+  // command. Captured form for HM:
+  //   4C : <mode|flags> : <fan|mask> : <temp> : 00 : 33 : 33 : 00 : 00 : 00
+  if (hm_variant) {
+    uint8_t payload[9] = {
+        static_cast<uint8_t>(state->mode | set_flags),
+        static_cast<uint8_t>(state->fan | get_fan_bit_mask_for_mode(state->mode)),
+        temp_celcius_to_payload(state->target_temp),
+        EMPTY_DATA,
+        get_heat_cool_bits(state->mode),
+        get_heat_cool_bits(state->mode),
+        EMPTY_DATA,
+        EMPTY_DATA,
+        EMPTY_DATA,
+    };
+    write_set_parameter(command, master_address, command_mode_read, OPCODE2_SET_TEMP_WITH_FAN, payload, sizeof(payload));
+  } else {
+    uint8_t payload[6] = {
+        static_cast<uint8_t>(state->mode | set_flags),
+        static_cast<uint8_t>(state->fan | get_fan_bit_mask_for_mode(state->mode)),
+        temp_celcius_to_payload(state->target_temp),
+        EMPTY_DATA,
+        get_heat_cool_bits(state->mode),
+        get_heat_cool_bits(state->mode),
+    };
+    write_set_parameter(command, master_address, command_mode_read, OPCODE2_SET_TEMP_WITH_FAN, payload, sizeof(payload));
+  }
 }
 
 void write_set_parameter_flags_tu2c(struct DataFrame *command, uint8_t remote_address, uint8_t master_address,
@@ -580,14 +600,25 @@ void ToshibaAbClimate::add_polled_sensor(uint8_t id, float scale, uint32_t inter
   PolledSensor ps{ id, scale, interval_ms, sensor };
   this->polled_sensors_.push_back(ps);
 
-  // Schedule this sensor’s periodic query
-  // It doens't need to be added to loop it is added here for every sensor configured
+  // Schedule this sensor's periodic query.
+  // The periodic interval just appends the sensor ID to the pending queue;
+  // the actual 0x17 frame is dispatched serially from drain_sensor_query_queue_()
+  // so that short-form 0x1A replies (which carry no sensor ID) can be
+  // attributed unambiguously to the most recently sent query.
   if (interval_ms > 0) {
     this->set_interval(interval_ms, [this, id]() {
-      // Light back-pressure: avoid growing queue if it’s already busy
-      if (this->write_queue_.size() < 3) {
-        this->send_sensor_query(id);  // enqueue; loop() will handle bus timing
+      if (this->pending_count_ >= MAX_PENDING_SENSOR_QUERIES) {
+        ESP_LOGW(TAG, "Sensor query queue full; dropping query for 0x%02X", id);
+        return;
       }
+      // Skip if this sensor is already pending — the next interval will retry.
+      constexpr uint8_t mask = MAX_PENDING_SENSOR_QUERIES - 1;
+      for (uint8_t i = 0; i < this->pending_count_; i++) {
+        if (this->pending_sensor_queries_[(this->pending_head_ + i) & mask] == id) return;
+      }
+      const uint8_t tail = (this->pending_head_ + this->pending_count_) & mask;
+      this->pending_sensor_queries_[tail] = id;
+      this->pending_count_++;
     });
   }
   
@@ -621,6 +652,21 @@ void ToshibaAbClimate::send_sensor_query(uint8_t sensor_id) {
 
 
   this->send_command(cmd);  // enqueue; loop() will transmit when idle
+}
+
+
+void ToshibaAbClimate::drain_sensor_query_queue_() {
+  // sensor_query_outstanding_ is cleared by process_sensor_value_() on a
+  // matching reply, or by the 1s timeout watchdog if a reply never
+  // arrives — so a stuck query never deadlocks the queue.
+  if (this->sensor_query_outstanding_) return;
+  if (this->pending_count_ == 0) return;
+  if (this->write_queue_.size() >= WRITE_QUEUE_THROTTLE) return;
+
+  const uint8_t next = this->pending_sensor_queries_[this->pending_head_];
+  this->pending_head_ = (this->pending_head_ + 1) & (MAX_PENDING_SENSOR_QUERIES - 1);
+  this->pending_count_--;
+  this->send_sensor_query(next);
 }
 
 
@@ -889,9 +935,14 @@ void ToshibaAbClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "  Master address auto: %s", this->master_address_auto_ ? "true" : "false");
   ESP_LOGCONFIG(TAG, "  Command mode read: 0x%02X", this->command_mode_read_);
   ESP_LOGCONFIG(TAG, "  Command mode write: 0x%02X", this->command_mode_write_);
-  ESP_LOGCONFIG(TAG, "  Frame format: %s",
-                this->data_reader.frame_format() == FrameFormat::A0 ? "A0-protocol" :
-                this->data_reader.frame_format() == FrameFormat::TU2C ? "TU2C (U series)" : "TCC-Link");
+  const char *fmt_label;
+  switch (this->data_reader.frame_format()) {
+    case FrameFormat::TU2C: fmt_label = "TU2C (U series)"; break;
+    case FrameFormat::A0: fmt_label = "A0-protocol"; break;
+    case FrameFormat::HM: fmt_label = "HM (RAV-RM/HM range)"; break;
+    default: fmt_label = "TCC-Link"; break;
+  }
+  ESP_LOGCONFIG(TAG, "  Frame format: %s", fmt_label);
   ESP_LOGCONFIG(TAG, "  Filter frames: %s", this->filter_frames_ ? "true" : "false");
   ESP_LOGCONFIG(TAG, "  Autonomous mode: %s", this->autonomous_ ? "true" : "false");
   ESP_LOGCONFIG(TAG, "  Read only: %s", this->read_only_ ? "true" : "false");
@@ -1152,7 +1203,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           sync_from_received_state();
 
           break;
-        case OPCODE_STATUS:
+        case OPCODE_STATUS: {
           // sync power, mode, fan and target temp from the unit to the climate
           // component
 
@@ -1171,16 +1222,19 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
 
           ESP_LOGD(TAG, "Power: %d, Mode: %02X, Fan: %02X, Vent: %02X, Target Temp: %.1f",
                    tcc_state.power, tcc_state.mode, tcc_state.fan, tcc_state.vent, tcc_state.target_temp);
-   
+
 
           sync_from_received_state();
 
           break;
-        case OPCODE_EXTENDED_STATUS:
+        }
+        case OPCODE_EXTENDED_STATUS: {
           // sync power, mode, fan and target temp from the unit to the climate
           // component
 
           log_data_frame("EXTENDED STATUS", frame);
+
+          constexpr uint8_t rt_off = STATUS_DATA_TARGET_TEMP_BYTE + 1;
 
           tcc_state.power = (frame->data[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_POWER_MASK);
           tcc_state.mode =
@@ -1194,10 +1248,9 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
                   TEMPERATURE_CONVERSION_RATIO -
               TEMPERATURE_CONVERSION_OFFSET;
 
-          
-          if (frame->data[STATUS_DATA_TARGET_TEMP_BYTE + 1] > 1) {
+          if (frame->data_length > rt_off && frame->data[rt_off] > 1) {
             tcc_state.room_temp =
-                static_cast<float>(frame->data[STATUS_DATA_TARGET_TEMP_BYTE + 1]) / TEMPERATURE_CONVERSION_RATIO -
+                static_cast<float>(frame->data[rt_off]) / TEMPERATURE_CONVERSION_RATIO -
                 TEMPERATURE_CONVERSION_OFFSET;
           }
 
@@ -1210,6 +1263,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           sync_from_received_state();
 
           break;
+        }
         case OPCODE_SENSOR_VALUE:
             // sensor value received from master
           this->process_sensor_value_(frame);
@@ -1868,14 +1922,18 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
     return true;
   }
   if (!frame->is_tu2c() && frame->crc() != frame->calculate_crc()) {
-    ESP_LOGW(TAG, "CRC check failed");
-    log_data_frame("Failed frame", frame);
-
     if (this->failed_crcs_sensor_ != nullptr) {
       this->failed_crcs_sensor_->publish_state(this->failed_crcs_sensor_->state + 1);
     }
-
-    return false;
+    // Classic TCC-Link: the XOR CRC is the unit's actual algorithm, so a
+    // mismatch means the frame is corrupt — drop it. The HM variant uses
+    // a different (still-undecoded) CRC algorithm, so every frame fails
+    // the XOR check by design; tolerate the mismatch and process anyway.
+    if (!this->is_hm_variant()) {
+      ESP_LOGW(TAG, "CRC check failed");
+      log_data_frame("Failed frame", frame);
+      return false;
+    }
   }
   // >>> Drop our own TX echo frames (remote-labeled, identical bytes)
   if (this->is_own_tx_echo_(frame)) {
@@ -1899,6 +1957,11 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
 void ToshibaAbClimate::loop() {
   // TODO: check if last_unconfirmed_command_ was not confirmed after a timeout
   // and log warning/error
+
+  // Drain the pending sensor-query queue at most one per loop iteration.
+  // This must run BEFORE the TX dispatch below so an enqueued 0x17 has a
+  // chance to be picked up in the same tick.
+  this->drain_sensor_query_queue_();
 
   const bool bus_can_send = (millis() - last_received_frame_millis_) >= FRAME_SEND_MILLIS_FROM_LAST_RECEIVE &&
                             (millis() - last_sent_frame_millis_) >= FRAME_SEND_MILLIS_FROM_LAST_SEND;
@@ -2196,7 +2259,7 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
       write_set_parameter_flags_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_, new_state,
                                         COMMAND_SET_FAN);
     } else {
-      write_set_parameter_flags(&command, this->master_address_, this->command_mode_read_, new_state, COMMAND_SET_FAN);
+      write_set_parameter_flags(&command, this->master_address_, this->command_mode_read_, new_state, COMMAND_SET_FAN, this->is_hm_variant());
     }
     commands.push_back(command);
   }
@@ -2208,7 +2271,7 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
       write_set_parameter_flags_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_, new_state,
                                         COMMAND_SET_TEMP);
     } else {
-      write_set_parameter_flags(&command, this->master_address_, this->command_mode_read_, new_state, COMMAND_SET_TEMP);
+      write_set_parameter_flags(&command, this->master_address_, this->command_mode_read_, new_state, COMMAND_SET_TEMP, this->is_hm_variant());
     }
     commands.push_back(command);
   }
