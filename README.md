@@ -1,3 +1,9 @@
+# Updated code (May 2026) - Toshiba ESTIA Heat Pumps support
+
+Thanks to @7tobias the code now supports interfacing with Toshiba Estia Heat Pumps, the board has been tested with the R32 ESTIA Series 1.
+Previous models might use a different protocol again.
+Have a look at the bottom of this page for details and to the example_estia.yaml for setup.
+
 # D1 mini board variant
 
 In collaboration with @issalig, the initial developer of this project, we have designed a simpler board to be used with a D1 mini.
