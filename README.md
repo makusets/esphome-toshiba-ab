@@ -198,7 +198,9 @@ The case looks like this:
 
 # Toshiba Estia Heat Pump Support
 
-This component also supports Toshiba Estia heat pumps using the A0-protocol on the AB-bus. This is a different protocol from TCC-Link and TU2C, used by Estia R32 and similar models.
+This component also supports Toshiba R32 Estia heat pumps using the A0-protocol on the AB-bus. This is a different protocol from TCC-Link and TU2C and that of previous R410A ESTIA pumps.
+
+This componennt supports Estia R32 Heat Pumps (tested with Series 1) and possibly other similar models.
 
 <img src="docs/estia-esphome.png" width="45%"> <img src="docs/estia-log.png" width="45%">
 
