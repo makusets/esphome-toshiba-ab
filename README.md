@@ -1,7 +1,11 @@
-# Updated code (May 2026) - Toshiba ESTIA Heat Pumps support
+# Updated code (May 2026) - Toshiba ESTIA R32 Heat Pumps Support 
 
-Thanks to @7tobias the code now supports interfacing with Toshiba Estia Heat Pumps, the board has been tested with the R32 ESTIA Series 1.
-Previous models might use a different protocol again.
+Thanks to @7tobias the code now supports interfacing with Toshiba R32 Estia Heat Pumps, the board has been tested with the R32 ESTIA Series 1.
+
+The protocol in ESTIA Heat Pumps changed with the introduction of R32 pumps around 2021.
+
+Older ESTIA models using R410A use a different protocol. Have a look at https://github.com/vakkeli/toshiba_uart_ctrl for R410 models, @vakkeli integration should be compatible with this board (with the correct UART pins setup in yaml)
+
 Have a look at the bottom of this page for details and to the example_estia.yaml for setup.
 
 # D1 mini board variant
