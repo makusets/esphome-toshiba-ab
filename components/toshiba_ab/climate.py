@@ -99,6 +99,13 @@ FRAME_FORMATS = {
     "tcc-link": FrameFormat.NORMAL,
     "a0": FrameFormat.A0,
     "estia_a0": FrameFormat.A0,
+    # HM-range dialect (RAV-RM/HM indoors paired with TU2C-Link-capable
+    # outdoors). Frames use a 6-byte wrapper that embeds source/dest at
+    # byte offsets 6 / 8 of the on-wire data. The reader canonicalises
+    # them to the same in-memory layout as `normal` so the rest of the
+    # pipeline is unchanged. CRC is currently tolerated rather than
+    # validated (algorithm not yet derived).
+    "hm": FrameFormat.HM,
 }
 
 
