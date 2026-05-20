@@ -1211,6 +1211,10 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         case OPCODE_STATUS: {
           // sync power, mode, fan and target temp from the unit to the climate
           // component
+          if (frame->size() <= 5 || frame->raw[5] != 0x81) {
+            log_data_frame("STATUS ignored (raw[5] != 0x81)", frame);
+            break;
+          }
 
           log_data_frame("STATUS", frame);
 
@@ -1236,6 +1240,10 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         case OPCODE_EXTENDED_STATUS: {
           // sync power, mode, fan and target temp from the unit to the climate
           // component
+          if (frame->size() <= 5 || frame->raw[5] != 0x81) {
+            log_data_frame("EXTENDED STATUS ignored (raw[5] != 0x81)", frame);
+            break;
+          }
 
           log_data_frame("EXTENDED STATUS", frame);
 
