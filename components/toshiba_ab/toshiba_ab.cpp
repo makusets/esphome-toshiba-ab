@@ -258,19 +258,43 @@ void ToshibaAbClimate::handle_pending_command_ack_(const DataFrame *frame) {
   }
 }
 
-void log_data_frame(const std::string msg, const struct DataFrame *frame, size_t length = 0) {
+void log_data_frame(const std::string &msg, const struct DataFrame *frame, size_t length = 0) {
   std::string res;
-  char buf[5];
+  char buf[8];
+
   size_t len = length > 0 ? length : frame->data_length;
+
   for (size_t i = 0; i < len; i++) {
     if (i > 0) {
       res += ':';
     }
-    sprintf(buf, "%02X", frame->data[i]);
-    res += buf;
+
+    snprintf(buf, sizeof(buf), "%02X", frame->data[i]);
+
+    if (i == 0) {
+      // data[0] in yellow
+      res += "\033[33m";
+      res += buf;
+      res += "\033[0m";
+    } else {
+      // remaining data bytes in dim grey
+      res += "\033[2;37m";
+      res += buf;
+      res += "\033[0m";
+    }
   }
-  ESP_LOGD("RX", "%s: %02X:%02X:\x1B[32m%02X\033[0m:%02X:\033[2;100;37m%s\033[0m:%02X", msg.c_str(), frame->source,
-           frame->dest, frame->opcode1, frame->data_length, res.c_str(), frame->crc());
+
+  ESP_LOGD(
+    "RX",
+    "%s: \033[31m%02X\033[0m:\033[31m%02X\033[0m:\033[32m%02X\033[0m:%02X:%s:%02X",
+    msg.c_str(),
+    frame->source,
+    frame->dest,
+    frame->opcode1,
+    frame->data_length,
+    res.c_str(),
+    frame->crc()
+  );
 }
 
 void log_raw_data(const std::string& prefix, const uint8_t raw[], size_t size) {
