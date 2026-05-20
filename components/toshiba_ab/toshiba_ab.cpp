@@ -271,8 +271,8 @@ void log_data_frame(const std::string &msg, const struct DataFrame *frame, size_
 
     snprintf(buf, sizeof(buf), "%02X", frame->data[i]);
 
-    if (i == 0) {
-      // data[0] in yellow
+    if (i == 1) {
+      // data[1] in yellow
       res += "\033[33m";
       res += buf;
       res += "\033[0m";
