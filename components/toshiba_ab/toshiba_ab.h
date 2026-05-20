@@ -832,16 +832,23 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
 
   uint32_t last_received_frame_millis_ = 0;
   uint32_t last_sent_frame_millis_ = 0;
+  uint32_t last_tu2c_received_frame_millis_ = 0;
+  uint32_t last_tu2c_sent_frame_millis_ = 0;
   std::queue<DataFrame> write_queue_;
   std::queue<std::vector<uint8_t>> raw_write_queue_;
   optional<DataFrame> last_unconfirmed_command_;
   uint8_t last_unconfirmed_command_attempts_{0};
   bool resend_last_unconfirmed_command_{false};
+  uint32_t last_unconfirmed_command_sent_ms_{0};
   optional<DataFrame> last_tx_frame_for_echo_;
   uint32_t last_tx_frame_millis_{0};
   static const uint32_t ECHO_MATCH_WINDOW_MS = 1500;
 
   static const uint8_t MAX_COMMAND_SEND_ATTEMPTS = 5;
+  static const uint8_t TU2C_MAX_COMMAND_SEND_ATTEMPTS = 3;
+  static const uint32_t TU2C_ACK_TIMEOUT_MS = 3000;
+  static const uint32_t TU2C_FRAME_SEND_MILLIS_FROM_LAST_RECEIVE = 500;
+  static const uint32_t TU2C_FRAME_SEND_MILLIS_FROM_LAST_SEND = 500;
 
   // Estia raw command ACK tracking
   std::vector<uint8_t> estia_pending_cmd_;        // last sent raw command (for retry)
