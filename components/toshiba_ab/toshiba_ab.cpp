@@ -1353,6 +1353,18 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
                 
         log_data_frame("Remote Timer Read", frame);
 
+      } else if (frame->opcode1 == OPCODE_PARAMETER &&
+                 frame->data_length >= 3) {
+        // Remote command frames (opcode1 0x11)
+        if (frame->data[1] == 0x4C) {
+          log_data_frame("Remote command: fan/mode/temp change", frame);
+        } else if (frame->data[1] == 0x41 && frame->data[2] == 0x02) {
+          log_data_frame("Remote command: power off", frame);
+        } else if (frame->data[1] == 0x41 && frame->data[2] == 0x03) {
+          log_data_frame("Remote command: power off", frame);
+        } else {
+          log_data_frame("Remote command", frame);
+        }
       } else {
         // unknown remote message
         log_data_frame("Unknown remote data", frame);
