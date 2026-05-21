@@ -1361,7 +1361,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         } else if (frame->data[1] == 0x41 && frame->data[2] == 0x02) {
           log_data_frame("Remote command: power off", frame);
         } else if (frame->data[1] == 0x41 && frame->data[2] == 0x03) {
-          log_data_frame("Remote command: power off", frame);
+          log_data_frame("Remote command: power on", frame);
         } else {
           log_data_frame("Remote command", frame);
         }
