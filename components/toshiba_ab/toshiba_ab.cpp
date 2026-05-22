@@ -331,9 +331,9 @@ std::string frame_to_hex_string(const DataFrame *frame) {
 }
 
 
-void write_set_parameter(struct DataFrame *command, uint8_t master_address, uint8_t command_mode_read, uint8_t opcode2,
+void write_set_parameter(struct DataFrame *command, uint8_t remote_address, uint8_t master_address, uint8_t command_mode_read, uint8_t opcode2,
                          uint8_t payload[], size_t payload_size) {
-  command->source = TOSHIBA_REMOTE;
+  command->source = remote_address;
   command->dest = master_address;
   command->opcode1 = OPCODE_PARAMETER;
   command->data_length = SET_PARAMETER_PAYLOAD_HEADER_SIZE + payload_size;
@@ -347,9 +347,9 @@ void write_set_parameter(struct DataFrame *command, uint8_t master_address, uint
   command->data[SET_PARAMETER_PAYLOAD_HEADER_SIZE + payload_size] = command->calculate_crc();
 }
 
-void write_set_temperature(struct DataFrame *command, uint8_t master_address, uint8_t command_mode_read, uint8_t opcode2,
+void write_set_temperature(struct DataFrame *command, uint8_t remote_address, uint8_t master_address, uint8_t command_mode_read, uint8_t opcode2,
                            uint8_t payload[], size_t payload_size) {
-  command->source = TOSHIBA_REMOTE;
+  command->source = remote_address;
   command->dest = master_address;
   command->opcode1 = OPCODE_TEMPERATURE;
   command->data_length = SET_PARAMETER_PAYLOAD_HEADER_SIZE + payload_size;
@@ -364,13 +364,13 @@ void write_set_temperature(struct DataFrame *command, uint8_t master_address, ui
 }
 
 
-void write_set_parameter(struct DataFrame *command, uint8_t master_address, uint8_t command_mode_read, uint8_t opcode2,
+void write_set_parameter(struct DataFrame *command, uint8_t remote_address, uint8_t master_address, uint8_t command_mode_read, uint8_t opcode2,
                          uint8_t single_type_payload) {
   uint8_t payload[1] = {single_type_payload};
-  write_set_parameter(command, master_address, command_mode_read, opcode2, payload, 1);
+  write_set_parameter(command, remote_address, master_address, command_mode_read, opcode2, payload, 1);
 }
 
-void write_set_parameter_flags(struct DataFrame *command, uint8_t master_address, uint8_t command_mode_read,
+void write_set_parameter_flags(struct DataFrame *command, uint8_t remote_address, uint8_t master_address, uint8_t command_mode_read,
                                const struct TccState *state, uint8_t set_flags, bool hm_variant) {
   // The first six payload bytes are identical in both variants. The HM
   // variant appends three trailing zero bytes that the RBC-ASCU11-E wired
@@ -389,7 +389,7 @@ void write_set_parameter_flags(struct DataFrame *command, uint8_t master_address
         EMPTY_DATA,
         EMPTY_DATA,
     };
-    write_set_parameter(command, master_address, command_mode_read, OPCODE2_SET_TEMP_WITH_FAN, payload, sizeof(payload));
+    write_set_parameter(command, remote_address, master_address, command_mode_read, OPCODE2_SET_TEMP_WITH_FAN, payload, sizeof(payload));
   } else {
     uint8_t payload[6] = {
         static_cast<uint8_t>(state->mode | set_flags),
@@ -399,7 +399,7 @@ void write_set_parameter_flags(struct DataFrame *command, uint8_t master_address
         get_heat_cool_bits(state->mode),
         get_heat_cool_bits(state->mode),
     };
-    write_set_parameter(command, master_address, command_mode_read, OPCODE2_SET_TEMP_WITH_FAN, payload, sizeof(payload));
+    write_set_parameter(command, remote_address, master_address, command_mode_read, OPCODE2_SET_TEMP_WITH_FAN, payload, sizeof(payload));
   }
 }
 
@@ -445,22 +445,22 @@ void write_power_off_tu2c(struct DataFrame *command, uint8_t remote_address, uin
   command->raw[7] = calculate_tu2c_power_off_crc(command->raw, 7);
 }
 
-void write_set_parameter_mode(struct DataFrame *command, uint8_t master_address, uint8_t command_mode_read,
+void write_set_parameter_mode(struct DataFrame *command, uint8_t remote_address, uint8_t master_address, uint8_t command_mode_read,
                               const struct TccState *state) {
-  write_set_parameter(command, master_address, command_mode_read, OPCODE2_SET_MODE, state->mode);
+  write_set_parameter(command, remote_address, master_address, command_mode_read, OPCODE2_SET_MODE, state->mode);
 }
 
-void write_set_parameter_power(struct DataFrame *command, uint8_t master_address, uint8_t command_mode_read,
+void write_set_parameter_power(struct DataFrame *command, uint8_t remote_address, uint8_t master_address, uint8_t command_mode_read,
                                const struct TccState *state) {
-  write_set_parameter(command, master_address, command_mode_read, OPCODE2_SET_POWER, state->power | 0b0010);
+  write_set_parameter(command, remote_address, master_address, command_mode_read, OPCODE2_SET_POWER, state->power | 0b0010);
 }
 
-void write_set_parameter_vent(struct DataFrame *command, uint8_t master_address, uint8_t command_mode_read,
+void write_set_parameter_vent(struct DataFrame *command, uint8_t remote_address, uint8_t master_address, uint8_t command_mode_read,
                               const struct TccState *state) {
-  write_set_parameter(command, master_address, command_mode_read, OPCODE2_SET_VENT, state->vent);
+  write_set_parameter(command, remote_address, master_address, command_mode_read, OPCODE2_SET_VENT, state->vent);
 }
 
-void write_set_parameter_room_temp(struct DataFrame *command, uint8_t master_address, uint8_t command_mode_read,
+void write_set_parameter_room_temp(struct DataFrame *command, uint8_t remote_address, uint8_t master_address, uint8_t command_mode_read,
                                    float temperature) {
   // Clamp temperature to a safe range (adjust if needed by protocol)
   float clamped = std::max(0.0f, std::min(temperature, 40.0f));
@@ -471,15 +471,15 @@ void write_set_parameter_room_temp(struct DataFrame *command, uint8_t master_add
   uint8_t room_temp [2] = {0x00, temp_celcius_to_payload(rounded)};
 
   // Send using existing write_set_temperature
-  write_set_temperature(command, master_address, command_mode_read, OPCODE2_SENSOR_ROOM_TEMP, room_temp, sizeof(room_temp));
+  write_set_temperature(command, remote_address, master_address, command_mode_read, OPCODE2_SENSOR_ROOM_TEMP, room_temp, sizeof(room_temp));
 }
 
-void write_read_envelope(DataFrame *cmd, uint8_t master_address,
+void write_read_envelope(DataFrame *cmd, uint8_t remote_address, uint8_t master_address,
                          uint8_t command_mode_read, uint8_t opcode2, const uint8_t payload[], size_t payload_size) {
 // Writes a read envelope command
 // This is used to read some data from the master unit, but not sensors
 // And to send remote PING/KEEP_ALIVE commands
-  cmd->source      = TOSHIBA_REMOTE;
+  cmd->source      = remote_address;
   cmd->dest        = master_address;
   cmd->opcode1     = OPCODE_ERROR_HISTORY;             // 0x15
   cmd->data_length = SET_PARAMETER_PAYLOAD_HEADER_SIZE + payload_size;
@@ -532,7 +532,7 @@ void ToshibaAbClimate::send_ping() { // Sends a PING command to the master unit,
   DataFrame cmd{};
 
   const uint8_t tail[] = { OPCODE2_READ_STATUS, 0x00, 0x00, 0x48, 0x00 };
-  write_read_envelope(&cmd, this->master_address_, this->command_mode_read_, OPCODE2_PING_PONG, tail, sizeof(tail));
+  write_read_envelope(&cmd, this->remote_address_, this->master_address_, this->command_mode_read_, OPCODE2_PING_PONG, tail, sizeof(tail));
   this->send_command(cmd);
 }
 
@@ -549,7 +549,7 @@ void ToshibaAbClimate::send_read_block(uint8_t opcode2, uint16_t start, uint16_t
     static_cast<uint8_t>( length       & 0xFF),
   };
 
-  write_read_envelope(&cmd, this->master_address_, this->command_mode_read_, opcode2, tail, sizeof(tail));
+  write_read_envelope(&cmd, this->remote_address_, this->master_address_, this->command_mode_read_, opcode2, tail, sizeof(tail));
   this->send_command(cmd);  // enqueue; loop() will transmit when bus is idle
 }
 
@@ -557,7 +557,7 @@ void ToshibaAbClimate::remote_announce() {
   // Build and enqueue a short announce/envelope frame from the remote.
   // Example format: 40:F0:15:02:00:0D:AA -> source=0x40, opcode=0x15, len=2, data={0x00,0x0D}
   DataFrame cmd{};
-  cmd.source = TOSHIBA_REMOTE;
+  cmd.source = this->remote_address_;
   cmd.dest = TOSHIBA_BROADCAST;
   cmd.opcode1 = OPCODE_ERROR_HISTORY; // 0x15
   cmd.data_length = 2;
@@ -658,7 +658,7 @@ void ToshibaAbClimate::add_polled_sensor(uint8_t id, float scale, uint32_t inter
 
 void ToshibaAbClimate::send_sensor_query(uint8_t sensor_id) {
   DataFrame cmd{};
-  cmd.source      = TOSHIBA_REMOTE;           // 0x40
+  cmd.source      = this->remote_address_;           // 0x40
   cmd.dest        = this->master_address_;    // usually 0x00
   cmd.opcode1     = OPCODE_SENSOR_QUERY;      // 0x17
   cmd.data_length = 8;
@@ -960,6 +960,7 @@ void ToshibaAbClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "  UART: logging unavailable");
 #endif
   this->dump_traits_(TAG);
+  ESP_LOGCONFIG(TAG, "  Remote address: 0x%02X", this->remote_address_);
   ESP_LOGCONFIG(TAG, "  Master address: 0x%02X", this->master_address_);
   ESP_LOGCONFIG(TAG, "  Master address auto: %s", this->master_address_auto_ ? "true" : "false");
   ESP_LOGCONFIG(TAG, "  Command mode read: 0x%02X", this->command_mode_read_);
@@ -1053,7 +1054,7 @@ void ToshibaAbClimate::setup() {
           const uint8_t raw = temp_celcius_to_payload(t);
           ESP_LOGV(TAG, "Autonomous: enqueuing remote temperature %.1f°C (raw=0x%02X)", t, raw);
           DataFrame cmd{};
-          cmd.source = TOSHIBA_REMOTE;
+          cmd.source = this->remote_address_;
           cmd.dest = this->master_address_;
           cmd.opcode1 = OPCODE_TEMPERATURE;
           cmd.data_length = 5;
@@ -1311,7 +1312,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           break;
       }
     }else {
-    if (frame->source == TOSHIBA_REMOTE) {
+    if (frame->source == this->remote_address_) {
       ESP_LOGD(TAG, "Received data from remote:");
 
       // Remote temperature push: 40 00 55 05 08 81 01 6E 00 ..
@@ -2302,7 +2303,7 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
       // turn on
       ESP_LOGD(TAG, "Turning on");
       auto command = DataFrame{};
-      write_set_parameter_power(&command, this->master_address_, this->command_mode_read_, new_state);
+      write_set_parameter_power(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
       commands.push_back(command);
     } else {
       // turn off
@@ -2311,7 +2312,7 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
       if (use_tu2c) {
         write_power_off_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_);
       } else {
-        write_set_parameter_power(&command, this->master_address_, this->command_mode_read_, new_state);
+        write_set_parameter_power(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
       }
       commands.push_back(command);
       // don't process other changes when turning off
@@ -2322,7 +2323,7 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
   if (new_state->mode != tcc_state.mode) {
     ESP_LOGD(TAG, "Changing mode");
     auto command = DataFrame{};
-    write_set_parameter_mode(&command, this->master_address_, this->command_mode_read_, new_state);
+    write_set_parameter_mode(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
     commands.push_back(command);
   }
 
@@ -2333,7 +2334,7 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
       write_set_parameter_flags_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_, new_state,
                                         COMMAND_SET_FAN);
     } else {
-      write_set_parameter_flags(&command, this->master_address_, this->command_mode_read_, new_state, COMMAND_SET_FAN, this->is_hm_variant());
+      write_set_parameter_flags(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state, COMMAND_SET_FAN, this->is_hm_variant());
     }
     commands.push_back(command);
   }
@@ -2345,7 +2346,7 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
       write_set_parameter_flags_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_, new_state,
                                         COMMAND_SET_TEMP);
     } else {
-      write_set_parameter_flags(&command, this->master_address_, this->command_mode_read_, new_state, COMMAND_SET_TEMP, this->is_hm_variant());
+      write_set_parameter_flags(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state, COMMAND_SET_TEMP, this->is_hm_variant());
     }
     commands.push_back(command);
   }
@@ -2353,7 +2354,7 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
   if (new_state->vent != tcc_state.vent) {
     ESP_LOGD(TAG, "Changing vent");
     auto command = DataFrame{};
-    write_set_parameter_vent(&command, this->master_address_, this->command_mode_read_, new_state);
+    write_set_parameter_vent(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
     commands.push_back(command);
   }
 
@@ -2443,7 +2444,7 @@ void ToshibaAbClimate::send_command(const struct DataFrame command) {
       }
     } else if (!this->announce_ack_received_) {
       bool is_announce = false;
-      if (command.source == TOSHIBA_REMOTE && command.dest == TOSHIBA_BROADCAST &&
+      if (command.source == this->remote_address_ && command.dest == TOSHIBA_BROADCAST &&
           command.opcode1 == OPCODE_ERROR_HISTORY && command.data_length == 2 &&
           command.data[1] == 0x0D) {
         is_announce = true;
