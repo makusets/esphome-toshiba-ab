@@ -517,6 +517,7 @@ void ToshibaAbClimate::send_remote_temp(float temp_c) {
   // Encode raw = (C + OFFSET) * RATIO, mask per protocol
   const uint8_t raw = static_cast<uint8_t>(
       std::lround((temp_c + TEMPERATURE_CONVERSION_OFFSET) * TEMPERATURE_CONVERSION_RATIO));
+  const float rounded_temp_c = static_cast<float>(raw) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
   const uint8_t temp_source = std::min<uint8_t>(this->remote_address_ + 1, TOSHIBA_REMOTE_MAX);
 
 
@@ -534,7 +535,7 @@ void ToshibaAbClimate::send_remote_temp(float temp_c) {
 
   cmd.data[cmd.data_length] = cmd.calculate_crc();
 
-  ESP_LOGD(TAG, "Sending sensor temperature: %.1f°C", temp_c);
+  ESP_LOGD(TAG, "Sending sensor temperature: %.1f°C", rounded_temp_c);
   this->send_command(cmd);  // enqueue; loop() sends when bus is idle
 }
 
