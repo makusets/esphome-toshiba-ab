@@ -534,6 +534,7 @@ void ToshibaAbClimate::send_remote_temp(float temp_c) {
 
   cmd.data[cmd.data_length] = cmd.calculate_crc();
 
+  ESP_LOGD(TAG, "send_remote_temp: enqueuing remote temperature %.1f°C (raw=0x%02X)", temp_c, raw);
   this->send_command(cmd);  // enqueue; loop() sends when bus is idle
 }
 
