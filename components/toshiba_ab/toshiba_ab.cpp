@@ -163,6 +163,16 @@ void ToshibaAbClimate::update_frame_validation_() {
   this->data_reader.set_allow_same_source_dest(allow_same);
 }
 
+bool ToshibaAbClimate::has_bus_quiet_time_elapsed_(uint32_t now) const {
+  return (now - this->last_received_frame_millis_) >= FRAME_SEND_MILLIS_FROM_LAST_RECEIVE &&
+         (now - this->last_sent_frame_millis_) >= FRAME_SEND_MILLIS_FROM_LAST_SEND;
+}
+
+bool ToshibaAbClimate::has_tu2c_quiet_time_elapsed_(uint32_t now) const {
+  return (now - this->last_tu2c_received_frame_millis_) >= TU2C_FRAME_SEND_MILLIS_FROM_LAST_RECEIVE &&
+         (now - this->last_tu2c_sent_frame_millis_) >= TU2C_FRAME_SEND_MILLIS_FROM_LAST_SEND;
+}
+
 
 bool ToshibaAbClimate::is_ack_for_pending_command_(const DataFrame *frame) const {
   if (frame == nullptr || !this->last_unconfirmed_command_.has_value()) {
@@ -2025,8 +2035,8 @@ void ToshibaAbClimate::loop() {
   // chance to be picked up in the same tick.
   this->drain_sensor_query_queue_();
 
-  const bool bus_can_send = (millis() - last_received_frame_millis_) >= FRAME_SEND_MILLIS_FROM_LAST_RECEIVE &&
-                            (millis() - last_sent_frame_millis_) >= FRAME_SEND_MILLIS_FROM_LAST_SEND;
+  const uint32_t now = millis();
+  const bool bus_can_send = this->has_bus_quiet_time_elapsed_(now);
 
   if (bus_can_send) {
     optional<DataFrame> frame_to_send{};
@@ -2064,7 +2074,7 @@ void ToshibaAbClimate::loop() {
     }
 
     if (!frame_to_send.has_value() && !this->raw_write_queue_.empty()) {
-      last_sent_frame_millis_ = millis();
+      last_sent_frame_millis_ = now;
       auto raw_frame = this->raw_write_queue_.front();
       this->raw_write_queue_.pop();
 
@@ -2095,7 +2105,7 @@ void ToshibaAbClimate::loop() {
         this->last_unconfirmed_command_ = frame_to_send.value();
         this->last_unconfirmed_command_attempts_ = 1;
         this->resend_last_unconfirmed_command_ = false;
-        this->last_unconfirmed_command_sent_ms_ = millis();
+        this->last_unconfirmed_command_sent_ms_ = now;
       } else {
         this->last_unconfirmed_command_.reset();
         this->last_unconfirmed_command_attempts_ = 0;
@@ -2105,15 +2115,10 @@ void ToshibaAbClimate::loop() {
     }
 
     if (frame_to_send.has_value()) {
-      if (frame_to_send->is_tu2c()) {
-        const bool tu2c_timing_ok =
-            (millis() - last_tu2c_received_frame_millis_) >= TU2C_FRAME_SEND_MILLIS_FROM_LAST_RECEIVE &&
-            (millis() - last_tu2c_sent_frame_millis_) >= TU2C_FRAME_SEND_MILLIS_FROM_LAST_SEND;
-        if (!tu2c_timing_ok) {
+      if (frame_to_send->is_tu2c() && !this->has_tu2c_quiet_time_elapsed_(now)) {
           return;
-        }
       }
-      last_sent_frame_millis_ = millis();
+      last_sent_frame_millis_ = now;
       if (frame_to_send->is_tu2c()) {
         last_tu2c_sent_frame_millis_ = last_sent_frame_millis_;
       }

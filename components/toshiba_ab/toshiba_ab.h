@@ -755,6 +755,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool is_own_tx_echo_(const DataFrame *f) const; //used to filter echo after sending frame
   void remember_tx_frame_for_echo_(const uint8_t *bytes, size_t size, bool tu2c);
   void update_frame_validation_();
+  bool has_bus_quiet_time_elapsed_(uint32_t now) const;
+  bool has_tu2c_quiet_time_elapsed_(uint32_t now) const;
 
 
   std::vector<DataFrame> create_commands(const struct TccState *new_state);
