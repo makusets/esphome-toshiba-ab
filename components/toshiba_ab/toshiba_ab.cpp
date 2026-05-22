@@ -1312,7 +1312,9 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           break;
       }
     }else {
-    if (frame->source == this->remote_address_) {
+    const bool is_remote_source = (frame->source == this->remote_address_) ||
+                                  (frame->source >= 0x40 && frame->source <= 0x49);
+    if (is_remote_source) {
       ESP_LOGD(TAG, "Received data from remote:");
 
       // Remote temperature push: 40 00 55 05 08 81 01 6E 00 ..
