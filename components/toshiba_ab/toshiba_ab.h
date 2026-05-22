@@ -23,6 +23,7 @@ const uint32_t FRAME_SEND_MILLIS_FROM_LAST_SEND = 500;
 
 // const uint8_t TOSHIBA_MASTER = 0x00;  replaced by master_address_ which is set up in yaml
 const uint8_t TOSHIBA_REMOTE_DEFAULT = 0x40;
+const uint8_t TOSHIBA_REMOTE_MAX = 0x49;
 const uint8_t TOSHIBA_TU2C_REMOTE_DEFAULT = 0x50;
 const uint8_t TOSHIBA_TU2C_MASTER_DEFAULT = 0x90;
 const uint8_t TOSHIBA_TEMP_SENSOR = 0x42;
@@ -643,12 +644,16 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
 
   uint8_t master_address_ = 0x00;
   uint8_t remote_address_{TOSHIBA_REMOTE_DEFAULT};
+  bool remote_address_auto_{true};
   bool master_address_auto_{true};
   uint8_t tu2c_remote_address_{TOSHIBA_TU2C_REMOTE_DEFAULT};
   uint8_t tu2c_master_address_{TOSHIBA_TU2C_MASTER_DEFAULT};
   bool filter_frames_{true};
   void set_master_address(uint8_t address);
-  void set_remote_address(uint8_t address) { remote_address_ = address; }
+  void set_remote_address(uint8_t address) {
+    remote_address_ = std::min(address, TOSHIBA_REMOTE_MAX);
+    remote_address_auto_ = false;
+  }
   void set_master_address_auto(bool auto_detect) {
     master_address_auto_ = auto_detect;
   }

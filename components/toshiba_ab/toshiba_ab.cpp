@@ -493,8 +493,10 @@ void write_read_envelope(DataFrame *cmd, uint8_t remote_address, uint8_t master_
 }
 
 
-// Sends room temp to AC unit with the sensor configured in yaml
-// example frame: 42:00:11:04:08:89:72:46:E2 for 22 degrees
+// Sends room temp to AC unit with the sensor configured in yaml.
+// Uses a dedicated source address offset from the runtime remote id
+// (remote+1, capped at 0x49) to avoid colliding with normal remote traffic.
+// Example: if remote id is 0x41, this frame source becomes 0x42.
 void ToshibaAbClimate::send_remote_temp(float temp_c) {
   // sanity
   if (!std::isfinite(temp_c) || temp_c < -40.0f || temp_c > 80.0f) {
@@ -505,10 +507,11 @@ void ToshibaAbClimate::send_remote_temp(float temp_c) {
   // Encode raw = (C + OFFSET) * RATIO, mask per protocol
   const uint8_t raw = static_cast<uint8_t>(
       std::lround((temp_c + TEMPERATURE_CONVERSION_OFFSET) * TEMPERATURE_CONVERSION_RATIO));
+  const uint8_t temp_source = std::min<uint8_t>(this->remote_address_ + 1, TOSHIBA_REMOTE_MAX);
 
 
   DataFrame cmd{};
-  cmd.source      = TOSHIBA_TEMP_SENSOR;        // 0x42
+  cmd.source      = temp_source;
   cmd.dest        = this->master_address_;  // usually 0x00
   cmd.opcode1     = OPCODE_PARAMETER;       // 0x11
   cmd.data_length = 4;                       // payload: 08 89 <raw> 46
@@ -1315,6 +1318,17 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
     const bool is_remote_source = (frame->source == this->remote_address_) ||
                                   (frame->source >= 0x40 && frame->source <= 0x49);
     if (is_remote_source) {
+      // In remote auto-address mode we start at 0x40 and avoid collisions with
+      // existing remotes on the bus. If any remote frame arrives using our
+      // current address, shift to the next address up to 0x49.
+      if (this->remote_address_auto_ &&
+          frame->source == this->remote_address_ &&
+          this->remote_address_ < TOSHIBA_REMOTE_MAX) {
+        const uint8_t old = this->remote_address_;
+        this->remote_address_++;
+        ESP_LOGI(TAG, "Remote auto-address collision detected at 0x%02X; switching to 0x%02X",
+                 old, this->remote_address_);
+      }
       ESP_LOGD(TAG, "Received data from remote:");
 
       // Remote temperature push: 40 00 55 05 08 81 01 6E 00 ..
@@ -1373,12 +1387,11 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         log_data_frame("Unknown remote data", frame);
       }
     
-    } else if (frame->source == TOSHIBA_TEMP_SENSOR) {
-      // message from configured temp sensor in yaml
-      // example:   42:00:11:04:08:89:72:46:E2  for 22 degrees, this message follows Toshiba standalone temp sensor format
-      if (frame->opcode1 == OPCODE_PARAMETER &&
-          frame->data_length == 4 &&
-          frame->data[1] == 0x89) {
+    } else if (frame->opcode1 == OPCODE_PARAMETER &&
+               frame->data_length == 4 &&
+               frame->data[1] == 0x89) {
+      // External room-temperature report frame. Do not key this on a fixed
+      // source address (e.g. 0x42), because runtime remote id can vary.
 
         std::string label = this->ext_temp_sensor_name_.empty()
                     ? "Yaml temp sensor"
@@ -1387,9 +1400,6 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         uint8_t raw = frame->data[2] & TEMPERATURE_DATA_MASK;  // raw[7]
         float sensor_temp = static_cast<float>(raw) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
         ESP_LOGD(TAG, "%s: %.1f °C", label.c_str(), sensor_temp);
-      } else {
-        log_data_frame("Unknown 0x42 data", frame);
-      }
     } else {
     // Unknown source handling
     ESP_LOGD(TAG, "Received data from unknown source: %02X", frame->source);
