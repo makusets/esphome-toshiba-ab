@@ -42,6 +42,12 @@ const LogString *opcode_to_string(uint8_t opcode) {
 
 uint8_t temp_celcius_to_payload(float t) {
   // raw = round( (t + offset) * ratio )
+  // Guard NaN: lround(NaN) is impl-defined and cast-to-uint8 was producing
+  // 0xFF, which the AC decodes as 92.5°C and the wall remote displays as 92.
+  // Substitute 22°C as a safe fallback before any encoding.
+  if (std::isnan(t)) {
+    t = 22.0f;
+  }
   const float scaled = (t + TEMPERATURE_CONVERSION_OFFSET) * TEMPERATURE_CONVERSION_RATIO;
   int v = static_cast<int>(std::lround(scaled));
   if (v < 0) v = 0;
@@ -1011,6 +1017,19 @@ void ToshibaAbClimate::setup() {
   }
   ESP_LOGD("toshiba", "Setting up ToshibaClimate...");
 
+  // Restore last-known mode/target_temp/fan_mode from preferences so we never
+  // boot with target_temperature = NaN. Without this, a control command sent
+  // before the first valid STATUS frame encodes NaN -> 0xFF -> 92.5°C and the
+  // wall remote shows 92. `restore_from_flash: true` in YAML makes this also
+  // survive a power loss; otherwise it survives OTA + WDT reboots via RTC.
+  auto restore = this->restore_state_();
+  if (restore.has_value()) {
+    restore->apply(this);
+  } else {
+    this->target_temperature = 22.0f;
+    this->mode = climate::CLIMATE_MODE_OFF;
+  }
+
   // Override traits for Estia heat pump
   if (this->data_reader.frame_format() == FrameFormat::A0) {
     this->traits_.set_supported_modes({
@@ -1251,8 +1270,14 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         case OPCODE_STATUS: {
           // sync power, mode, fan and target temp from the unit to the climate
           // component
-          if (frame->size() <= 5 || frame->raw[5] != 0x81) {
-            log_data_frame("STATUS ignored (raw[5] != 0x81)", frame);
+          // Sanity-guard: the AC's 0x81 marker byte lives at a format-dependent
+          // offset. Classic TCC-Link puts it at raw[5] (data[1]); HM puts it at
+          // raw[4] (data[0]). Reject any STATUS frame missing the marker, but
+          // check the right offset per variant — otherwise every HM STATUS
+          // gets dropped and the climate component never syncs from the AC.
+          const uint8_t marker_off = (this->data_reader.frame_format() == FrameFormat::HM) ? 4 : 5;
+          if (frame->size() <= marker_off || frame->raw[marker_off] != 0x81) {
+            log_data_frame("STATUS ignored (marker != 0x81)", frame);
             break;
           }
 
@@ -1280,8 +1305,11 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         case OPCODE_EXTENDED_STATUS: {
           // sync power, mode, fan and target temp from the unit to the climate
           // component
-          if (frame->size() <= 5 || frame->raw[5] != 0x81) {
-            log_data_frame("EXTENDED STATUS ignored (raw[5] != 0x81)", frame);
+          // See OPCODE_STATUS above for the rationale: 0x81 marker is at
+          // raw[4] on HM, raw[5] on classic.
+          const uint8_t marker_off_ext = (this->data_reader.frame_format() == FrameFormat::HM) ? 4 : 5;
+          if (frame->size() <= marker_off_ext || frame->raw[marker_off_ext] != 0x81) {
+            log_data_frame("EXTENDED STATUS ignored (marker != 0x81)", frame);
             break;
           }
 
@@ -2221,7 +2249,17 @@ void ToshibaAbClimate::loop() {
 
   uint8_t bytes_read = 0;
 
-  while (available()) {
+  // Cap bytes drained per loop() tick. HM-variant master broadcasts can be
+  // 60-80 bytes (≈370 ms of wire time at 2400 baud) — well past the
+  // 30 ms-per-component budget. Unbounded draining keeps loop() inside the
+  // soft-serial RX path long enough to starve lwIP/Wi-Fi and trip the WDT
+  // (observed PCs all land at 0x401037xx, soft-serial ISR). 32 bytes ≈
+  // 150 ms of wire time — bounded worst case; unread bytes wait in the
+  // 2048-byte UART buffer for the next tick.
+  constexpr uint8_t MAX_BYTES_PER_LOOP = 32;
+  uint8_t loop_budget = MAX_BYTES_PER_LOOP;
+
+  while (available() && loop_budget-- > 0) {
     int byte = read();
     if (byte >= 0) {
       bytes_read++;
@@ -2256,6 +2294,8 @@ void ToshibaAbClimate::loop() {
       ESP_LOGW(TAG, "Unable to read data");
     }
   }
+
+  App.feed_wdt();
 
   if (bytes_read > 0) {
     loops_with_reads_++;
