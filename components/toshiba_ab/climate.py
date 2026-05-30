@@ -120,6 +120,34 @@ REPORT_SENSOR_TEMP_SCHEMA = cv.Schema({
 })
 
 
+CONF_HARDWARE_UART_RX_PIN = "hardware_uart_rx_pin"
+
+
+def _hardware_uart_rx_pin(value):
+    """Accept GPIO3 or GPIO13 — the only ESP8266 UART0 hardware RX pins.
+
+    Lets an ESP8266 install whose RX is on a hardware-UART pin (but whose TX is
+    not, so ESPHome would otherwise bit-bang both) move RX onto the real hardware
+    UART. This removes the software-serial RX busy-wait that starves Wi-Fi and
+    trips the watchdog on busy buses. TX stays on the configured uart tx_pin.
+    """
+    original = value
+    if isinstance(value, str) and value.strip().upper().startswith("GPIO"):
+        value = value.strip()[4:]
+    try:
+        num = int(value)
+    except (TypeError, ValueError):
+        raise cv.Invalid(
+            f"{CONF_HARDWARE_UART_RX_PIN} must be GPIO3 or GPIO13, got {original!r}"
+        )
+    if num not in (3, 13):
+        raise cv.Invalid(
+            f"{CONF_HARDWARE_UART_RX_PIN} must be GPIO3 or GPIO13 "
+            "(the only ESP8266 hardware UART0 RX pins)"
+        )
+    return num
+
+
 CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
     {
         cv.Optional(CONF_MASTER, default=0x00): cv.uint8_t,
@@ -129,6 +157,9 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
         cv.Optional(CONF_COMMAND_MODE_WRITE, default=0x80): cv.uint8_t,
         cv.Optional(CONF_FRAME_FORMAT, default="n"): cv.one_of(*FRAME_FORMATS, lower=True),
         cv.Optional(CONF_FILTER_FRAMES, default=True): cv.boolean,
+        # Opt-in (ESP8266): receive on hardware UART0 (GPIO3 or GPIO13) instead of
+        # software serial, to avoid the RX busy-wait that trips the watchdog.
+        cv.Optional(CONF_HARDWARE_UART_RX_PIN): _hardware_uart_rx_pin,
 
         cv.GenerateID(): cv.declare_id(ToshibaAbClimate),
         cv.Optional(CONF_CONNECTED): binary_sensor.binary_sensor_schema(
@@ -207,8 +238,12 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
 ).extend(uart.UART_DEVICE_SCHEMA).extend(cv.COMPONENT_SCHEMA)
 
 def validate_uart(config):
+    # When hardware_uart_rx_pin is set, the component owns RX via the hardware
+    # UART0, so the `uart:` block must be TX-only — don't require an rx_pin.
+    # Otherwise keep the original requirement that the uart provides RX.
+    require_rx = CONF_HARDWARE_UART_RX_PIN not in config
     uart.final_validate_device_schema(
-        "tcc_link", baud_rate=2400, require_rx=True, require_tx=False
+        "tcc_link", baud_rate=2400, require_rx=require_rx, require_tx=False
     )(config)
 
 
@@ -236,6 +271,8 @@ async def to_code(config):
         cg.add(var.set_frame_format(FRAME_FORMATS[config[CONF_FRAME_FORMAT]]))
     if CONF_FILTER_FRAMES in config:
         cg.add(var.set_filter_frames(config[CONF_FILTER_FRAMES]))
+    if CONF_HARDWARE_UART_RX_PIN in config:
+        cg.add(var.set_hardware_uart_rx_pin(config[CONF_HARDWARE_UART_RX_PIN]))
 
     if CONF_CONNECTED in config:
         sens = await binary_sensor.new_binary_sensor(config[CONF_CONNECTED])

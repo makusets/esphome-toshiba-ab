@@ -4,6 +4,9 @@
 #include <inttypes.h>
 #include <cstring>
 #include <cstdlib>
+#ifdef USE_ESP8266
+#include <HardwareSerial.h>
+#endif
 
 
 namespace esphome {
@@ -12,6 +15,13 @@ namespace toshiba_ab {
 
 
 static const char *const TAG = "tcc_link.climate";
+
+#ifdef USE_ESP8266
+// Optional hardware UART0 instance, used for RX only when hardware_uart_rx_pin is
+// configured (see ToshibaAbClimate::set_hardware_uart_rx_pin). ESPHome disables
+// the Arduino global `Serial`, so we own this instance. Only begun when enabled.
+static HardwareSerial s_bus_serial(UART0);
+#endif
 
 
 const LogString *opcode_to_string(uint8_t opcode) {
@@ -647,6 +657,7 @@ bool ToshibaAbClimate::is_tu2c_registration_query_(const DataFrame &frame) const
 }
 
 void ToshibaAbClimate::add_polled_sensor(uint8_t id, float scale, uint32_t interval_ms, sensor::Sensor *sensor) {
+  const size_t sensor_index = this->polled_sensors_.size();
   PolledSensor ps{ id, scale, interval_ms, sensor };
   this->polled_sensors_.push_back(ps);
 
@@ -655,26 +666,38 @@ void ToshibaAbClimate::add_polled_sensor(uint8_t id, float scale, uint32_t inter
   // the actual 0x17 frame is dispatched serially from drain_sensor_query_queue_()
   // so that short-form 0x1A replies (which carry no sensor ID) can be
   // attributed unambiguously to the most recently sent query.
+  //
+  // Do not start all pollers immediately after boot: ESP8266 Wi-Fi/API
+  // reconnect plus software-serial RX is watchdog-sensitive. Start polling
+  // after a grace period and stagger each sensor so the first burst cannot
+  // swamp the bus or the API connection.
   if (interval_ms > 0) {
-    this->set_interval(interval_ms, [this, id]() {
-      if (this->pending_count_ >= MAX_PENDING_SENSOR_QUERIES) {
-        ESP_LOGW(TAG, "Sensor query queue full; dropping query for 0x%02X", id);
-        return;
-      }
-      // Skip if this sensor is already pending — the next interval will retry.
-      constexpr uint8_t mask = MAX_PENDING_SENSOR_QUERIES - 1;
-      for (uint8_t i = 0; i < this->pending_count_; i++) {
-        if (this->pending_sensor_queries_[(this->pending_head_ + i) & mask] == id) return;
-      }
-      const uint8_t tail = (this->pending_head_ + this->pending_count_) & mask;
-      this->pending_sensor_queries_[tail] = id;
-      this->pending_count_++;
+    const uint32_t first_poll_delay_ms = 15000 + static_cast<uint32_t>(sensor_index) * 2000;
+    this->set_timeout(first_poll_delay_ms, [this, id, interval_ms]() {
+      this->enqueue_sensor_query_(id);
+      this->set_interval(interval_ms, [this, id]() { this->enqueue_sensor_query_(id); });
     });
   }
   
     // Ensure the read-only switch reports its initial state to Home Assistant
     if (this->read_only_switch_)
       this->read_only_switch_->publish_state(this->read_only_);
+}
+
+bool ToshibaAbClimate::enqueue_sensor_query_(uint8_t id) {
+  if (this->pending_count_ >= MAX_PENDING_SENSOR_QUERIES) {
+    ESP_LOGW(TAG, "Sensor query queue full; dropping query for 0x%02X", id);
+    return false;
+  }
+  // Skip if this sensor is already pending — the next interval will retry.
+  constexpr uint8_t mask = MAX_PENDING_SENSOR_QUERIES - 1;
+  for (uint8_t i = 0; i < this->pending_count_; i++) {
+    if (this->pending_sensor_queries_[(this->pending_head_ + i) & mask] == id) return false;
+  }
+  const uint8_t tail = (this->pending_head_ + this->pending_count_) & mask;
+  this->pending_sensor_queries_[tail] = id;
+  this->pending_count_++;
+  return true;
 }
 
 void ToshibaAbClimate::send_sensor_query(uint8_t sensor_id) {
@@ -707,7 +730,7 @@ void ToshibaAbClimate::send_sensor_query(uint8_t sensor_id) {
 
 void ToshibaAbClimate::drain_sensor_query_queue_() {
   // sensor_query_outstanding_ is cleared by process_sensor_value_() on a
-  // matching reply, or by the 1s timeout watchdog if a reply never
+  // matching reply, or by the sensor-query timeout watchdog if a reply never
   // arrives — so a stuck query never deadlocks the queue.
   if (this->sensor_query_outstanding_) return;
   if (this->pending_count_ == 0) return;
@@ -1048,6 +1071,25 @@ void ToshibaAbClimate::setup() {
 
   pinMode(16, OUTPUT); // Set GPIO16 low, only needed for my old board, to be removed soon
   digitalWrite(16, LOW);
+
+  // --- Optional hardware-UART RX (see set_hardware_uart_rx_pin) ---
+  // When the bus RX pin is an ESP8266 hardware-UART0 pin (GPIO3, or GPIO13 via
+  // swap) but TX is not, ESPHome would bit-bang both. The software-serial RX ISR
+  // busy-waits ~1 char time per byte at 2400 baud, starving Wi-Fi enough to trip
+  // the watchdog on busy buses (makusets#88). Moving RX onto the real hardware
+  // UART gives a FIFO-backed, zero-busy-wait receiver. TX stays on the ESPHome
+  // software-serial parent (configured tx_pin). UART0 is free when logger
+  // baud_rate is 0. Disabled by default, so all other configs are unaffected.
+#ifdef USE_ESP8266
+  if (this->hw_uart_rx_enabled_) {
+    s_bus_serial.setRxBufferSize(512);
+    s_bus_serial.begin(2400, SERIAL_8E1);
+    if (this->hw_uart_rx_pin_ == 13) {
+      s_bus_serial.swap();  // UART0: RX GPIO3->GPIO13, TX GPIO1->GPIO15 (unused)
+    }
+    ESP_LOGCONFIG(TAG, "Hardware UART0 RX enabled on GPIO%u", this->hw_uart_rx_pin_);
+  }
+#endif
 
   // If autonomous mode is enabled, we need to send ping, E8 read, and external temp periodically
   // Send all these if autonomous mode is enabled using set_interval calls
@@ -2259,8 +2301,22 @@ void ToshibaAbClimate::loop() {
   constexpr uint8_t MAX_BYTES_PER_LOOP = 32;
   uint8_t loop_budget = MAX_BYTES_PER_LOOP;
 
-  while (available() && loop_budget-- > 0) {
-    int byte = read();
+  // Read from hardware UART0 RX when enabled (no busy-wait), else from the
+  // ESPHome software-serial parent (existing behavior).
+  while (loop_budget > 0) {
+#ifdef USE_ESP8266
+    const bool have = this->hw_uart_rx_enabled_ ? (s_bus_serial.available() > 0) : (this->available() > 0);
+#else
+    const bool have = this->available() > 0;
+#endif
+    if (!have)
+      break;
+    loop_budget--;
+#ifdef USE_ESP8266
+    int byte = this->hw_uart_rx_enabled_ ? s_bus_serial.read() : this->read();
+#else
+    int byte = this->read();
+#endif
     if (byte >= 0) {
       bytes_read++;
 
