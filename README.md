@@ -1,12 +1,15 @@
-# Updated code (May 2026) - Toshiba ESTIA R32 Heat Pumps Support 
+# Updated code (May 2026) - Toshiba ESTIA R32 Heat Pumps Support and more
 
 Thanks to @7tobias the code now supports interfacing with Toshiba R32 Estia Heat Pumps, the board has been tested with the R32 ESTIA Series 1.
-
 The protocol in ESTIA Heat Pumps changed with the introduction of R32 pumps around 2021.
-
 Older ESTIA models using R410A use a different protocol. Have a look at https://github.com/vakkeli/toshiba_uart_ctrl for R410 models, @vakkeli integration should be compatible with this board (with the correct UART pins setup in yaml)
-
 Have a look at the bottom of this page for details and to the example_estia.yaml for setup.
+
+- The esp will now detect what protocol is in use on the AB line automatically, if none is specified.
+- Adress assignment has changed to avoid duplicated adresses that would trigger an E09 error.
+- A new protocol variant has been implemented which increases compatibility with some newer models, it is auto detected, and is named "hm" in the code.
+- The esp will now use hardware UART, which should reduce blocking of code execution and triggering reboots by the watchdog.
+  
 
 # D1 mini board variant
 
