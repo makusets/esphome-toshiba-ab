@@ -110,6 +110,12 @@ uart:
   parity: EVEN
   rx_buffer_size: 2048    # increase buffer to avoid dropped bytes
 
+# ESP8266 note: when rx_pin is GPIO13 and tx_pin is not GPIO15, the Toshiba
+# component automatically moves RX onto hardware UART0 swap to avoid ESPHome
+# software-serial RX busy-wait watchdog issues. For any other rx_pin, the
+# normal ESPHome UART RX path is used unless hardware_uart_rx_pin is set
+# explicitly to GPIO3 or GPIO13 under the climate component.
+
 climate:
   - platform: toshiba_ab
     name: "Toshiba AC"

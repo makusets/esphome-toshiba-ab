@@ -674,8 +674,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_frame_format(FrameFormat format) { data_reader.set_frame_format(format); }
   bool is_hm_variant() const { return data_reader.frame_format() == FrameFormat::HM; }
 
-  // Opt-in (ESP8266 only): receive on the hardware UART0 using `pin` (GPIO3 or
-  // GPIO13) instead of ESPHome's software serial. The software-serial RX ISR
+  // ESP8266 only: receive on the hardware UART0 using `pin` (auto-detected for
+  // GPIO13, or explicitly configured for GPIO3/GPIO13) instead of ESPHome's
+  // software serial. The software-serial RX ISR
   // busy-waits ~1 char time per byte and starves Wi-Fi enough to trip the
   // watchdog on busy buses; the hardware UART has a FIFO and no busy-wait. TX
   // stays on the configured uart tx_pin (software serial). No effect elsewhere.
@@ -750,8 +751,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
  protected:
   climate::ClimateTraits traits_;
 
-  // Hardware-UART-RX opt-in (see set_hardware_uart_rx_pin). Disabled by default
-  // so existing configs are byte-for-byte unchanged.
+  // Hardware-UART-RX mode (see set_hardware_uart_rx_pin). Disabled by default
+  // unless final validation detects the ESP8266 GPIO13 RX/software-TX case.
   bool hw_uart_rx_enabled_{false};
   uint8_t hw_uart_rx_pin_{0};
 
