@@ -180,6 +180,119 @@ void ToshibaAbClimate::update_frame_validation_() {
   this->data_reader.set_allow_same_source_dest(allow_same);
 }
 
+void ToshibaAbClimate::confirm_frame_format_(FrameFormat format, const char *reason) {
+  if (!this->should_auto_detect_frame_format_()) {
+    return;
+  }
+  this->data_reader.set_frame_format(format);
+  this->frame_format_confirmed_ = true;
+  const char *fmt = "normal";
+  switch (format) {
+    case FrameFormat::TU2C: fmt = "tu2c"; break;
+    case FrameFormat::A0: fmt = "a0"; break;
+    case FrameFormat::HM: fmt = "hm"; break;
+    default: fmt = "n"; break;
+  }
+  ESP_LOGI(TAG, "Auto-detected frame_format=%s (%s)", fmt, reason != nullptr ? reason : "confirmed frame");
+}
+
+void ToshibaAbClimate::watch_auto_frame_format_byte_(uint8_t byte) {
+  if (!this->should_auto_detect_frame_format_()) {
+    return;
+  }
+
+  constexpr uint32_t AUTO_A0_BYTE_TIMEOUT_MS = 50;
+  if (this->auto_a0_collecting_ && (millis() - this->auto_a0_last_byte_ms_) > AUTO_A0_BYTE_TIMEOUT_MS) {
+    this->auto_a0_collecting_ = false;
+    this->auto_a0_prefix_match_ = 0;
+    this->auto_a0_index_ = 0;
+    this->auto_a0_expected_total_ = 0;
+  }
+
+  if (!this->auto_a0_collecting_) {
+    if (this->auto_a0_prefix_match_ == 1) {
+      if (byte == 0x00) {
+        this->auto_a0_collecting_ = true;
+        this->auto_a0_buffer_[0] = 0xA0;
+        this->auto_a0_buffer_[1] = 0x00;
+        this->auto_a0_index_ = 2;
+        this->auto_a0_expected_total_ = 0;
+        this->auto_a0_last_byte_ms_ = millis();
+      }
+      this->auto_a0_prefix_match_ = 0;
+      return;
+    }
+    if (byte == 0xA0) {
+      this->auto_a0_prefix_match_ = 1;
+    }
+    return;
+  }
+
+  this->auto_a0_last_byte_ms_ = millis();
+  if (this->auto_a0_index_ >= sizeof(this->auto_a0_buffer_)) {
+    this->auto_a0_collecting_ = false;
+    this->auto_a0_index_ = 0;
+    this->auto_a0_expected_total_ = 0;
+    return;
+  }
+
+  this->auto_a0_buffer_[this->auto_a0_index_++] = byte;
+  if (this->auto_a0_index_ == 4) {
+    const uint8_t len = this->auto_a0_buffer_[3];
+    this->auto_a0_expected_total_ = len + 6;  // A0:00 prefix + type + len + len-payload + CRC16
+    if (this->auto_a0_expected_total_ < 8 || this->auto_a0_expected_total_ > sizeof(this->auto_a0_buffer_)) {
+      this->auto_a0_collecting_ = false;
+      this->auto_a0_index_ = 0;
+      this->auto_a0_expected_total_ = 0;
+      return;
+    }
+  }
+
+  if (this->auto_a0_expected_total_ > 0 && this->auto_a0_index_ >= this->auto_a0_expected_total_) {
+    DataFrame candidate{};
+    const uint16_t stored = this->auto_a0_expected_total_ - 2;
+    for (uint16_t i = 0; i < stored && i < DATA_FRAME_MAX_SIZE; i++) {
+      candidate.raw[i] = this->auto_a0_buffer_[i + 2];
+    }
+    candidate.set_estia(true);
+    candidate.set_estia_len(this->auto_a0_buffer_[3]);
+    const uint16_t src = (stored > 4) ? ((candidate.raw[3] << 8) | candidate.raw[4]) : 0;
+    if (candidate.validate_estia_crc() && src == 0x0800) {
+      this->confirm_frame_format_(FrameFormat::A0, "valid A0 frame from master");
+    }
+    this->auto_a0_collecting_ = false;
+    this->auto_a0_index_ = 0;
+    this->auto_a0_expected_total_ = 0;
+  }
+}
+
+bool ToshibaAbClimate::is_hm_wire_frame_from_master_(const DataFrame *frame) const {
+  if (frame == nullptr || frame->raw[0] != 0xA0 || frame->raw[1] != 0x00 || frame->data_length < 7) {
+    return false;
+  }
+  const size_t total = frame->size();
+  if (total < 12 || frame->raw[4] != 0x00 || frame->raw[9] != 0x00) {
+    return false;
+  }
+  const uint8_t src = frame->raw[6];
+  if (src == this->master_address_) {
+    return true;
+  }
+  return this->master_address_auto_ && this->master_address_ == 0x00 && src == 0x00;
+}
+
+bool ToshibaAbClimate::maybe_auto_detect_hm_frame_(DataFrame *frame) {
+  if (!this->should_auto_detect_frame_format_() || !this->is_hm_wire_frame_from_master_(frame)) {
+    return false;
+  }
+  const uint8_t detected_master = frame->raw[6];
+  this->confirm_frame_format_(FrameFormat::HM, "valid HM frame from master");
+  if (this->master_address_auto_ && detected_master != this->master_address_) {
+    this->master_address_ = detected_master;
+  }
+  return DataFrameReader::canonicalize_hm_frame(frame, frame->size());
+}
+
 bool ToshibaAbClimate::has_bus_quiet_time_elapsed_(uint32_t now) const {
   return (now - this->last_received_frame_millis_) >= FRAME_SEND_MILLIS_FROM_LAST_RECEIVE &&
          (now - this->last_sent_frame_millis_) >= FRAME_SEND_MILLIS_FROM_LAST_SEND;
@@ -1017,7 +1130,8 @@ void ToshibaAbClimate::dump_config() {
     case FrameFormat::HM: fmt_label = "HM (RAV-RM/HM range)"; break;
     default: fmt_label = "TCC-Link"; break;
   }
-  ESP_LOGCONFIG(TAG, "  Frame format: %s", fmt_label);
+  ESP_LOGCONFIG(TAG, "  Frame format: %s%s%s", fmt_label, this->frame_format_auto_ ? " (auto" : "",
+                this->frame_format_auto_ ? (this->frame_format_confirmed_ ? ", confirmed)" : ", pending)") : "");
 #ifdef USE_ESP8266
   if (this->hw_uart_rx_enabled_) {
     ESP_LOGCONFIG(TAG, "  Hardware UART0 RX: enabled");
@@ -1288,6 +1402,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
       switch (frame->opcode1) {
         case OPCODE_PING: {
         log_data_frame("PING/ALIVE", frame);
+        this->confirm_frame_format_(FrameFormat::NORMAL, "valid keepalive from master");
         break;
         }
         case OPCODE_ACK: {
@@ -2085,6 +2200,14 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
 
     return true;
   }
+  DataFrame auto_detected_frame{};
+  if (this->should_auto_detect_frame_format_() && this->is_hm_wire_frame_from_master_(frame)) {
+    auto_detected_frame = *frame;
+    if (this->maybe_auto_detect_hm_frame_(&auto_detected_frame)) {
+      frame = &auto_detected_frame;
+    }
+  }
+
   if (!frame->is_tu2c() && frame->crc() != frame->calculate_crc()) {
     if (this->failed_crcs_sensor_ != nullptr) {
       this->failed_crcs_sensor_->publish_state(this->failed_crcs_sensor_->state + 1);
@@ -2342,6 +2465,8 @@ void ToshibaAbClimate::loop() {
 
       if (!can_read_packet)
         continue;  // wait until can read packet
+
+      this->watch_auto_frame_format_byte_(static_cast<uint8_t>(byte));
 
       if (data_reader.put(byte)) {
         // packet complete

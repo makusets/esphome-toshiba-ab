@@ -531,31 +531,7 @@ struct DataFrameReader {
         if (frame_format_ == FrameFormat::HM
             && frame.raw[0] == 0xA0 && frame.raw[1] == 0x00
             && frame.data_length >= 7) {
-          const uint16_t total = expected_total_;
-          const uint8_t crc_byte = frame.raw[total - 1];
-          const uint8_t new_src = frame.raw[6];
-          const uint8_t new_dst = frame.raw[8];
-          const uint8_t new_data_length = frame.data_length - 5;
-          const uint8_t opcode2 = frame.raw[10];
-          // Real payload after opcode2 in the wire frame is
-          // (data_length - 7) bytes, located at wire raw[11..total-2].
-          const uint8_t tail_len = frame.data_length - 7;
-          // raw[4] = opcode2, raw[5] = 0x00 padding, raw[6..] = tail.
-          // Source range raw[11..] is to the RIGHT of destination range
-          // raw[6..]; iterate forward so each source byte is read before
-          // any subsequent write could overwrite it.
-          for (uint8_t i = 0; i < tail_len; i++) {
-            frame.raw[DATA_OFFSET_FROM_START + 2 + i] = frame.raw[11 + i];
-          }
-          frame.raw[DATA_OFFSET_FROM_START + 0] = opcode2;
-          frame.raw[DATA_OFFSET_FROM_START + 1] = 0x00;
-          frame.raw[0] = new_src;
-          frame.raw[1] = new_dst;
-          // raw[2] (opcode1) is at the same wire offset in HM as in
-          // NORMAL; only the length value changes.
-          frame.raw[3] = new_data_length;
-          frame.data_length = new_data_length;
-          frame.raw[DATA_OFFSET_FROM_START + new_data_length] = crc_byte;
+          DataFrameReader::canonicalize_hm_frame(&frame, expected_total_);
           // CRC algorithm for HM hasn't been derived yet — accept the
           // frame but flag the CRC as unvalidated so callers can decide.
           crc_valid = false;
@@ -579,6 +555,31 @@ struct DataFrameReader {
     }
 
     return false;
+  }
+
+
+  static bool canonicalize_hm_frame(DataFrame *hm_frame, uint16_t total) {
+    if (hm_frame == nullptr || total < 12 || hm_frame->raw[0] != 0xA0 || hm_frame->raw[1] != 0x00 ||
+        hm_frame->data_length < 7) {
+      return false;
+    }
+    const uint8_t crc_byte = hm_frame->raw[total - 1];
+    const uint8_t new_src = hm_frame->raw[6];
+    const uint8_t new_dst = hm_frame->raw[8];
+    const uint8_t new_data_length = hm_frame->data_length - 5;
+    const uint8_t opcode2 = hm_frame->raw[10];
+    const uint8_t tail_len = hm_frame->data_length - 7;
+    for (uint8_t i = 0; i < tail_len; i++) {
+      hm_frame->raw[DATA_OFFSET_FROM_START + 2 + i] = hm_frame->raw[11 + i];
+    }
+    hm_frame->raw[DATA_OFFSET_FROM_START + 0] = opcode2;
+    hm_frame->raw[DATA_OFFSET_FROM_START + 1] = 0x00;
+    hm_frame->raw[0] = new_src;
+    hm_frame->raw[1] = new_dst;
+    hm_frame->raw[3] = new_data_length;
+    hm_frame->data_length = new_data_length;
+    hm_frame->raw[DATA_OFFSET_FROM_START + new_data_length] = crc_byte;
+    return true;
   }
 
   void set_filter_frames(bool filter_frames) { filter_frames_ = filter_frames; }
@@ -671,7 +672,16 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_waterpump_hours_sensor(sensor::Sensor *sensor) { waterpump_hours_sensor_ = sensor; }
   void set_backup_heater_hours_sensor(sensor::Sensor *sensor) { backup_heater_hours_sensor_ = sensor; }
   void set_demand_sensor(sensor::Sensor *sensor) { demand_sensor_ = sensor; }
-  void set_frame_format(FrameFormat format) { data_reader.set_frame_format(format); }
+  void set_frame_format(FrameFormat format) {
+    data_reader.set_frame_format(format);
+    frame_format_auto_ = false;
+    frame_format_confirmed_ = true;
+  }
+  void set_frame_format_auto() {
+    data_reader.set_frame_format(FrameFormat::NORMAL);
+    frame_format_auto_ = true;
+    frame_format_confirmed_ = false;
+  }
   bool is_hm_variant() const { return data_reader.frame_format() == FrameFormat::HM; }
 
   // ESP8266 only: receive on the hardware UART0 using `pin` (auto-detected for
@@ -773,6 +783,11 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void update_frame_validation_();
   bool has_bus_quiet_time_elapsed_(uint32_t now) const;
   bool has_tu2c_quiet_time_elapsed_(uint32_t now) const;
+  bool should_auto_detect_frame_format_() const { return frame_format_auto_ && !frame_format_confirmed_; }
+  void confirm_frame_format_(FrameFormat format, const char *reason);
+  void watch_auto_frame_format_byte_(uint8_t byte);
+  bool maybe_auto_detect_hm_frame_(DataFrame *frame);
+  bool is_hm_wire_frame_from_master_(const DataFrame *frame) const;
 
 
   std::vector<DataFrame> create_commands(const struct TccState *new_state);
@@ -855,6 +870,15 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   uint32_t last_sent_millis_ = 0;
   uint32_t last_received_millis_ = 0;
   bool can_read_packet = false;
+
+  bool frame_format_auto_{true};
+  bool frame_format_confirmed_{false};
+  uint8_t auto_a0_prefix_match_{0};
+  bool auto_a0_collecting_{false};
+  uint8_t auto_a0_buffer_[DATA_FRAME_MAX_SIZE + 2]{};
+  uint16_t auto_a0_index_{0};
+  uint16_t auto_a0_expected_total_{0};
+  uint32_t auto_a0_last_byte_ms_{0};
 
   uint32_t last_received_frame_millis_ = 0;
   uint32_t last_sent_frame_millis_ = 0;

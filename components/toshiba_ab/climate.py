@@ -97,6 +97,7 @@ ToshibaAbSendRawFrameAction = toshiba_ab_ns.class_(
 
 FrameFormat = toshiba_ab_ns.enum("FrameFormat")
 FRAME_FORMATS = {
+    "auto": None,
     "n": FrameFormat.NORMAL,
     "normal": FrameFormat.NORMAL,
     "u": FrameFormat.TU2C,
@@ -160,7 +161,7 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
         cv.Optional(CONF_MASTER_ADDRESS_AUTO, default=True): cv.boolean,
         cv.Optional(CONF_COMMAND_MODE_READ, default=0x08): cv.uint8_t,
         cv.Optional(CONF_COMMAND_MODE_WRITE, default=0x80): cv.uint8_t,
-        cv.Optional(CONF_FRAME_FORMAT, default="n"): cv.one_of(*FRAME_FORMATS, lower=True),
+        cv.Optional(CONF_FRAME_FORMAT, default="auto"): cv.one_of(*FRAME_FORMATS, lower=True),
         cv.Optional(CONF_FILTER_FRAMES, default=True): cv.boolean,
         # Manual override for hardware UART0 RX. The common ESP8266 case
         # (uart.rx_pin GPIO13 with a non-UART0 TX pin) is auto-detected below.
@@ -313,7 +314,10 @@ async def to_code(config):
     if CONF_COMMAND_MODE_WRITE in config:
         cg.add(var.set_command_mode_write(config[CONF_COMMAND_MODE_WRITE]))
     if CONF_FRAME_FORMAT in config:
-        cg.add(var.set_frame_format(FRAME_FORMATS[config[CONF_FRAME_FORMAT]]))
+        if config[CONF_FRAME_FORMAT] == "auto":
+            cg.add(var.set_frame_format_auto())
+        else:
+            cg.add(var.set_frame_format(FRAME_FORMATS[config[CONF_FRAME_FORMAT]]))
     if CONF_FILTER_FRAMES in config:
         cg.add(var.set_filter_frames(config[CONF_FILTER_FRAMES]))
     if CONF_HARDWARE_UART_RX_PIN in config:
