@@ -1018,6 +1018,23 @@ void ToshibaAbClimate::dump_config() {
     default: fmt_label = "TCC-Link"; break;
   }
   ESP_LOGCONFIG(TAG, "  Frame format: %s", fmt_label);
+#ifdef USE_ESP8266
+  if (this->hw_uart_rx_enabled_) {
+    ESP_LOGCONFIG(TAG, "  Hardware UART0 RX: enabled");
+    ESP_LOGCONFIG(TAG, "    Receive path: hardware UART0");
+    ESP_LOGCONFIG(TAG, "    RX pin: GPIO%u%s", this->hw_uart_rx_pin_,
+                  this->hw_uart_rx_pin_ == 13 ? " (UART0 swapped RX)" : "");
+    ESP_LOGCONFIG(TAG, "    UART0 swap: %s", this->hw_uart_rx_pin_ == 13 ? "yes (GPIO3 -> GPIO13)" : "no");
+  } else {
+    ESP_LOGCONFIG(TAG, "  Hardware UART0 RX: disabled (using ESPHome UART RX)");
+  }
+#else
+  ESP_LOGCONFIG(TAG, "  Hardware UART0 RX: %s",
+                this->hw_uart_rx_enabled_ ? "configured but unsupported on this platform" : "disabled");
+  if (this->hw_uart_rx_enabled_) {
+    ESP_LOGCONFIG(TAG, "    Configured RX pin: GPIO%u", this->hw_uart_rx_pin_);
+  }
+#endif
   ESP_LOGCONFIG(TAG, "  Filter frames: %s", this->filter_frames_ ? "true" : "false");
   ESP_LOGCONFIG(TAG, "  Autonomous mode: %s", this->autonomous_ ? "true" : "false");
   ESP_LOGCONFIG(TAG, "  Read only: %s", this->read_only_ ? "true" : "false");
@@ -1089,7 +1106,8 @@ void ToshibaAbClimate::setup() {
     if (this->hw_uart_rx_pin_ == 13) {
       s_bus_serial.swap();  // UART0: RX GPIO3->GPIO13, TX GPIO1->GPIO15 (unused)
     }
-    ESP_LOGCONFIG(TAG, "Hardware UART0 RX enabled on GPIO%u", this->hw_uart_rx_pin_);
+    ESP_LOGCONFIG(TAG, "Hardware UART0 RX enabled on GPIO%u%s", this->hw_uart_rx_pin_,
+                  this->hw_uart_rx_pin_ == 13 ? " (UART0 swapped RX)" : "");
   }
 #endif
 
