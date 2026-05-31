@@ -674,6 +674,16 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_frame_format(FrameFormat format) { data_reader.set_frame_format(format); }
   bool is_hm_variant() const { return data_reader.frame_format() == FrameFormat::HM; }
 
+  // Opt-in (ESP8266 only): receive on the hardware UART0 using `pin` (GPIO3 or
+  // GPIO13) instead of ESPHome's software serial. The software-serial RX ISR
+  // busy-waits ~1 char time per byte and starves Wi-Fi enough to trip the
+  // watchdog on busy buses; the hardware UART has a FIFO and no busy-wait. TX
+  // stays on the configured uart tx_pin (software serial). No effect elsewhere.
+  void set_hardware_uart_rx_pin(uint8_t pin) {
+    this->hw_uart_rx_pin_ = pin;
+    this->hw_uart_rx_enabled_ = true;
+  }
+
   climate::ClimateTraits traits() override;
   void control(const climate::ClimateCall &call) override;
 
@@ -740,6 +750,11 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
  protected:
   climate::ClimateTraits traits_;
 
+  // Hardware-UART-RX opt-in (see set_hardware_uart_rx_pin). Disabled by default
+  // so existing configs are byte-for-byte unchanged.
+  bool hw_uart_rx_enabled_{false};
+  uint8_t hw_uart_rx_pin_{0};
+
   DataFrameReader data_reader;
   TccState tcc_state;
 
@@ -791,7 +806,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   uint8_t last_sensor_query_id_{0xFF};     // 0xFF = invalid / none
   bool    sensor_query_outstanding_{false}; // true after send, cleared on reply
   uint32_t last_sensor_query_ms_{0};
-  uint32_t sensor_query_timeout_ms_{1000};  // 3s default; adjust if needed
+  uint32_t sensor_query_timeout_ms_{2500};  // Give busy HM buses time to answer before releasing the guard.
   uint32_t sensor_query_timeouts_{0};       // (optional) stats
 
   // Pending-query ring buffer. Periodic intervals push sensor IDs here;
@@ -812,6 +827,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   // gating; sensor queries are throttled when the write queue is this
   // deep so we don't pile commands behind a slow bus.
   static constexpr size_t WRITE_QUEUE_THROTTLE = 3;
+  bool enqueue_sensor_query_(uint8_t id);
   void drain_sensor_query_queue_();
 
   // room temperature sensor reporting to AC  ******************************

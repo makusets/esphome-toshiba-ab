@@ -4,6 +4,9 @@
 #include <inttypes.h>
 #include <cstring>
 #include <cstdlib>
+#ifdef USE_ESP8266
+#include <HardwareSerial.h>
+#endif
 
 
 namespace esphome {
@@ -12,6 +15,13 @@ namespace toshiba_ab {
 
 
 static const char *const TAG = "tcc_link.climate";
+
+#ifdef USE_ESP8266
+// Optional hardware UART0 instance, used for RX only when hardware_uart_rx_pin is
+// configured (see ToshibaAbClimate::set_hardware_uart_rx_pin). ESPHome disables
+// the Arduino global `Serial`, so we own this instance. Only begun when enabled.
+static HardwareSerial s_bus_serial(UART0);
+#endif
 
 
 const LogString *opcode_to_string(uint8_t opcode) {
@@ -42,6 +52,12 @@ const LogString *opcode_to_string(uint8_t opcode) {
 
 uint8_t temp_celcius_to_payload(float t) {
   // raw = round( (t + offset) * ratio )
+  // Guard NaN: lround(NaN) is impl-defined and cast-to-uint8 was producing
+  // 0xFF, which the AC decodes as 92.5°C and the wall remote displays as 92.
+  // Substitute 22°C as a safe fallback before any encoding.
+  if (std::isnan(t)) {
+    t = 22.0f;
+  }
   const float scaled = (t + TEMPERATURE_CONVERSION_OFFSET) * TEMPERATURE_CONVERSION_RATIO;
   int v = static_cast<int>(std::lround(scaled));
   if (v < 0) v = 0;
@@ -641,6 +657,7 @@ bool ToshibaAbClimate::is_tu2c_registration_query_(const DataFrame &frame) const
 }
 
 void ToshibaAbClimate::add_polled_sensor(uint8_t id, float scale, uint32_t interval_ms, sensor::Sensor *sensor) {
+  const size_t sensor_index = this->polled_sensors_.size();
   PolledSensor ps{ id, scale, interval_ms, sensor };
   this->polled_sensors_.push_back(ps);
 
@@ -649,26 +666,38 @@ void ToshibaAbClimate::add_polled_sensor(uint8_t id, float scale, uint32_t inter
   // the actual 0x17 frame is dispatched serially from drain_sensor_query_queue_()
   // so that short-form 0x1A replies (which carry no sensor ID) can be
   // attributed unambiguously to the most recently sent query.
+  //
+  // Do not start all pollers immediately after boot: ESP8266 Wi-Fi/API
+  // reconnect plus software-serial RX is watchdog-sensitive. Start polling
+  // after a grace period and stagger each sensor so the first burst cannot
+  // swamp the bus or the API connection.
   if (interval_ms > 0) {
-    this->set_interval(interval_ms, [this, id]() {
-      if (this->pending_count_ >= MAX_PENDING_SENSOR_QUERIES) {
-        ESP_LOGW(TAG, "Sensor query queue full; dropping query for 0x%02X", id);
-        return;
-      }
-      // Skip if this sensor is already pending — the next interval will retry.
-      constexpr uint8_t mask = MAX_PENDING_SENSOR_QUERIES - 1;
-      for (uint8_t i = 0; i < this->pending_count_; i++) {
-        if (this->pending_sensor_queries_[(this->pending_head_ + i) & mask] == id) return;
-      }
-      const uint8_t tail = (this->pending_head_ + this->pending_count_) & mask;
-      this->pending_sensor_queries_[tail] = id;
-      this->pending_count_++;
+    const uint32_t first_poll_delay_ms = 15000 + static_cast<uint32_t>(sensor_index) * 2000;
+    this->set_timeout(first_poll_delay_ms, [this, id, interval_ms]() {
+      this->enqueue_sensor_query_(id);
+      this->set_interval(interval_ms, [this, id]() { this->enqueue_sensor_query_(id); });
     });
   }
   
     // Ensure the read-only switch reports its initial state to Home Assistant
     if (this->read_only_switch_)
       this->read_only_switch_->publish_state(this->read_only_);
+}
+
+bool ToshibaAbClimate::enqueue_sensor_query_(uint8_t id) {
+  if (this->pending_count_ >= MAX_PENDING_SENSOR_QUERIES) {
+    ESP_LOGW(TAG, "Sensor query queue full; dropping query for 0x%02X", id);
+    return false;
+  }
+  // Skip if this sensor is already pending — the next interval will retry.
+  constexpr uint8_t mask = MAX_PENDING_SENSOR_QUERIES - 1;
+  for (uint8_t i = 0; i < this->pending_count_; i++) {
+    if (this->pending_sensor_queries_[(this->pending_head_ + i) & mask] == id) return false;
+  }
+  const uint8_t tail = (this->pending_head_ + this->pending_count_) & mask;
+  this->pending_sensor_queries_[tail] = id;
+  this->pending_count_++;
+  return true;
 }
 
 void ToshibaAbClimate::send_sensor_query(uint8_t sensor_id) {
@@ -701,7 +730,7 @@ void ToshibaAbClimate::send_sensor_query(uint8_t sensor_id) {
 
 void ToshibaAbClimate::drain_sensor_query_queue_() {
   // sensor_query_outstanding_ is cleared by process_sensor_value_() on a
-  // matching reply, or by the 1s timeout watchdog if a reply never
+  // matching reply, or by the sensor-query timeout watchdog if a reply never
   // arrives — so a stuck query never deadlocks the queue.
   if (this->sensor_query_outstanding_) return;
   if (this->pending_count_ == 0) return;
@@ -1011,6 +1040,19 @@ void ToshibaAbClimate::setup() {
   }
   ESP_LOGD("toshiba", "Setting up ToshibaClimate...");
 
+  // Restore last-known mode/target_temp/fan_mode from preferences so we never
+  // boot with target_temperature = NaN. Without this, a control command sent
+  // before the first valid STATUS frame encodes NaN -> 0xFF -> 92.5°C and the
+  // wall remote shows 92. `restore_from_flash: true` in YAML makes this also
+  // survive a power loss; otherwise it survives OTA + WDT reboots via RTC.
+  auto restore = this->restore_state_();
+  if (restore.has_value()) {
+    restore->apply(this);
+  } else {
+    this->target_temperature = 22.0f;
+    this->mode = climate::CLIMATE_MODE_OFF;
+  }
+
   // Override traits for Estia heat pump
   if (this->data_reader.frame_format() == FrameFormat::A0) {
     this->traits_.set_supported_modes({
@@ -1029,6 +1071,25 @@ void ToshibaAbClimate::setup() {
 
   pinMode(16, OUTPUT); // Set GPIO16 low, only needed for my old board, to be removed soon
   digitalWrite(16, LOW);
+
+  // --- Optional hardware-UART RX (see set_hardware_uart_rx_pin) ---
+  // When the bus RX pin is an ESP8266 hardware-UART0 pin (GPIO3, or GPIO13 via
+  // swap) but TX is not, ESPHome would bit-bang both. The software-serial RX ISR
+  // busy-waits ~1 char time per byte at 2400 baud, starving Wi-Fi enough to trip
+  // the watchdog on busy buses (makusets#88). Moving RX onto the real hardware
+  // UART gives a FIFO-backed, zero-busy-wait receiver. TX stays on the ESPHome
+  // software-serial parent (configured tx_pin). UART0 is free when logger
+  // baud_rate is 0. Disabled by default, so all other configs are unaffected.
+#ifdef USE_ESP8266
+  if (this->hw_uart_rx_enabled_) {
+    s_bus_serial.setRxBufferSize(512);
+    s_bus_serial.begin(2400, SERIAL_8E1);
+    if (this->hw_uart_rx_pin_ == 13) {
+      s_bus_serial.swap();  // UART0: RX GPIO3->GPIO13, TX GPIO1->GPIO15 (unused)
+    }
+    ESP_LOGCONFIG(TAG, "Hardware UART0 RX enabled on GPIO%u", this->hw_uart_rx_pin_);
+  }
+#endif
 
   // If autonomous mode is enabled, we need to send ping, E8 read, and external temp periodically
   // Send all these if autonomous mode is enabled using set_interval calls
@@ -1251,8 +1312,14 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         case OPCODE_STATUS: {
           // sync power, mode, fan and target temp from the unit to the climate
           // component
-          if (frame->size() <= 5 || frame->raw[5] != 0x81) {
-            log_data_frame("STATUS ignored (raw[5] != 0x81)", frame);
+          // Sanity-guard: the AC's 0x81 marker byte lives at a format-dependent
+          // offset. Classic TCC-Link puts it at raw[5] (data[1]); HM puts it at
+          // raw[4] (data[0]). Reject any STATUS frame missing the marker, but
+          // check the right offset per variant — otherwise every HM STATUS
+          // gets dropped and the climate component never syncs from the AC.
+          const uint8_t marker_off = (this->data_reader.frame_format() == FrameFormat::HM) ? 4 : 5;
+          if (frame->size() <= marker_off || frame->raw[marker_off] != 0x81) {
+            log_data_frame("STATUS ignored (marker != 0x81)", frame);
             break;
           }
 
@@ -1280,8 +1347,11 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         case OPCODE_EXTENDED_STATUS: {
           // sync power, mode, fan and target temp from the unit to the climate
           // component
-          if (frame->size() <= 5 || frame->raw[5] != 0x81) {
-            log_data_frame("EXTENDED STATUS ignored (raw[5] != 0x81)", frame);
+          // See OPCODE_STATUS above for the rationale: 0x81 marker is at
+          // raw[4] on HM, raw[5] on classic.
+          const uint8_t marker_off_ext = (this->data_reader.frame_format() == FrameFormat::HM) ? 4 : 5;
+          if (frame->size() <= marker_off_ext || frame->raw[marker_off_ext] != 0x81) {
+            log_data_frame("EXTENDED STATUS ignored (marker != 0x81)", frame);
             break;
           }
 
@@ -2221,8 +2291,32 @@ void ToshibaAbClimate::loop() {
 
   uint8_t bytes_read = 0;
 
-  while (available()) {
-    int byte = read();
+  // Cap bytes drained per loop() tick. HM-variant master broadcasts can be
+  // 60-80 bytes (≈370 ms of wire time at 2400 baud) — well past the
+  // 30 ms-per-component budget. Unbounded draining keeps loop() inside the
+  // soft-serial RX path long enough to starve lwIP/Wi-Fi and trip the WDT
+  // (observed PCs all land at 0x401037xx, soft-serial ISR). 32 bytes ≈
+  // 150 ms of wire time — bounded worst case; unread bytes wait in the
+  // 2048-byte UART buffer for the next tick.
+  constexpr uint8_t MAX_BYTES_PER_LOOP = 32;
+  uint8_t loop_budget = MAX_BYTES_PER_LOOP;
+
+  // Read from hardware UART0 RX when enabled (no busy-wait), else from the
+  // ESPHome software-serial parent (existing behavior).
+  while (loop_budget > 0) {
+#ifdef USE_ESP8266
+    const bool have = this->hw_uart_rx_enabled_ ? (s_bus_serial.available() > 0) : (this->available() > 0);
+#else
+    const bool have = this->available() > 0;
+#endif
+    if (!have)
+      break;
+    loop_budget--;
+#ifdef USE_ESP8266
+    int byte = this->hw_uart_rx_enabled_ ? s_bus_serial.read() : this->read();
+#else
+    int byte = this->read();
+#endif
     if (byte >= 0) {
       bytes_read++;
 
@@ -2256,6 +2350,8 @@ void ToshibaAbClimate::loop() {
       ESP_LOGW(TAG, "Unable to read data");
     }
   }
+
+  App.feed_wdt();
 
   if (bytes_read > 0) {
     loops_with_reads_++;

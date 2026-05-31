@@ -273,6 +273,49 @@ See `example_estia.yaml` for a complete configuration including optional 0-10V d
 - makusets "Toshiba AB D1 Mini" board (LMV331TP comparator)
 
 
+# Toshiba HM-range Support (RAV-RM / RAV-GM)
+
+Newer HM-range indoor units — the `RAV-RM…BTP-E` series (e.g. **RAV-RM801BTP-E**), typically paired with a TU2C-Link-capable outdoor such as the `RAV-GM…ATP-E` series (e.g. **RAV-GM801ATP-E**) — speak a dialect of the AB protocol that the classic TCC-Link decoder does not understand out of the box. This component supports it via `frame_format: hm`.
+
+The HM dialect differs from classic TCC-Link in a few ways: an `A0:00` sync delimiter wrapping the frame, source/destination addresses at different wire offsets, a longer `SET_TEMP_WITH_FAN` payload, and the `STATUS` / `EXTENDED_STATUS` marker sitting one byte earlier. The reader canonicalises HM frames to the standard in-memory layout, so the rest of the pipeline (control, sensors, etc.) behaves the same as `n`.
+
+## Features
+
+- Full control: power, mode (auto / cool / heat / dry / fan-only), fan speed, setpoint
+- Reads room temperature plus the optional diagnostic sensors (compressor frequency, operating current, coil temps, fan rpm, …)
+- Works alongside the original wall remote on the same bus
+
+## HM YAML configuration
+
+Use the same `logger:`, `external_components:` and `uart:` blocks as the main install section above; the only HM-specific change is `frame_format: hm` on the `climate:` component:
+
+```yaml
+climate:
+  - platform: toshiba_ab
+    name: "Toshiba AC"
+    id: toshiba_ac
+    frame_format: hm
+    master: 0x00
+    master_address_auto: false     # recommended for HM (stops a corrupt frame hijacking auto-detect)
+    connected:
+      name: "Toshiba AC Connected"
+```
+
+See `complete_example.yaml` for the optional diagnostic sensors and other options.
+
+## Caveats
+
+- **CRC is tolerated, not validated** — the HM CRC algorithm has not been derived yet, so frames are accepted on structure rather than checksum. In practice this is reliable, but it is less strict than the classic / Estia paths.
+- **Fan speeds**: the indoor unit exposes three real speeds (Low / Medium / High) plus Auto on the bus; a wall remote that shows more "bars" maps several of them onto these three.
+- HM support is newer than the classic TCC-Link path — please report issues.
+
+## Tested with
+
+- Indoor: **RAV-RM801BTP-E** (HM range)
+- Outdoor: **RAV-GM801ATP-E** (TU2C-Link-capable)
+- makusets v3.2 board (ESP-12F)
+
+
 # More options and complete yaml
 
 Have a look at the complete_example.yaml file for more options available for the component. It includes details about reporting a chosen temperature to the AC central unit or reading extra sensors (power, pressure, runtime, temp...)
