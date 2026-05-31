@@ -115,9 +115,6 @@ climate:
   - platform: toshiba_ab
     name: "Toshiba AC"
     id: toshiba_ac
-    connected:
-      name: "Toshiba AC Connected"  # optional, binary sensor that monitors link with AC
-    master: 0x00 # Master ID in Toshiba protocol, optional, if omitted will go into autodetect
 
 ```
 
