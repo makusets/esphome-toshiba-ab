@@ -1,18 +1,22 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
+import esphome.final_validate as fv
 from esphome.components import climate, uart, binary_sensor, sensor, switch, text_sensor, template
 from esphome.const import (
     CONF_ID,
     CONF_NAME,
     CONF_SENSOR,
-    CONF_HARDWARE_UART,
     CONF_BAUD_RATE,
+    CONF_NUMBER,
+    CONF_RX_PIN,
+    CONF_TX_PIN,
     CONF_UPDATE_INTERVAL,
     CONF_MODE,
     CONF_FAN_MODE,
     CONF_SWING_MODE,
     CONF_TRIGGER_ID,
+    CONF_UART_ID,
     DEVICE_CLASS_CONNECTIVITY,
     DEVICE_CLASS_DURATION,
     DEVICE_CLASS_TEMPERATURE,
@@ -22,6 +26,7 @@ from esphome.const import (
     UNIT_CELSIUS,
     UNIT_HOUR,
 )
+from esphome.core import CORE
 
 DEPENDENCIES = ["uart"]
 AUTO_LOAD = ["climate", "binary_sensor", "sensor", "switch"]
@@ -157,8 +162,8 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
         cv.Optional(CONF_COMMAND_MODE_WRITE, default=0x80): cv.uint8_t,
         cv.Optional(CONF_FRAME_FORMAT, default="n"): cv.one_of(*FRAME_FORMATS, lower=True),
         cv.Optional(CONF_FILTER_FRAMES, default=True): cv.boolean,
-        # Opt-in (ESP8266): receive on hardware UART0 (GPIO3 or GPIO13) instead of
-        # software serial, to avoid the RX busy-wait that trips the watchdog.
+        # Manual override for hardware UART0 RX. The common ESP8266 case
+        # (uart.rx_pin GPIO13 with a non-UART0 TX pin) is auto-detected below.
         cv.Optional(CONF_HARDWARE_UART_RX_PIN): _hardware_uart_rx_pin,
 
         cv.GenerateID(): cv.declare_id(ToshibaAbClimate),
@@ -237,17 +242,57 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
     }
 ).extend(uart.UART_DEVICE_SCHEMA).extend(cv.COMPONENT_SCHEMA)
 
+
+def _pin_number(config):
+    if not isinstance(config, dict):
+        return None
+    return config.get(CONF_NUMBER)
+
+
+def _auto_hardware_uart_rx_pin(config):
+    # On ESP8266, a bus wired as TX=software pin + RX=GPIO13 makes ESPHome use
+    # software serial for both directions. Remove RX from the ESPHome UART hub so
+    # it stays TX-only, then let this component read GPIO13 through UART0 swap.
+    # For every other RX pin, leave the hub untouched and keep the normal ESPHome
+    # UART receive path unless hardware_uart_rx_pin is set explicitly. If TX is
+    # GPIO15, ESPHome can already use swapped UART0 by itself.
+    if not CORE.is_esp8266 or CONF_HARDWARE_UART_RX_PIN in config:
+        return None
+
+    auto_pin = None
+
+    def detect_hub(hub_config):
+        nonlocal auto_pin
+        rx_num = _pin_number(hub_config.get(CONF_RX_PIN))
+        tx_num = _pin_number(hub_config.get(CONF_TX_PIN))
+        if rx_num == 13 and tx_num != 15:
+            auto_pin = rx_num
+            hub_config.pop(CONF_RX_PIN, None)
+        return hub_config
+
+    cv.Schema(
+        {cv.Required(CONF_UART_ID): fv.id_declaration_match_schema(detect_hub)},
+        extra=cv.ALLOW_EXTRA,
+    )(config)
+    return auto_pin
+
+
 def validate_uart(config):
-    # When hardware_uart_rx_pin is set, the component owns RX via the hardware
-    # UART0, so the `uart:` block must be TX-only — don't require an rx_pin.
-    # Otherwise keep the original requirement that the uart provides RX.
-    require_rx = CONF_HARDWARE_UART_RX_PIN not in config
+    # When hardware_uart_rx_pin is set explicitly, or when we can auto-detect the
+    # ESP8266 GPIO13 RX/software-TX case, the component owns RX via UART0 and the
+    # ESPHome `uart:` hub must be TX-only. Otherwise keep requiring uart.rx_pin.
+    auto_rx_pin = _auto_hardware_uart_rx_pin(config)
+    require_rx = CONF_HARDWARE_UART_RX_PIN not in config and auto_rx_pin is None
     uart.final_validate_device_schema(
         "tcc_link", baud_rate=2400, require_rx=require_rx, require_tx=False
     )(config)
+    if auto_rx_pin is not None:
+        config[CONF_HARDWARE_UART_RX_PIN] = auto_rx_pin
+    return config
 
 
 FINAL_VALIDATE_SCHEMA = validate_uart
+
 
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])

@@ -17,9 +17,10 @@ namespace toshiba_ab {
 static const char *const TAG = "tcc_link.climate";
 
 #ifdef USE_ESP8266
-// Optional hardware UART0 instance, used for RX only when hardware_uart_rx_pin is
-// configured (see ToshibaAbClimate::set_hardware_uart_rx_pin). ESPHome disables
-// the Arduino global `Serial`, so we own this instance. Only begun when enabled.
+// Optional hardware UART0 instance, used for RX only when GPIO13 RX is
+// auto-detected on ESP8266 (or hardware_uart_rx_pin is configured). ESPHome
+// disables the Arduino global `Serial`, so we own this instance. Only begun when
+// enabled.
 static HardwareSerial s_bus_serial(UART0);
 #endif
 
@@ -1072,9 +1073,10 @@ void ToshibaAbClimate::setup() {
   pinMode(16, OUTPUT); // Set GPIO16 low, only needed for my old board, to be removed soon
   digitalWrite(16, LOW);
 
-  // --- Optional hardware-UART RX (see set_hardware_uart_rx_pin) ---
-  // When the bus RX pin is an ESP8266 hardware-UART0 pin (GPIO3, or GPIO13 via
-  // swap) but TX is not, ESPHome would bit-bang both. The software-serial RX ISR
+  // --- Optional/auto hardware-UART RX (see set_hardware_uart_rx_pin) ---
+  // When the bus RX pin is an ESP8266 hardware-UART0 pin (GPIO13 via swap, or
+  // GPIO3 via explicit config) but TX is not, ESPHome would bit-bang both. The
+  // software-serial RX ISR
   // busy-waits ~1 char time per byte at 2400 baud, starving Wi-Fi enough to trip
   // the watchdog on busy buses (makusets#88). Moving RX onto the real hardware
   // UART gives a FIFO-backed, zero-busy-wait receiver. TX stays on the ESPHome
