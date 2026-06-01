@@ -1,6 +1,6 @@
-# ESP12 based Hardware design and
-# ESPHome component for Toshiba central HVAC systems (AB line)
+# ESP12 based Hardware design and ESPHome component for Toshiba central HVAC systems (AB line)
 ### (not suitable for split systems or other systems using IR remotes)
+<img src="hardware/v3.2/v3_2.png" width="30%">   <img src="card.JPG" width="30%">
 
 ## Updated code (May 2026) - Toshiba ESTIA R32 Heat Pumps Support and more
 
