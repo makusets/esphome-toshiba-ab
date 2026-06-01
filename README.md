@@ -83,14 +83,29 @@ The circuit board was designed in easyEDA and all necessary files are included h
 
 Most of the work is based on previous work, hard bits of decoding and initial board design by @issalig https://github.com/issalig/toshiba_air_cond and an initial esphome component from @muxa: https://github.com/muxa/esphome-tcc-link
 
-## Toshiba protocol compatibility
+# Toshiba protocols compatibility
 
-Toshiba systems using the AB line for communication employ at least two known protocol variations. This project was designed and tested for the initial TCC-Link protocol. Compatibilty with the newer TU2C protocol variant is a work-in-progress and is not yet finalised. If your system model name includes a "U", it will most likely use the newer TU2C. For example: RAS-M16U2MUVG or M07U2DVG-E
+## TCC-Link
 
-Toshiba explains that the protocol in newer units can be changed back to TCC-Link, from the unit mainboard or in cases by using the DN Code "FC" and setting it back to "0000". But I have not tested it.
+Toshiba systems using the AB line for communication employ at least two major known protocol variations with further variations within each of them. This project was designed and tested for the initial TCC-Link protocol. And two variations of that protocol are supported at the moment. 
+
+Newer HM-range indoor units — the `RAV-RM…BTP-E` series (e.g. **RAV-RM801BTP-E**), typically paired with a outdoor such as the `RAV-GM…ATP-E` series (e.g. **RAV-GM801ATP-E**) — speak a dialect of the classic TCC-Link decoder that the current code should autodetect thanks to @mtthidoteu. Otherwise, it can be set with in yaml with `frame_format: hm`. 
+The HM dialect differs from classic TCC-Link in a few ways: two fixed intial bytes `A0:00`, source/destination addresses at different byte positions, a longer payload, and few other changes.
+
+## TU2C
+
+Compatibilty with the newer TU2C protocol variants is a work-in-progress and is not yet finalised. If your system model name includes a "U", it will most likely use the newer TU2C protocol. For example: RAS-M16U2MUVG or M07U2DVG-E
+
+Toshiba explains that the protocol in newer units can be changed back to TCC-Link, from the unit mainboard or in cases by using the DN Code "FC" and setting it back to "0000". But I have not tested it, if you do, please let me know.
 For more info see: https://github.com/makusets/esphome-toshiba-ab/blob/main/50598241NOTICE2.pdf
 
 If you want to help test the board with the TU2C protocol, see: https://github.com/makusets/esphome-toshiba-ab/issues/24
+
+## Estia heat pumps
+
+Thanks to @7tobias this component also supports Toshiba R32 Estia heat pumps that use a variation of the TU2C protocol, different to that of previous R410A ESTIA pumps. See below for yaml configuration instructions.
+Older ESTIA models using R410A use a different protocol. Have a look at https://github.com/vakkeli/toshiba_uart_ctrl for R410 models, @vakkeli integration should be compatible with this board (with the correct UART pins setup in yaml). Happy to integrate that protocol into this repo if someone wants to run the tests.
+
 
 ## To install, add or modify these sections in your esphome device yaml file
 
@@ -199,7 +214,7 @@ The case looks like this:
 
 # Toshiba Estia Heat Pump Support
 
-This component also supports Toshiba R32 Estia heat pumps using the A0-protocol on the AB-bus. This is a different protocol from TCC-Link and TU2C and that of previous R410A ESTIA pumps.
+This component also supports Toshiba R32 Estia heat pumps using the A0-protocol on the AB-bus. This seems to be a variation of the TU2C protocol and different to that of previous R410A ESTIA pumps.
 
 This componennt supports Estia R32 Heat Pumps (tested with Series 1) and possibly other similar models.
 
@@ -274,49 +289,6 @@ See `example_estia.yaml` for a complete configuration including optional 0-10V d
 - makusets "Toshiba AB D1 Mini" board (LMV331TP comparator)
 
 
-# Toshiba HM-range Support (RAV-RM / RAV-GM)
-
-Newer HM-range indoor units — the `RAV-RM…BTP-E` series (e.g. **RAV-RM801BTP-E**), typically paired with a TU2C-Link-capable outdoor such as the `RAV-GM…ATP-E` series (e.g. **RAV-GM801ATP-E**) — speak a dialect of the AB protocol that the classic TCC-Link decoder does not understand out of the box. This component supports it via `frame_format: hm`.
-
-The HM dialect differs from classic TCC-Link in a few ways: an `A0:00` sync delimiter wrapping the frame, source/destination addresses at different wire offsets, a longer `SET_TEMP_WITH_FAN` payload, and the `STATUS` / `EXTENDED_STATUS` marker sitting one byte earlier. The reader canonicalises HM frames to the standard in-memory layout, so the rest of the pipeline (control, sensors, etc.) behaves the same as `n`.
-
-## Features
-
-- Full control: power, mode (auto / cool / heat / dry / fan-only), fan speed, setpoint
-- Reads room temperature plus the optional diagnostic sensors (compressor frequency, operating current, coil temps, fan rpm, …)
-- Works alongside the original wall remote on the same bus
-
-## HM YAML configuration
-
-Use the same `logger:`, `external_components:` and `uart:` blocks as the main install section above; the only HM-specific change is `frame_format: hm` on the `climate:` component:
-
-```yaml
-climate:
-  - platform: toshiba_ab
-    name: "Toshiba AC"
-    id: toshiba_ac
-    frame_format: hm
-    master: 0x00
-    master_address_auto: false     # recommended for HM (stops a corrupt frame hijacking auto-detect)
-    connected:
-      name: "Toshiba AC Connected"
-```
-
-See `complete_example.yaml` for the optional diagnostic sensors and other options.
-
-## Caveats
-
-- **CRC is tolerated, not validated** — the HM CRC algorithm has not been derived yet, so frames are accepted on structure rather than checksum. In practice this is reliable, but it is less strict than the classic / Estia paths.
-- **Fan speeds**: the indoor unit exposes three real speeds (Low / Medium / High) plus Auto on the bus; a wall remote that shows more "bars" maps several of them onto these three.
-- HM support is newer than the classic TCC-Link path — please report issues.
-
-## Tested with
-
-- Indoor: **RAV-RM801BTP-E** (HM range)
-- Outdoor: **RAV-GM801ATP-E** (TU2C-Link-capable)
-- makusets v3.2 board (ESP-12F)
-
-
 # More options and complete yaml
 
-Have a look at the complete_example.yaml file for more options available for the component. It includes details about reporting a chosen temperature to the AC central unit or reading extra sensors (power, pressure, runtime, temp...)
+Have a look at the complete_example.yaml file for more options available for the component. It includes details about protocols, remote IDs, reporting a chosen temperature to the AC central unit or reading extra sensors (power, pressure, runtime, temp...)
