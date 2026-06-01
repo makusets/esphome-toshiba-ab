@@ -7,8 +7,8 @@ Have a look at the bottom of this page for details and to the example_estia.yaml
 
 - The esp will now detect what protocol is in use on the AB line automatically, if none is specified.
 - Adress assignment has changed to avoid duplicated adresses that would trigger an E09 error.
-- A new protocol variant has been implemented which increases compatibility with some newer models, it is auto detected, and is named "hm" in the code.
-- The esp will now use hardware UART, which should reduce blocking of code execution and triggering reboots by the watchdog.
+- Thanks to @mtthidoteu, a new protocol variant has been implemented which increases compatibility with some newer models, it is auto detected, and is named "hm" in the code.
+- Thanks to @mtthidoteu  again, the esp will now use hardware UART, which should reduce blocking of code execution and triggering reboots by the watchdog.
   
 
 # D1 mini board variant
