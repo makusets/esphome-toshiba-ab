@@ -1,4 +1,7 @@
-# Updated code (May 2026) - Toshiba ESTIA R32 Heat Pumps Support and more
+# ESPHome component for Toshiba central HVAC systems (AB line)
+### (not suitable for split systems or other systems using IR remotes)
+
+## Updated code (May 2026) - Toshiba ESTIA R32 Heat Pumps Support and more
 
 Thanks to [@7tobias](https://github.com/7tobias) the code now supports interfacing with Toshiba R32 Estia Heat Pumps, the board has been tested with the R32 ESTIA Series 1.
 The protocol in ESTIA Heat Pumps changed with the introduction of R32 pumps around 2021.
@@ -11,7 +14,7 @@ Have a look at the bottom of this page for details and to the example_estia.yaml
 - Thanks to [@mtthidoteu](https://github.com/mtthidoteu)  again, the esp will now use hardware UART, which should reduce blocking of code execution and triggering reboots by the watchdog.
 
 
-# D1 mini board variant
+## D1 mini board variant
 
 In collaboration with [@issalig](https://github.com/issalig), the initial developer of this project, we have designed a simpler board to be used with a D1 mini.
 
@@ -23,7 +26,7 @@ In collaboration with [@issalig](https://github.com/issalig), the initial develo
 <img src="hardware/D1%20mini/D1Mini.JPG" width="30%">
 
 
-# v3.2 is here!
+## v3.2 is here!
 
 Improvements over v3:
 - Changed GPIO Pins for the UART component to improve stability and compatibility, GPI10 was not the best choice
@@ -37,7 +40,7 @@ Improvements over v3:
 
 <img src="hardware/v3.2/v3_2.png" width="30%">
 
-# Updated code (Jan 2026) - New Autonomous Mode
+## Updated code (Jan 2026) - New Autonomous Mode
 - Added the option of using the board without any other controller or wall remote (autonomous mode). Details in "complete_example.yaml"
 - Added the option of changing read/write codes needed for some comercial systems.
 - Added the option of a filter alert sensor.
@@ -46,7 +49,7 @@ Improvements over v3:
 - Improved logs.
 - Other small changes.
 
-# v3 is here!
+## v3 is here!
 v3 board is here (v2 never saw the light)
 
 Improvements over v1:
