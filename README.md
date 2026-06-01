@@ -1,3 +1,4 @@
+# ESP12 based Hardware design and
 # ESPHome component for Toshiba central HVAC systems (AB line)
 ### (not suitable for split systems or other systems using IR remotes)
 
