@@ -87,9 +87,9 @@ Most of the work is based on previous work, hard bits of decoding and initial bo
 
 ## TCC-Link
 
-Toshiba systems using the AB line for communication employ at least two major known protocol variations with further variations within each of them. This project was designed and tested for the initial TCC-Link protocol. And two variations of that protocol are supported at the moment.
+Toshiba systems using the AB line for communication employ at least two major known protocol variations, with further variations within each of them. This project was designed and tested for the initial TCC-Link protocol. And two variations of that protocol are supported at the moment.
 
-Newer HM-range indoor units — the `RAV-RM…BTP-E` series (e.g. **RAV-RM801BTP-E**), typically paired with a outdoor such as the `RAV-GM…ATP-E` series (e.g. **RAV-GM801ATP-E**) — speak a dialect of the classic TCC-Link decoder that the current code should autodetect thanks to [@mtthidoteu](https://github.com/mtthidoteu). Otherwise, it can be set with in yaml with `frame_format: hm`.
+Newer HM-range indoor units — the `RAV-RM…BTP-E` series (e.g. **RAV-RM801BTP-E**), typically paired with a outdoor such as the `RAV-GM…ATP-E` series (e.g. **RAV-GM801ATP-E**) — speak a dialect of the classic TCC-Link that the current code should autodetect thanks to [@mtthidoteu](https://github.com/mtthidoteu). Otherwise, it can be set in yaml with `frame_format: hm`.
 The HM dialect differs from classic TCC-Link in a few ways: two fixed intial bytes `A0:00`, source/destination addresses at different byte positions, a longer payload, and few other changes.
 
 ## TU2C
@@ -107,7 +107,8 @@ Thanks to [@7tobias](https://github.com/7tobias) this component also supports To
 Older ESTIA models using R410A use a different protocol. Have a look at https://github.com/vakkeli/toshiba_uart_ctrl for R410 models, [@vakkeli](https://github.com/vakkeli) integration should be compatible with this board (with the correct UART pins setup in yaml). Happy to integrate that protocol into this repo if someone wants to run the tests.
 
 
-## To install, add or modify these sections in your esphome device yaml file
+# Installation
+## Add or modify these sections in your esphome device yaml file
 
 ```yaml
 
