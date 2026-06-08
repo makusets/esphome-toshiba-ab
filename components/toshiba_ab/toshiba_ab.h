@@ -483,10 +483,12 @@ struct DataFrameReader {
       return false;
     }
     // In classic TCC-Link, some units restart a frame in-place and mark the
-    // abandoned frame by sending 0x00 as the 6th byte. Discard the partial
-    // frame so the following byte is read as a new source byte.
-    if (frame_format_ == FrameFormat::NORMAL && data_index_ == 5 && current_byte == 0x00) {
-      ESP_LOGV("READER", "Normal TCC-Link frame restart indicator at byte 6; resetting reader");
+    // abandoned frame by sending 0x00 as the 5th or 6th byte. Discard the
+    // partial frame so the following byte is read as a new source byte.
+    if (frame_format_ == FrameFormat::NORMAL &&
+        (data_index_ == 4 || data_index_ == 5) && current_byte == 0x00) {
+      ESP_LOGV("READER", "Normal TCC-Link frame restart indicator at byte %u; resetting reader",
+               static_cast<unsigned>(data_index_ + 1));
       reset_frame_state_();
       return false;
     }
