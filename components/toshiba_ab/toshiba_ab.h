@@ -482,6 +482,15 @@ struct DataFrameReader {
       ESP_LOGV("READER", "Ignoring packet with out-of-range source: 0x%02X", current_byte);
       return false;
     }
+    // In classic TCC-Link, some units restart a frame in-place and mark the
+    // abandoned frame by sending 0x00 as the 6th byte. Discard the partial
+    // frame so the following byte is read as a new source byte.
+    if (frame_format_ == FrameFormat::NORMAL && data_index_ == 5 && current_byte == 0x00) {
+      ESP_LOGV("READER", "Normal TCC-Link frame restart indicator at byte 6; resetting reader");
+      reset_frame_state_();
+      return false;
+    }
+
     // Store byte
     frame.raw[data_index_] = current_byte;
 
