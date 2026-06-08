@@ -1150,6 +1150,7 @@ void ToshibaAbClimate::dump_config() {
   }
 #endif
   ESP_LOGCONFIG(TAG, "  Filter frames: %s", this->filter_frames_ ? "true" : "false");
+  ESP_LOGCONFIG(TAG, "  Packet min wait: %" PRIu32 "ms", this->packet_min_wait_millis_);
   ESP_LOGCONFIG(TAG, "  Autonomous mode: %s", this->autonomous_ ? "true" : "false");
   ESP_LOGCONFIG(TAG, "  Read only: %s", this->read_only_ ? "true" : "false");
   const bool has_ext_temp = this->ext_temp_sensor_ != nullptr;
@@ -2514,7 +2515,7 @@ void ToshibaAbClimate::loop() {
 
     if (last_read_millis_ > 0) {
       auto millis_since_last_read = millis() - last_read_millis_;
-      if (millis_since_last_read >= PACKET_MIN_WAIT_MILLIS) {
+      if (millis_since_last_read >= this->packet_min_wait_millis_) {
         // can start reading packet
 
         if (!data_reader.complete && data_reader.data_index_ > 0) {

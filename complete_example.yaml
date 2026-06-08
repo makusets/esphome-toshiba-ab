@@ -79,6 +79,10 @@ climate:
     frame_format: N             # optional, defaults to autodetect, otherwise can be forced to "n" for TCC-Link, or "hm" for Estia HM variant, use "U" if your unit uses TU2C protocol, check parity in UART section too
     filter_frames: true         # optional, default true; reject normal TCC-Link frames with source > 0xA0
 
+    # --- Bus collision guard ---
+    packet_min_wait: 200ms      # optional, default 200ms; minimum idle time after received bytes before the next packet is parsed
+                                # Increase if you still see bus/data collisions; lower only if your bus needs faster packet processing
+
     ###### Optional settings  #######
 
     filter_alert:               # Optional binary sensor to report filter alert status if available
