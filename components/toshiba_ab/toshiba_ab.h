@@ -830,6 +830,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
     data_reader.set_filter_frames(filter_frames);
   }
   bool get_filter_frames() const { return filter_frames_; }
+  void set_packet_min_wait(uint32_t millis) { packet_min_wait_millis_ = millis; }
   void set_command_mode_read(uint8_t value) { command_mode_read_ = value; }
   void set_command_mode_write(uint8_t value) { command_mode_write_ = value; }
   void set_filter_alert_sensor(binary_sensor::BinarySensor *sensor) { filter_alert_sensor_ = sensor; }
@@ -1034,6 +1035,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   uint32_t loops_with_reads_ = 0;
   uint32_t last_read_millis_ = 0;
   uint32_t last_sent_millis_ = 0;
+  uint32_t packet_min_wait_millis_{PACKET_MIN_WAIT_MILLIS};
   uint32_t last_received_millis_ = 0;
   bool can_read_packet = false;
 
