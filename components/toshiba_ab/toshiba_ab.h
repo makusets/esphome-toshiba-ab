@@ -522,10 +522,12 @@ struct DataFrameReader {
 
     // In classic TCC-Link, some units restart a frame in-place and mark the
     // abandoned frame by sending 0x00 from the 5th byte onward. A 0x00 can
-    // also be valid payload or CRC data, so treat it as a candidate marker
-    // until the next four bytes prove that a replacement frame has begun.
+    // also be valid payload or CRC data, so only treat it as a candidate when
+    // the four-byte proof still fits inside this frame. Otherwise a legitimate
+    // late-frame 0x00 (common in 0x1A sensor values/CRC bytes) would defer
+    // completion until the next packet and then be reset as a timeout.
     const bool normal_restart_candidate = frame_format_ == FrameFormat::NORMAL && data_index_ >= 4 &&
-                                          (expected_total_ == 0 || data_index_ < expected_total_) &&
+                                          expected_total_ > 0 && (data_index_ + 4) < expected_total_ &&
                                           current_byte == 0x00;
     const bool normal_restart_lookahead_byte = frame_format_ == FrameFormat::NORMAL &&
                                                normal_restart_candidate_count_ > 0 && expected_total_ > 0 &&
