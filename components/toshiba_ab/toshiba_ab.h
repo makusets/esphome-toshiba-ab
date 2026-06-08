@@ -312,6 +312,19 @@ struct DataFrameReader {
   FrameFormat frame_format_{FrameFormat::NORMAL};
   bool estia_{false};
   uint16_t estia_expected_total_{0};
+  struct NormalRestartCandidate {
+    uint8_t marker_index{0};
+    std::array<uint8_t, 3> header{{0, 0, 0}};
+    std::array<uint8_t, 4> follow{{0, 0, 0, 0}};
+    uint8_t follow_count{0};
+  };
+  static const uint8_t NORMAL_RESTART_CANDIDATE_MAX = 4;
+  std::array<NormalRestartCandidate, NORMAL_RESTART_CANDIDATE_MAX> normal_restart_candidates_{};
+  uint8_t normal_restart_candidate_count_{0};
+  std::array<uint8_t, 4> normal_restart_lookahead_{{0, 0, 0, 0}};
+  uint8_t normal_restart_lookahead_count_{0};
+  std::array<uint8_t, DATA_FRAME_MAX_SIZE> normal_replay_{{0}};
+  uint8_t normal_replay_count_{0};
   uint32_t estia_last_byte_ms_{0};
   static const uint32_t ESTIA_BYTE_TIMEOUT_MS = 20;  // inter-byte timeout: ~4 byte-times at 2400 baud
 
@@ -324,9 +337,30 @@ struct DataFrameReader {
     tu2c_bytes_seen_ = 0;
     estia_ = false;
     estia_expected_total_ = 0;
+    reset_normal_restart_state_();
+    normal_replay_count_ = 0;
   }
 
   bool put(uint8_t byte) {
+    if (normal_replay_count_ == 0) {
+      return put_byte_(byte);
+    }
+
+    enqueue_normal_replay_(byte);
+    while (normal_replay_count_ > 0) {
+      const uint8_t replay_byte = normal_replay_[0];
+      for (uint8_t i = 1; i < normal_replay_count_; i++) {
+        normal_replay_[i - 1] = normal_replay_[i];
+      }
+      normal_replay_count_--;
+      if (put_byte_(replay_byte)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  bool put_byte_(uint8_t byte) {
     const bool use_estia = frame_format_ == FrameFormat::A0;
 
     // ── Estia A0-protocol: prefix A0:00, then Type:Len:...:CRC16 ──
@@ -482,19 +516,30 @@ struct DataFrameReader {
       ESP_LOGV("READER", "Ignoring packet with out-of-range source: 0x%02X", current_byte);
       return false;
     }
-    // In classic TCC-Link, some units restart a frame in-place and mark the
-    // abandoned frame by sending 0x00 as the 5th or 6th byte. Discard the
-    // partial frame so the following byte is read as a new source byte.
-    if (frame_format_ == FrameFormat::NORMAL &&
-        (data_index_ == 4 || data_index_ == 5) && current_byte == 0x00) {
-      ESP_LOGV("READER", "Normal TCC-Link frame restart indicator at byte %u; resetting reader",
-               static_cast<unsigned>(data_index_ + 1));
-      reset_frame_state_();
-      return false;
+    if (frame_format_ == FrameFormat::NORMAL && handle_normal_restart_candidates_(current_byte)) {
+      return complete;
     }
 
+    // In classic TCC-Link, some units restart a frame in-place and mark the
+    // abandoned frame by sending 0x00 from the 5th byte onward. A 0x00 can
+    // also be valid payload or CRC data, so treat it as a candidate marker
+    // until the next four bytes prove that a replacement frame has begun.
+    const bool normal_restart_candidate = frame_format_ == FrameFormat::NORMAL && data_index_ >= 4 &&
+                                          (expected_total_ == 0 || data_index_ < expected_total_) &&
+                                          current_byte == 0x00;
+    const bool normal_restart_lookahead_byte = frame_format_ == FrameFormat::NORMAL &&
+                                               normal_restart_candidate_count_ > 0 && expected_total_ > 0 &&
+                                               data_index_ >= expected_total_;
+
     // Store byte
-    frame.raw[data_index_] = current_byte;
+    if (normal_restart_lookahead_byte) {
+      enqueue_normal_restart_lookahead_(current_byte);
+    } else {
+      frame.raw[data_index_] = current_byte;
+    }
+    if (normal_restart_candidate) {
+      add_normal_restart_candidate_();
+    }
 
     if (!use_tu2c && data_index_ == 1) {
       // ignore frames where source == dest (likely noise or corrupted)
@@ -518,10 +563,17 @@ struct DataFrameReader {
       expected_total_ = DATA_OFFSET_FROM_START + frame.data_length + 1;  // 4 + len + crc
     }
 
-    data_index_++;
+    if (!normal_restart_lookahead_byte) {
+      data_index_++;
+    }
+
+    if (frame_format_ == FrameFormat::NORMAL && normal_restart_candidate_count_ == 0 && expected_total_ > 0 &&
+        data_index_ >= expected_total_) {
+      replay_normal_restart_lookahead_();
+    }
 
     // If we know how many bytes we expect, finish only when we have them all
-    if (expected_total_ > 0 && data_index_ >= expected_total_) {
+    if (expected_total_ > 0 && data_index_ >= expected_total_ && normal_restart_candidate_count_ == 0) {
       if (!use_tu2c) {
         // We have the whole frame (header + payload + CRC).
         //
@@ -603,6 +655,106 @@ struct DataFrameReader {
   FrameFormat frame_format() const { return frame_format_; }
 
 private:
+  void reset_normal_restart_state_() {
+    for (auto &candidate : normal_restart_candidates_) {
+      candidate.marker_index = 0;
+      candidate.header = {{0, 0, 0}};
+      candidate.follow = {{0, 0, 0, 0}};
+      candidate.follow_count = 0;
+    }
+    normal_restart_candidate_count_ = 0;
+    normal_restart_lookahead_ = {{0, 0, 0, 0}};
+    normal_restart_lookahead_count_ = 0;
+  }
+
+  void enqueue_normal_replay_(uint8_t byte) {
+    if (normal_replay_count_ >= normal_replay_.size()) {
+      ESP_LOGW("READER", "Normal replay buffer overflow; dropping byte 0x%02X", byte);
+      return;
+    }
+    normal_replay_[normal_replay_count_++] = byte;
+  }
+
+  void enqueue_normal_restart_lookahead_(uint8_t byte) {
+    if (normal_restart_lookahead_count_ >= normal_restart_lookahead_.size()) {
+      ESP_LOGW("READER", "Normal restart lookahead overflow; dropping byte 0x%02X", byte);
+      return;
+    }
+    normal_restart_lookahead_[normal_restart_lookahead_count_++] = byte;
+  }
+
+  void replay_normal_restart_lookahead_() {
+    for (uint8_t i = 0; i < normal_restart_lookahead_count_; i++) {
+      enqueue_normal_replay_(normal_restart_lookahead_[i]);
+    }
+    normal_restart_lookahead_count_ = 0;
+  }
+
+  void remove_normal_restart_candidate_(uint8_t index) {
+    if (index >= normal_restart_candidate_count_) {
+      return;
+    }
+    for (uint8_t i = index + 1; i < normal_restart_candidate_count_; i++) {
+      normal_restart_candidates_[i - 1] = normal_restart_candidates_[i];
+    }
+    normal_restart_candidate_count_--;
+    normal_restart_candidates_[normal_restart_candidate_count_] = NormalRestartCandidate{};
+  }
+
+  void add_normal_restart_candidate_() {
+    if (normal_restart_candidate_count_ >= normal_restart_candidates_.size()) {
+      ESP_LOGW("READER", "Too many overlapping normal restart candidates; dropping marker at byte %u",
+               static_cast<unsigned>(data_index_ + 1));
+      return;
+    }
+    auto &candidate = normal_restart_candidates_[normal_restart_candidate_count_++];
+    candidate.marker_index = data_index_;
+    candidate.header[0] = frame.raw[0];
+    candidate.header[1] = frame.raw[1];
+    candidate.header[2] = frame.raw[2];
+    candidate.follow = {{0, 0, 0, 0}};
+    candidate.follow_count = 0;
+  }
+
+  bool handle_normal_restart_candidates_(uint8_t current_byte) {
+    for (uint8_t i = 0; i < normal_restart_candidate_count_;) {
+      auto &candidate = normal_restart_candidates_[i];
+      candidate.follow[candidate.follow_count++] = current_byte;
+      if (candidate.follow_count < candidate.follow.size()) {
+        i++;
+        continue;
+      }
+
+      const bool confirmed_restart = candidate.follow[0] == candidate.header[0] &&
+                                     candidate.follow[1] == candidate.header[1] &&
+                                     candidate.follow[2] == candidate.header[2];
+      if (confirmed_restart) {
+        ESP_LOGV("READER", "Normal TCC-Link frame restart marker at byte %u confirmed by header %02X:%02X:%02X",
+                 static_cast<unsigned>(candidate.marker_index + 1), candidate.header[0], candidate.header[1],
+                 candidate.header[2]);
+        const std::array<uint8_t, 4> restarted_header = candidate.follow;
+        reset_frame_state_();
+        frame.raw[0] = restarted_header[0];
+        frame.raw[1] = restarted_header[1];
+        frame.raw[2] = restarted_header[2];
+        frame.raw[3] = restarted_header[3];
+        frame.data_length = restarted_header[3];
+        data_index_ = 4;
+        if (!frame.validate_bounds()) {
+          ESP_LOGV("READER", "Invalid restarted frame length 0x%02X; resetting reader", frame.data_length);
+          reset();
+        } else {
+          expected_total_ = DATA_OFFSET_FROM_START + frame.data_length + 1;
+        }
+        return true;
+      }
+
+      remove_normal_restart_candidate_(i);
+    }
+
+    return false;
+  }
+
   void reset_frame_state_() {
     frame.reset();
     frame.set_tu2c(false);
@@ -614,6 +766,7 @@ private:
     tu2c_len_pending_ = false;
     tu2c_expected_total_ = 0;
     tu2c_bytes_seen_ = 0;
+    reset_normal_restart_state_();
   }
 };
 
