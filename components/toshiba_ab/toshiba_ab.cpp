@@ -1120,6 +1120,7 @@ void ToshibaAbClimate::dump_config() {
   this->dump_traits_(TAG);
   ESP_LOGCONFIG(TAG, "  Remote address: 0x%02X", this->remote_address_);
   ESP_LOGCONFIG(TAG, "  Master address: 0x%02X", this->master_address_);
+  ESP_LOGCONFIG(TAG, "  Master address confirmed: %s", this->master_address_confirmed_ ? "true" : "false");
   ESP_LOGCONFIG(TAG, "  Master address auto: %s", this->master_address_auto_ ? "true" : "false");
   ESP_LOGCONFIG(TAG, "  Command mode read: 0x%02X", this->command_mode_read_);
   ESP_LOGCONFIG(TAG, "  Command mode write: 0x%02X", this->command_mode_write_);
@@ -1152,6 +1153,7 @@ void ToshibaAbClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "  Filter frames: %s", this->filter_frames_ ? "true" : "false");
   ESP_LOGCONFIG(TAG, "  Packet min wait: %" PRIu32 "ms", this->packet_min_wait_millis_);
   ESP_LOGCONFIG(TAG, "  Autonomous mode: %s", this->autonomous_ ? "true" : "false");
+  ESP_LOGCONFIG(TAG, "  Ping: %s", this->ping_enabled_ ? "true" : "false");
   ESP_LOGCONFIG(TAG, "  Read only: %s", this->read_only_ ? "true" : "false");
   const bool has_ext_temp = this->ext_temp_sensor_ != nullptr;
   ESP_LOGCONFIG(TAG, "  External temp report: %s", (has_ext_temp && this->ext_temp_enabled_) ? "enabled" : "disabled");
@@ -1292,6 +1294,22 @@ void ToshibaAbClimate::setup() {
         }
       });
     }
+  } else if (this->ping_enabled_) {
+    this->set_interval(this->ping_interval_ms_, [this]() {
+      if (this->data_reader.frame_format() != FrameFormat::NORMAL) {
+        return;
+      }
+      if (!this->remote_address_confirmed_) {
+        ESP_LOGV(TAG, "Ping skipped: remote address is not confirmed yet");
+        return;
+      }
+      if (!this->master_address_confirmed_) {
+        ESP_LOGV(TAG, "Ping skipped: master address is not confirmed yet");
+        return;
+      }
+      this->send_ping();
+      ESP_LOGV(TAG, "Enqueued remote PING (keep-alive)");
+    });
   }
 
   this->update_frame_validation_();
@@ -1393,6 +1411,10 @@ void ToshibaAbClimate::sync_from_received_state() {
 
 void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
   if (frame->source == this->master_address_) {
+      if (!this->master_address_confirmed_) {
+        this->master_address_confirmed_ = true;
+        ESP_LOGI(TAG, "Master address confirmed from valid frame: 0x%02X", this->master_address_);
+      }
       // status update
       ESP_LOGD(TAG, "Received data from master:");
       last_master_alive_millis_ = millis();
@@ -1544,7 +1566,8 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           this->remote_address_ < TOSHIBA_REMOTE_MAX) {
         const uint8_t old = this->remote_address_;
         this->remote_address_++;
-        ESP_LOGI(TAG, "Remote auto-address collision detected at 0x%02X; switching to 0x%02X",
+        this->remote_address_confirmed_ = true;
+        ESP_LOGI(TAG, "Remote auto-address collision detected at 0x%02X; switching to confirmed address 0x%02X",
                  old, this->remote_address_);
       }
       ESP_LOGD(TAG, "Received data from remote:");
@@ -1576,6 +1599,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         frame->dest != this->master_address_) {
           ESP_LOGI(TAG, "Remote ping addressed to new master: 0x%02X, updating master address", frame->dest);
           this->master_address_ = frame->dest;
+          this->master_address_confirmed_ = false;
         }
       
       // Remote 40:00:15:06:08:E8:00:01:00:9E:2C that is sent every minute, the master responds with an hourly counter (time on?)
@@ -3052,6 +3076,7 @@ void ToshibaAbReadOnlySwitch::write_state(bool state) {
 
 void ToshibaAbClimate::set_master_address(uint8_t address) {
   this->master_address_ = address;
+  this->master_address_confirmed_ = false;
 }
 
 }  // namespace toshiba_ab

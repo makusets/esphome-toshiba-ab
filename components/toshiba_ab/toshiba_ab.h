@@ -810,8 +810,10 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void loop() override;
 
   uint8_t master_address_ = 0x00;
+  bool master_address_confirmed_{false};
   uint8_t remote_address_{TOSHIBA_REMOTE_DEFAULT};
   bool remote_address_auto_{true};
+  bool remote_address_confirmed_{false};
   bool master_address_auto_{true};
   uint8_t tu2c_remote_address_{TOSHIBA_TU2C_REMOTE_DEFAULT};
   uint8_t tu2c_master_address_{TOSHIBA_TU2C_MASTER_DEFAULT};
@@ -820,6 +822,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_remote_address(uint8_t address) {
     remote_address_ = std::min(address, TOSHIBA_REMOTE_MAX);
     remote_address_auto_ = false;
+    remote_address_confirmed_ = true;
   }
   void set_master_address_auto(bool auto_detect) {
     master_address_auto_ = auto_detect;
@@ -889,6 +892,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool is_tu2c_registration_ack_(const DataFrame *frame) const;
   bool is_tu2c_registration_query_(const DataFrame &frame) const;
   void set_read_only(bool en) { read_only_ = en; }
+  void set_ping_enabled(bool en) { ping_enabled_ = en; }
   void set_estia_source_address(uint16_t addr) { estia_source_address_ = addr; }
   void send_estia_setpoint(float target_temp);
   void send_estia_power(bool on);
@@ -1022,6 +1026,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   // If true, component will not send any commands to the central unit
   // (useful for read-only deployments). Default: false
   bool read_only_{false};
+  bool ping_enabled_{true};
 
   //autonomous mode **********************************
   bool autonomous_ = false;
