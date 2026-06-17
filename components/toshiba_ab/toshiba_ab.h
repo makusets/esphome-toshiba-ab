@@ -893,6 +893,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool is_tu2c_registration_query_(const DataFrame &frame) const;
   void set_read_only(bool en) { read_only_ = en; }
   void set_ping_enabled(bool en) { ping_enabled_ = en; }
+  void set_autoreset_errors(bool en) { autoreset_errors_ = en; }
   void set_estia_source_address(uint16_t addr) { estia_source_address_ = addr; }
   void send_estia_setpoint(float target_temp);
   void send_estia_power(bool on);
@@ -949,6 +950,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void handle_pending_command_ack_(const DataFrame *frame);
   size_t send_new_state(const struct TccState *new_state);
   void sync_from_received_state();
+  void autoreset_remote_error_();
   bool is_own_tx_echo_(const DataFrame *f) const; //used to filter echo after sending frame
   void remember_tx_frame_for_echo_(const uint8_t *bytes, size_t size, bool tu2c);
   void update_frame_validation_();
@@ -1027,6 +1029,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   // (useful for read-only deployments). Default: false
   bool read_only_{false};
   bool ping_enabled_{true};
+  bool autoreset_errors_{false};
 
   //autonomous mode **********************************
   bool autonomous_ = false;
