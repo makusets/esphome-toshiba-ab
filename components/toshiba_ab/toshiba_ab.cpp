@@ -1409,6 +1409,19 @@ void ToshibaAbClimate::sync_from_received_state() {
   }
 }
 
+void ToshibaAbClimate::autoreset_remote_error_() {
+  ESP_LOGI(TAG, "Autoreset errors: resending current mode/fan/target temperature");
+  auto command = DataFrame{};
+  if (this->data_reader.frame_format() == FrameFormat::TU2C) {
+    write_set_parameter_flags_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_, &this->tcc_state,
+                                   COMMAND_SET_TEMP | COMMAND_SET_FAN);
+  } else {
+    write_set_parameter_flags(&command, this->remote_address_, this->master_address_, this->command_mode_read_, &this->tcc_state,
+                              COMMAND_SET_TEMP | COMMAND_SET_FAN, this->is_hm_variant());
+  }
+  this->send_command(command);
+}
+
 void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
   if (frame->source == this->master_address_) {
       if (!this->master_address_confirmed_) {
@@ -1585,6 +1598,17 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         // sync_from_received_state(); we don't update the state, we wait for the next status update from master
         // remote temperature is sent regardless of DN32 setting, ac decides wether to use it or ignore it
         
+
+      // Remote error report: 40 FE 55 02 0E 49 AE
+      } else if (frame->opcode1 == OPCODE_TEMPERATURE &&
+                 frame->data_length == 2 &&
+                 frame->data[1] == 0x49) {
+        log_data_frame("Remote error report", frame);
+        if (this->autoreset_errors_) {
+          this->autoreset_remote_error_();
+        } else {
+          ESP_LOGD(TAG, "Ignoring remote error report because autoreset_errors is disabled");
+        }
 
       // Remote PING sent every 30s: 40 00 15 07 08 0C 81 00 00 48 00 ..
       } else if (frame->opcode1 == OPCODE_ERROR_HISTORY &&      // 0x15 envelope

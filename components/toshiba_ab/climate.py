@@ -48,6 +48,7 @@ CONF_COMMAND_MODE_WRITE = "command_mode_write"
 CONF_FRAME_FORMAT = "frame_format"
 CONF_FILTER_FRAMES = "filter_frames"
 CONF_PACKET_MIN_WAIT = "packet_min_wait"
+CONF_AUTORESET_ERRORS = "autoreset_errors"
 CONF_FRAME = "frame"
 
 CONF_AUTONOMOUS = "autonomous"
@@ -166,6 +167,7 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
         cv.Optional(CONF_FRAME_FORMAT, default="auto"): cv.one_of(*FRAME_FORMATS, lower=True),
         cv.Optional(CONF_FILTER_FRAMES, default=True): cv.boolean,
         cv.Optional(CONF_PACKET_MIN_WAIT, default="200ms"): cv.positive_time_period_milliseconds,
+        cv.Optional(CONF_AUTORESET_ERRORS, default=False): cv.boolean,
         # Manual override for hardware UART0 RX. The common ESP8266 case
         # (uart.rx_pin GPIO13 with a non-UART0 TX pin) is auto-detected below.
         cv.Optional(CONF_HARDWARE_UART_RX_PIN): _hardware_uart_rx_pin,
@@ -326,6 +328,8 @@ async def to_code(config):
         cg.add(var.set_filter_frames(config[CONF_FILTER_FRAMES]))
     if CONF_PACKET_MIN_WAIT in config:
         cg.add(var.set_packet_min_wait(cg.uint32(config[CONF_PACKET_MIN_WAIT])))
+    if CONF_AUTORESET_ERRORS in config:
+        cg.add(var.set_autoreset_errors(config[CONF_AUTORESET_ERRORS]))
     if CONF_HARDWARE_UART_RX_PIN in config:
         cg.add(var.set_hardware_uart_rx_pin(config[CONF_HARDWARE_UART_RX_PIN]))
 
