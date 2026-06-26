@@ -3195,7 +3195,7 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     this->publish_state();
     if (this->zone1_switch_) this->zone1_switch_->publish_state(this->estia_first_gen_zone1_active_);
     if (this->dhw_boost_switch_) this->dhw_boost_switch_->publish_state(this->estia_first_gen_dhw_boost_);
-    if (this->zone1_curve_sensor_) this->zone1_curve_sensor_->publish_state(static_cast<float>(frame->raw[10]) / 2.0f - 16.0f);
+    if (this->zone1_target_temperature_sensor_) this->zone1_target_temperature_sensor_->publish_state(static_cast<float>(frame->raw[10]) / 2.0f - 16.0f);
     if (len > 18 && this->zone1_water_temp_sensor_) this->zone1_water_temp_sensor_->publish_state(static_cast<float>(frame->raw[14]) / 2.0f - 16.0f);
     this->estia_first_gen_pump_state_known_ = true;
   } else if (src == this->master_address_ && frame->raw[4] == 0x80 && frame->raw[5] == 0x5C && len > 8) {

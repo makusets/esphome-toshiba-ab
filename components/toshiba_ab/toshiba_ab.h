@@ -848,7 +848,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_backup_heater_hours_sensor(sensor::Sensor *sensor) { backup_heater_hours_sensor_ = sensor; }
   void set_demand_sensor(sensor::Sensor *sensor) { demand_sensor_ = sensor; }
   void set_zone1_water_temp_sensor(sensor::Sensor *sensor) { zone1_water_temp_sensor_ = sensor; }
-  void set_zone1_curve_sensor(sensor::Sensor *sensor) { zone1_curve_sensor_ = sensor; }
+  void set_zone1_target_temperature_sensor(sensor::Sensor *sensor) { zone1_target_temperature_sensor_ = sensor; }
   void set_frame_format(FrameFormat format) {
     data_reader.set_frame_format(format);
     frame_format_auto_ = false;
@@ -1005,7 +1005,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   sensor::Sensor *backup_heater_hours_sensor_{nullptr};
   sensor::Sensor *demand_sensor_{nullptr};  // 0-10V interface demand (0..15)
   sensor::Sensor *zone1_water_temp_sensor_{nullptr};
-  sensor::Sensor *zone1_curve_sensor_{nullptr};
+  sensor::Sensor *zone1_target_temperature_sensor_{nullptr};
 
   // rx handler for 0x1A (sensor) replies (called from process_received_data)
   void process_sensor_value_(const DataFrame *frame);

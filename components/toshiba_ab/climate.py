@@ -65,7 +65,7 @@ CONF_DEMAND_ENABLED = "demand_enabled"
 CONF_ZONE1_SWITCH = "zone1_switch"
 CONF_DHW_BOOST = "dhw_boost"
 CONF_ZONE1_WATER_TEMPERATURE = "zone1_water_temperature"
-CONF_ZONE1_CURVE = "zone1_curve"
+CONF_ZONE1_TARGET_TEMPERATURE = "zone1_target_temperature"
 
 #AC Sensors addresses
 
@@ -229,8 +229,10 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
             device_class=DEVICE_CLASS_TEMPERATURE,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
-        cv.Optional(CONF_ZONE1_CURVE): sensor.sensor_schema(
+        cv.Optional(CONF_ZONE1_TARGET_TEMPERATURE): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS,
             accuracy_decimals=0,
+            device_class=DEVICE_CLASS_TEMPERATURE,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
         cv.Optional(CONF_FAILED_CRCS): sensor.sensor_schema(
@@ -411,9 +413,9 @@ async def to_code(config):
     if CONF_ZONE1_WATER_TEMPERATURE in config:
         sens = await sensor.new_sensor(config[CONF_ZONE1_WATER_TEMPERATURE])
         cg.add(var.set_zone1_water_temp_sensor(sens))
-    if CONF_ZONE1_CURVE in config:
-        sens = await sensor.new_sensor(config[CONF_ZONE1_CURVE])
-        cg.add(var.set_zone1_curve_sensor(sens))
+    if CONF_ZONE1_TARGET_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_ZONE1_TARGET_TEMPERATURE])
+        cg.add(var.set_zone1_target_temperature_sensor(sens))
     if CONF_OUTDOOR_TEMPERATURE in config:
         sens = await sensor.new_sensor(config[CONF_OUTDOOR_TEMPERATURE])
         cg.add(var.set_outdoor_temp_sensor(sens))
