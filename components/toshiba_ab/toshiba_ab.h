@@ -26,6 +26,9 @@ const uint8_t TOSHIBA_REMOTE_DEFAULT = 0x40;
 const uint8_t TOSHIBA_REMOTE_MAX = 0x49;
 const uint8_t TOSHIBA_TU2C_REMOTE_DEFAULT = 0x50;
 const uint8_t TOSHIBA_TU2C_MASTER_DEFAULT = 0x90;
+const uint8_t TOSHIBA_ESTIA_REMOTE_DEFAULT = 0x60;
+const uint8_t TOSHIBA_ESTIA_REMOTE_MAX = 0x69;
+const uint8_t TOSHIBA_ESTIA_MASTER_DEFAULT = 0x70;
 const uint8_t TOSHIBA_TEMP_SENSOR = 0x42;
 const uint8_t TOSHIBA_BROADCAST = 0xF0;
 const uint8_t TOSHIBA_REPORT = 0x52;
@@ -286,11 +289,13 @@ enum class FrameFormat : uint8_t {
   // unconditionally and crc_valid is set to false so callers can
   // distinguish if needed.
   HM = 3,
+  ESTIA = 4,
 };
 constexpr FrameFormat NORMAL = FrameFormat::NORMAL;
 constexpr FrameFormat TU2C = FrameFormat::TU2C;
 constexpr FrameFormat A0 = FrameFormat::A0;
 constexpr FrameFormat HM = FrameFormat::HM;
+constexpr FrameFormat ESTIA = FrameFormat::ESTIA;
 
 struct DataFrameReader {
   // Reads a data frame byte by byte, accumulating bytes until a complete frame is received
@@ -434,7 +439,7 @@ struct DataFrameReader {
       return false;
     }
 
-    const bool use_tu2c = frame_format_ == FrameFormat::TU2C;
+    const bool use_tu2c = frame_format_ == FrameFormat::TU2C || frame_format_ == FrameFormat::ESTIA;
     if (data_index_ == 0 && use_tu2c && !tu2c_) {
       if (prefix_match_ == 1) {
         if (byte == 0xF0) {
@@ -820,7 +825,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool filter_frames_{true};
   void set_master_address(uint8_t address);
   void set_remote_address(uint8_t address) {
-    remote_address_ = std::min(address, TOSHIBA_REMOTE_MAX);
+    remote_address_ = std::min(address, static_cast<uint8_t>(TOSHIBA_ESTIA_REMOTE_MAX));
     remote_address_auto_ = false;
     remote_address_confirmed_ = true;
   }
@@ -842,10 +847,15 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_waterpump_hours_sensor(sensor::Sensor *sensor) { waterpump_hours_sensor_ = sensor; }
   void set_backup_heater_hours_sensor(sensor::Sensor *sensor) { backup_heater_hours_sensor_ = sensor; }
   void set_demand_sensor(sensor::Sensor *sensor) { demand_sensor_ = sensor; }
+  void set_zone1_water_temp_sensor(sensor::Sensor *sensor) { zone1_water_temp_sensor_ = sensor; }
+  void set_zone1_curve_sensor(sensor::Sensor *sensor) { zone1_curve_sensor_ = sensor; }
   void set_frame_format(FrameFormat format) {
     data_reader.set_frame_format(format);
     frame_format_auto_ = false;
     frame_format_confirmed_ = true;
+    if (format == FrameFormat::ESTIA) {
+      if (remote_address_auto_) remote_address_ = TOSHIBA_ESTIA_REMOTE_DEFAULT;
+    }
   }
   void set_frame_format_auto() {
     data_reader.set_frame_format(FrameFormat::NORMAL);
@@ -853,6 +863,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
     frame_format_confirmed_ = false;
   }
   bool is_hm_variant() const { return data_reader.frame_format() == FrameFormat::HM; }
+  bool is_estia_first_gen() const { return data_reader.frame_format() == FrameFormat::ESTIA; }
 
   // ESP8266 only: receive on the hardware UART0 using `pin` (auto-detected for
   // GPIO13, or explicitly configured for GPIO3/GPIO13) instead of ESPHome's
@@ -875,6 +886,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_vent_switch(switch_::Switch *vent_switch) { vent_switch_ = vent_switch; }
 
   void set_read_only_switch(switch_::Switch *read_only_switch) { read_only_switch_ = read_only_switch; }
+  void set_zone1_switch(switch_::Switch *zone1_switch) { zone1_switch_ = zone1_switch; }
+  void set_dhw_boost_switch(switch_::Switch *dhw_boost_switch) { dhw_boost_switch_ = dhw_boost_switch; }
 
   void set_failed_crcs_sensor(sensor::Sensor *failed_crcs_sensor) { this->failed_crcs_sensor_ = failed_crcs_sensor; }
 
@@ -902,6 +915,10 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void send_estia_demand_heartbeat();      // periodic 0x55 as 0x0041
   void set_demand_enabled(bool en) { demand_enabled_ = en; }
   void send_estia_data_request(uint8_t subtype);
+  void send_estia_first_gen_dhw_setpoint(float target_temp);
+  void send_estia_first_gen_zone1(bool on);
+  void send_estia_first_gen_dhw_boost(bool on);
+  void send_estia_first_gen_request_data(uint8_t request_code);
   void send_estia_tracked_(const uint8_t *frame, size_t len, uint16_t ack_dtype);
   
   // Reporting external sensor temperature to AC *************************
@@ -943,6 +960,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
 
   void process_received_data(const struct DataFrame *frame);
   void process_received_data_tu2c_(const struct DataFrame *frame);
+  void process_received_data_estia_first_gen_(const DataFrame *frame);
   bool is_ack_for_pending_command_(const DataFrame *frame) const;
   bool is_tu2c_command_ack_frame_(const DataFrame *frame) const;
   bool should_track_tu2c_command_ack_(const DataFrame &frame) const;
@@ -974,6 +992,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   binary_sensor::BinarySensor *connected_binary_sensor_{nullptr};
   switch_::Switch *vent_switch_{nullptr};
   switch_::Switch *read_only_switch_{nullptr};
+  switch_::Switch *zone1_switch_{nullptr};
+  switch_::Switch *dhw_boost_switch_{nullptr};
   sensor::Sensor *failed_crcs_sensor_{nullptr};
 
   sensor::Sensor *current_sensor_{nullptr}; // Sensor for current, x10 A
@@ -984,6 +1004,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   sensor::Sensor *waterpump_hours_sensor_{nullptr};
   sensor::Sensor *backup_heater_hours_sensor_{nullptr};
   sensor::Sensor *demand_sensor_{nullptr};  // 0-10V interface demand (0..15)
+  sensor::Sensor *zone1_water_temp_sensor_{nullptr};
+  sensor::Sensor *zone1_curve_sensor_{nullptr};
 
   // rx handler for 0x1A (sensor) replies (called from process_received_data)
   void process_sensor_value_(const DataFrame *frame);
@@ -1101,6 +1123,12 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   uint8_t estia_demand_value_{0};         // current demand value (0..15)
   uint32_t estia_last_demand_heartbeat_ms_{0};
 
+  bool estia_first_gen_pump_state_known_{false};
+  bool estia_first_gen_zone1_active_{false};
+  bool estia_first_gen_dhw_active_{false};
+  bool estia_first_gen_dhw_boost_{false};
+  uint8_t estia_first_gen_dhw_encoded_{0};
+  uint8_t estia_first_gen_zone1_encoded_{0};
   uint32_t last_temp_log_time_ = 0;  // Counter for BME280 temperature logging
   float last_sent_temp_ = 1; // Last sent room temperature to the unit
 
@@ -1123,6 +1151,22 @@ class ToshibaAbVentSwitch : public switch_::Switch, public Component {
 
   void write_state(bool state) override;
 
+  ToshibaAbClimate *climate_;
+};
+
+class ToshibaAbEstiaZone1Switch : public switch_::Switch, public Component {
+ public:
+  ToshibaAbEstiaZone1Switch(ToshibaAbClimate *climate) { climate_ = climate; }
+ protected:
+  void write_state(bool state) override;
+  ToshibaAbClimate *climate_;
+};
+
+class ToshibaAbEstiaDhwBoostSwitch : public switch_::Switch, public Component {
+ public:
+  ToshibaAbEstiaDhwBoostSwitch(ToshibaAbClimate *climate) { climate_ = climate; }
+ protected:
+  void write_state(bool state) override;
   ToshibaAbClimate *climate_;
 };
 

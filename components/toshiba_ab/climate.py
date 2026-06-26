@@ -62,6 +62,10 @@ CONF_WATERPUMP_HOURS = "waterpump_hours"
 CONF_BACKUP_HEATER_HOURS = "backup_heater_hours"
 CONF_DEMAND = "demand"
 CONF_DEMAND_ENABLED = "demand_enabled"
+CONF_ZONE1_SWITCH = "zone1_switch"
+CONF_DHW_BOOST = "dhw_boost"
+CONF_ZONE1_WATER_TEMPERATURE = "zone1_water_temperature"
+CONF_ZONE1_CURVE = "zone1_curve"
 
 #AC Sensors addresses
 
@@ -89,6 +93,12 @@ ToshibaAbVentSwitch =  toshiba_ab_ns.class_(
 ToshibaAbReadOnlySwitch = toshiba_ab_ns.class_(
     "ToshibaAbReadOnlySwitch", switch.Switch, cg.Component
 )
+ToshibaAbEstiaZone1Switch = toshiba_ab_ns.class_(
+    "ToshibaAbEstiaZone1Switch", switch.Switch, cg.Component
+)
+ToshibaAbEstiaDhwBoostSwitch = toshiba_ab_ns.class_(
+    "ToshibaAbEstiaDhwBoostSwitch", switch.Switch, cg.Component
+)
 
 ToshibaAbOnDataReceivedTrigger = toshiba_ab_ns.class_(
     "ToshibaAbOnDataReceivedTrigger", automation.Trigger.template()
@@ -110,6 +120,7 @@ FRAME_FORMATS = {
     "a0": FrameFormat.A0,
     "estia_a0": FrameFormat.A0,
     "hm": FrameFormat.HM,
+    "estia": FrameFormat.ESTIA,
 }
 
 
@@ -190,6 +201,37 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
                 )
             ),
             key=CONF_NAME,
+        ),
+
+        cv.Optional(CONF_ZONE1_SWITCH): cv.maybe_simple_value(
+            switch._SWITCH_SCHEMA.extend(
+                cv.Schema(
+                    {
+                        cv.GenerateID(): cv.declare_id(ToshibaAbEstiaZone1Switch),
+                    }
+                )
+            ),
+            key=CONF_NAME,
+        ),
+        cv.Optional(CONF_DHW_BOOST): cv.maybe_simple_value(
+            switch._SWITCH_SCHEMA.extend(
+                cv.Schema(
+                    {
+                        cv.GenerateID(): cv.declare_id(ToshibaAbEstiaDhwBoostSwitch),
+                    }
+                )
+            ),
+            key=CONF_NAME,
+        ),
+        cv.Optional(CONF_ZONE1_WATER_TEMPERATURE): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS,
+            accuracy_decimals=0,
+            device_class=DEVICE_CLASS_TEMPERATURE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_ZONE1_CURVE): sensor.sensor_schema(
+            accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
         ),
         cv.Optional(CONF_FAILED_CRCS): sensor.sensor_schema(
             accuracy_decimals=0,
@@ -341,6 +383,12 @@ async def to_code(config):
     if CONF_READ_ONLY_SWITCH in config:
         sw = await switch.new_switch(config[CONF_READ_ONLY_SWITCH], var)
         cg.add(var.set_read_only_switch(sw))
+    if CONF_ZONE1_SWITCH in config:
+        sw = await switch.new_switch(config[CONF_ZONE1_SWITCH], var)
+        cg.add(var.set_zone1_switch(sw))
+    if CONF_DHW_BOOST in config:
+        sw = await switch.new_switch(config[CONF_DHW_BOOST], var)
+        cg.add(var.set_dhw_boost_switch(sw))
 
     if CONF_ON_DATA_RECEIVED in config:
         for on_data_received in config.get(CONF_ON_DATA_RECEIVED, []):
@@ -360,6 +408,12 @@ async def to_code(config):
         cg.add(var.set_filter_alert_sensor(sens))
 
     # Estia sensors
+    if CONF_ZONE1_WATER_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_ZONE1_WATER_TEMPERATURE])
+        cg.add(var.set_zone1_water_temp_sensor(sens))
+    if CONF_ZONE1_CURVE in config:
+        sens = await sensor.new_sensor(config[CONF_ZONE1_CURVE])
+        cg.add(var.set_zone1_curve_sensor(sens))
     if CONF_OUTDOOR_TEMPERATURE in config:
         sens = await sensor.new_sensor(config[CONF_OUTDOOR_TEMPERATURE])
         cg.add(var.set_outdoor_temp_sensor(sens))
