@@ -431,7 +431,7 @@ struct DataFrameReader {
           tu2c_len_pending_ = true;
           return false;
         } else {
-        ESP_LOGV("READER", "Ignoring second byte != F0, resetting");
+        ESP_LOGVV("READER", "Ignoring second byte != F0, resetting");
         }
         prefix_match_ = 0;
         return false;
@@ -439,7 +439,7 @@ struct DataFrameReader {
       if (byte == 0xF0) {
         prefix_match_ = 1;
       } else {
-      ESP_LOGV("READER", "Ignoring first byte != F0, resetting");
+      ESP_LOGVV("READER", "Ignoring first byte != F0, resetting");
       }
       return false;
     }
