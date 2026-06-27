@@ -1,9 +1,9 @@
-# Toshiba AB frame formats
+# Toshiba AB protocols frame formats
 
-This component can read several related Toshiba AB-bus frame formats. The default
-configuration is `frame_format: auto`, which starts in classic TCC-Link mode and
-switches to a more specific format when the component can identify one from live
-traffic.
+This component can read several related Toshiba AB-bus protocols or frame formats. The default
+configuration is `frame_format: auto`, which starts in the most common TCC-Link protocol
+mode and switches to a more specific format if the component can identify one from live
+traffic. Not all protocols are automatically identified.
 
 ## Quick selection guide
 
@@ -16,9 +16,9 @@ traffic.
 | `u`, `tu2c`, `wrapped` | TU2C wrapped protocol | Newer U-series systems | `NONE` | No, set explicitly | Work in progress. Frames are wrapped with `F0:F0` and trailing `A0`. |
 | `estia` | First-generation Estia / R410A-style support | Older Estia-specific support path | `NONE` for the TU2C-style reader | No, set explicitly | Uses the TU2C reader path and Estia-specific control/decoding logic. |
 
-## Common fields used by classic-style frames
+## Common fields used by frames
 
-Classic TCC-Link and the component's internal canonical representation use this
+TCC-Link and the component's internal representation of frames (messages) use this
 layout:
 
 ```text
@@ -54,12 +54,13 @@ SRC:DST:OPCODE1:LEN:DATA...:CRC
 
 The reader takes the fourth byte as `LEN`, expects `4 + LEN + 1` total bytes,
 and validates the one-byte CRC. With the default frame filter enabled it ignores
-obvious invalid normal frames whose first byte is greater than `0xA0`.
+obvious invalid normal frames whose first byte is greater than `0xA0`, which is
+usually caused by electrical noise in the line, unless `filter_frames` is set to `false`
 
 ### Auto-detection
 
 Yes. When `frame_format: auto` is used, the reader initially parses frames as
-classic TCC-Link. The component confirms `normal` after it receives a valid
+classic TCC-Link. The component confirms the protocol after it receives a valid
 master keepalive/ping frame.
 
 ### YAML
@@ -75,40 +76,28 @@ uart:
 climate:
   - platform: toshiba_ab
     name: "Toshiba AC"
-    frame_format: auto   # default; or force with: normal
+    frame_format: auto   # default option, and can be omitted; or forced with: normal
 ```
 
-## `hm` / HM-range dialect
+## `hm` / HM-range systems
 
 ### Structure
 
-Some HM/RAV-RM systems send master broadcasts and remote-to-master frames with an
-extra wrapper/interlude on the wire:
+Some HM/RAV-RM master systems send frames with a different structure in the frame format, and
+with some extra bytes, for example:
 
 ```text
 A0:00:OPCODE1:LEN:00:SRC_MODE:SRC:DST_MODE:DST:00:OPCODE2:PAYLOAD...:CRC
 ```
 
-The real source and destination addresses are at wire offsets 6 and 8. The
-reader strips the six-byte interlude at offsets 4..9, inserts one padding byte
-after `OPCODE2`, and passes the rest of the component a canonical classic-style
-frame:
+`LEN` is the number of data bytes between `LEN` and `CRC`
+The values of bytes and their meaning is consistent with the TCC-Link protocol, but they are in different
+positions. The firmware reader "converts" the read messages to the TCC-Link format and uses most of the
+same code for interpretation.
+However, CRC validation for HM frames is intentionally not checked because the HM CRC
+algorithm has not yet been identified.
 
-```text
-SRC:DST:OPCODE1:LEN':OPCODE2:00:PAYLOAD...:CRC
-```
-
-CRC validation for HM frames is intentionally not enforced because the HM CRC
-algorithm has not yet been derived.
-
-Example shape:
-
-```text
-A0:00:11:0B:00:00:00:00:40:00:86:A1:05:...:<CRC>
-```
-
-Sensor-reply frames without the `A0:00` wrapper, such as `00:40:1A:...`, are
-accepted directly.
+To send messages, the firmware just uses the normal TCC-Link format and the frames are accepted by the master.
 
 ### Auto-detection
 
@@ -131,34 +120,31 @@ climate:
     frame_format: auto   # default; or force with: hm
 ```
 
-## `tu2c` / wrapped TU2C
+## `tu2c` / "U" series systems
 
 ### Structure
 
-TU2C frames are wrapped by a two-byte prefix and one-byte suffix:
+TU2C frames are easily identified by a two-byte prefix and one-byte suffix:
 
 ```text
-F0:F0:TOTAL_LEN:PAYLOAD...:A0
+F0:F0:TOTAL_LEN:SRC:DEST:DATA_LEN:DATA...:CRC:A0
 ```
 
 `TOTAL_LEN` includes the two `F0` prefix bytes, the length byte itself, and the
 trailing `A0`. After the length byte, the reader stores the following bytes up
-to but not including the final `A0` as the frame payload. TU2C command examples
-noted in the source include:
+to but not including the final `A0` as the frame payload to decode messages.
+TU2C command examples:
 
 ```text
-F0:F0:0B:50:90:03:01:21:02:CF:A0  # wrapped power-off example
-F0:F0:0A:50:90:02:49:0D:00:A0     # wrapped registration/query example
-F0:F0:0C:50:90:04:41:5C:90:F3:CC:A0  # wrapped keepalive example
+F0:F0:0B:50:90:03:01:21:02:CF:A0  # power-off example
+F0:F0:0A:50:90:02:49:0D:00:A0     # registration/query example
+F0:F0:0C:50:90:04:41:5C:90:F3:CC:A0  # keepalive example
 ```
-
-The same examples without the `F0:F0` prefix and trailing `A0` are the inner
-frames handled by the TU2C decoder.
 
 ### Auto-detection
 
-No. The component knows how to parse this format when selected, but `auto` does
-not currently promote to TU2C. Set it explicitly.
+No. The component knows how to interpret this format when selected, but `auto` does
+not currently scan for TU2C protocol. Set it explicitly.
 
 ### YAML
 
@@ -176,32 +162,34 @@ climate:
     frame_format: tu2c   # aliases: u, wrapped
 ```
 
-## `a0` / Estia R32 A0 protocol
+## `a0` / Estia R32 protocol
 
 ### Structure
 
-The Estia R32 A0 protocol is not the same as classic TCC-Link, even though it
-uses the same AB-bus speed and even parity. The full wire frame is:
+The Estia R32 AO protocol is not the same as classic TCC-Link, even though it
+uses the same AB-bus speed and even parity and the frames resemble the HM protocol.
+A full frame looks like:
 
 ```text
-A0:00:TYPE:LEN:00:SRC_H:SRC_L:DST_H:DST_L:DTYPE_H:DTYPE_L:DATA...:CRC_H:CRC_L
+A0:00:TYPE:LEN:00:SRC_MODE:SRC:DST_MODE:DST:DTYPE_H:DTYPE_L:DATA...:CRC_H:CRC_L
 ```
 
-The component stores bytes after the `A0:00` prefix internally. `LEN` is the
-length byte after `TYPE`; after the prefix, the total stored frame length is
-`LEN + 4` bytes: `TYPE`, `LEN`, `LEN` payload bytes, and the two-byte CRC. The
-CRC is CRC-16/MCRF4XX over the `A0:00` prefix plus the stored frame bytes except
-for the final CRC bytes.
+`SRC_MODE:SRC` and `DST_MODE:DST` are also referred as `SRC_H:SRC_L` and `DST_H:DST_L` 
 
-Common addresses are `0x0800` for the master, `0x0040` for the remote, `0x0041`
-for the optional 0-10 V demand interface emulation, and `0x00FE` for broadcast.
+The component processes bytes after the `A0:00` prefix. `LEN` is the
+number of bytes between `LEN` and the two-byte CRC. The CRC is CRC-16/MCRF4XX
+over the `A0:00` prefix plus the stored frame bytes except for the final CRC bytes.
 
-Example frames and shapes:
+Common SRC and DST addresses are `0x00` for the master, `0x40` for the remote, `0x41`
+for the optional 0-10 V demand interface emulation, and `0xFE` for broadcast. Consistent
+with Toshiba conventions.
+
+Example frames:
 
 ```text
-A0:00:11:08:00:00:40:08:00:00:41:22:<CRC_H>:<CRC_L>  # power-off command shape
-A0:00:11:08:00:00:40:08:00:03:C0:02:<CRC_H>:<CRC_L>  # mode command shape (heat)
-A0:00:15:0A:00:00:40:08:00:00:E8:C0:01:00:<CRC_H>:<CRC_L>  # data request shape
+A0:00:11:08:00:00:40:08:00:00:41:22:<CRC_H>:<CRC_L>  # power-off command
+A0:00:11:08:00:00:40:08:00:03:C0:02:<CRC_H>:<CRC_L>  # mode command (heat)
+A0:00:15:0A:00:00:40:08:00:00:E8:C0:01:00:<CRC_H>:<CRC_L>  # data request
 A0:00:18:26:00:SRC_H:SRC_L:DST_H:DST_L:00:E8:C1:01:00:DATA...:CRC_H:CRC_L
 ```
 
@@ -231,25 +219,30 @@ climate:
     demand_enabled: false  # optional: 0-10 V demand emulation
 ```
 
-## `estia` / first-generation Estia path
+## `estia` / first-generation Estia R410A
 
 ### Structure
 
 The `estia` option selects the component's first-generation Estia support path.
-It uses the TU2C-style wrapped reader rather than the Estia R32 A0 reader:
+It uses the TU2C-style format rather than the Estia R32 A0 style and parity NONE:
 
 ```text
-F0:F0:TOTAL_LEN:PAYLOAD...:A0
+F0:F0:TOTAL_LEN:SRC:DEST:DATA...:CRC:A0
+```
+`TOTAL_LEN` includes all bytes
+
+Example frames:
+
+```
+F0:F0:11:70:FF:E0:C0:31:C3:80:10:90:52:66:00:EC:A0      Status frame
+F0:F0:0B:60:70:E0:01:21:0C:E9:A0      Domestic Hot Water ON command
 ```
 
-Internally, first-generation Estia command helpers build payloads from a source,
-destination, Estia payload bytes, and a one-byte checksum, then wrap them for the
-bus. The supported control helpers are focused on zone 1, DHW boost, DHW
-setpoint, and data requests.
+Internally, first-generation Estia and TU2C protocol use most of the same code.
 
 ### Auto-detection
 
-No. Set `frame_format: estia` explicitly if you are using this support path.
+No. Set `frame_format: estia` explicitly if you are using this.
 
 ### YAML
 
