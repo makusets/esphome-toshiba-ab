@@ -89,6 +89,9 @@ Most of the work is based on previous work, hard bits of decoding and initial bo
 
 # Toshiba protocols compatibility
 
+For a detailed byte-level comparison of the supported frame formats, example frames, auto-detection behavior, and YAML snippets, see [docs/frame_formats.md](docs/frame_formats.md).
+
+
 ## TCC-Link
 
 Toshiba systems using the AB line for communication employ at least two major known protocol variations, with further variations within each of them. This project was designed and tested for the initial TCC-Link protocol. And two variations of that protocol are supported at the moment.
