@@ -269,25 +269,6 @@ enum class FrameFormat : uint8_t {
   NORMAL = 0,
   TU2C = 1,
   A0 = 2,
-  // HM-range dialect (RAV-RM/HM indoors paired with TU2C-Link-capable
-  // outdoors). On-wire layout for master broadcasts and remote→master
-  // frames is:
-  //
-  //   A0 00 OPCODE LEN <00 [src_mode] SRC [dst_mode] DST 00> opcode2 ... CRC
-  //
-  // The 6-byte interlude `00 [src_mode] SRC [dst_mode] DST 00` lives at
-  // wire offsets 4..9 and embeds the source and destination addresses
-  // at offsets 6 and 8 respectively. SRC=0x00 master / 0x40 remote /
-  // 0xFE broadcast — the same identifiers as classic TCC-Link, just at
-  // different byte positions. The reader normalises HM frames to the
-  // standard `src dst opcode len opcode2 ... crc` layout in put(), so
-  // the rest of the pipeline (status decoding, ACK matching, master
-  // detection) works unchanged.
-  //
-  // CRC is not validated for HM frames — the algorithm hasn't been
-  // derived (see makusets/esphome-toshiba-ab#76). Frames are accepted
-  // unconditionally and crc_valid is set to false so callers can
-  // distinguish if needed.
   HM = 3,
   ESTIA = 4,
 };
