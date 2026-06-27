@@ -11,10 +11,10 @@ traffic. Not all protocols are automatically identified.
 | --- | --- | --- | --- | --- | --- |
 | `auto` | Automatic | Recommended first try for most installs | See target format | N/A | Default. Starts as normal TCC-Link and confirms `normal`, `hm`, or `a0` from traffic. |
 | `n`, `normal`, `tcc-link` | Classic TCC-Link | Most older central HVAC systems using the AB remote bus | `EVEN` | Yes | The component confirms this when it sees a valid master keepalive. |
-| `hm` | HM / newer RAV-RM dialect | Newer HM-range/RAV-RM indoor units | `EVEN` | Yes | Uses an `A0:00` wire prefix and different source/destination byte positions, then is normalised internally. |
-| `a0`, `estia_a0` | Estia R32 A0 protocol | Toshiba R32 Estia heat pumps | `EVEN` | Yes | Uses CRC-16 and 16-bit addresses. For Estia setups, force `a0` if auto-detection does not lock quickly. |
-| `u`, `tu2c`, `wrapped` | TU2C wrapped protocol | Newer U-series systems | `NONE` | No, set explicitly | Work in progress. Frames are wrapped with `F0:F0` and trailing `A0`. |
-| `estia` | First-generation Estia / R410A-style support | Older Estia-specific support path | `NONE` for the TU2C-style reader | No, set explicitly | Uses the TU2C reader path and Estia-specific control/decoding logic. |
+| `hm` | HM / newer RAV-RM dialect | Newer HM-range/RAV-RM indoor units | `EVEN` | Yes | Uses an `A0:00` prefix and different source/destination byte positions, then is normalised internally. |
+| `a0`, `estia_a0` | Estia R32 A0 protocol | Toshiba R32 Estia heat pumps | `EVEN` | Yes | Uses two-byte CRC-16. |
+| `u`, `tu2c`, `wrapped` | TU2C wrapped protocol | Newer U-series systems | `NONE` | No, set explicitly | Work in progress. Frames are prefixed with `F0:F0` and trailing `A0`. |
+| `estia` | First-generation Estia / R410A-style support | Older Estia-specific support path | `NONE` | No, set explicitly | Uses the TU2C reader path and Estia-specific control/decoding logic. |
 
 ## Common fields used by frames
 
