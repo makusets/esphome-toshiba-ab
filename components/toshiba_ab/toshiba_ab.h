@@ -466,6 +466,7 @@ struct DataFrameReader {
     uint8_t current_byte = byte;
     if (use_tu2c && tu2c_) {
       if (tu2c_len_pending_) {
+        ESP_LOGV("READER", "Receiving TU2C frame...");
         // TU2C frames: third byte is the length, and it includes the 3 wrapping bytes.
         // The total length includes the two 0xF0 prefix bytes, the length byte itself,
         // and the trailing 0xA0. We therefore expect (len - 3) bytes after consuming
