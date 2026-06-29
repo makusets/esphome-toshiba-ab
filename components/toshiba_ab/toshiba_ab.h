@@ -1119,6 +1119,10 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool estia_first_gen_dhw_boost_{false};
   uint8_t estia_first_gen_dhw_encoded_{0};
   uint8_t estia_first_gen_zone1_encoded_{0};
+  bool estia_first_gen_status_reports_dhw_temp_{false};
+  uint32_t estia_first_gen_last_dhw_poll_ms_{0};
+  static const uint32_t ESTIA_FIRST_GEN_DHW_POLL_INTERVAL_MS = 60000;
+  static const uint8_t ESTIA_FIRST_GEN_DHW_TEMP_REQUEST = 0x08;
   uint32_t last_temp_log_time_ = 0;  // Counter for BME280 temperature logging
   float last_sent_temp_ = 1; // Last sent room temperature to the unit
 
