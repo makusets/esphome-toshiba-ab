@@ -352,7 +352,10 @@ bool ToshibaAbClimate::should_track_tu2c_command_ack_(const DataFrame &frame) co
     return false;
   }
 
-  if (frame.raw[1] != this->tu2c_remote_address_ || frame.raw[2] != this->tu2c_master_address_) {
+  const bool matches_tu2c_addresses = frame.raw[1] == this->tu2c_remote_address_ && frame.raw[2] == this->tu2c_master_address_;
+  const bool matches_estia_addresses = this->data_reader.frame_format() == FrameFormat::ESTIA &&
+                                      frame.raw[1] == this->remote_address_ && frame.raw[2] == this->master_address_;
+  if (!matches_tu2c_addresses && !matches_estia_addresses) {
     return false;
   }
 
@@ -360,8 +363,8 @@ bool ToshibaAbClimate::should_track_tu2c_command_ack_(const DataFrame &frame) co
     return false;
   }
 
-  // Track ACKs for TU2C write commands (currently power-off and set-parameter flags).
-  return frame.raw[5] == 0x21 || frame.raw[5] == 0x2C;
+  // Track ACKs for TU2C/first-gen Estia write commands.
+  return frame.raw[5] == 0x21 || frame.raw[5] == 0x23 || frame.raw[5] == 0x2C;
 }
 
 bool ToshibaAbClimate::should_track_command_ack_(const DataFrame &frame) const {
@@ -436,6 +439,33 @@ void log_data_frame(const std::string &msg, const struct DataFrame *frame, size_
     res.c_str(),
     frame->crc()
   );
+}
+
+void log_tu2c_data_frame(const std::string &msg, const struct DataFrame *frame) {
+  if (frame == nullptr) return;
+  const size_t size = frame->size();
+  std::string res;
+  res.reserve(size ? (size * 12) : 0);
+  char buf[4];
+  for (size_t i = 0; i < size; i++) {
+    if (i > 0) res += ':';
+    std::snprintf(buf, sizeof(buf), "%02X", frame->raw[i]);
+    const bool highlight = i == 1 || i == 2 || i == 3 || i == 4 || i == 5;
+    if (highlight) {
+      res += (i == 1 || i == 2) ? "\033[31m" : "\033[32m";
+      res += buf;
+      res += "\033[0m";
+    } else {
+      res += "\033[2;37m";
+      res += buf;
+      res += "\033[0m";
+    }
+  }
+  const uint8_t src = size > 1 ? frame->raw[1] : 0;
+  const uint8_t dst = size > 2 ? frame->raw[2] : 0;
+  const uint8_t op1 = size > 4 ? frame->raw[4] : 0;
+  const uint8_t op2 = size > 5 ? frame->raw[5] : 0;
+  ESP_LOGD("RX", "%s: SRC=%02X DST=%02X OP=%02X:%02X %s", msg.c_str(), src, dst, op1, op2, res.c_str());
 }
 
 void log_raw_data(const std::string& prefix, const uint8_t raw[], size_t size) {
@@ -816,6 +846,14 @@ bool ToshibaAbClimate::enqueue_sensor_query_(uint8_t id) {
 }
 
 void ToshibaAbClimate::send_sensor_query(uint8_t sensor_id) {
+  if (this->data_reader.frame_format() == FrameFormat::ESTIA) {
+    this->last_sensor_query_id_ = sensor_id;
+    this->sensor_query_outstanding_ = true;
+    this->last_sensor_query_ms_ = millis();
+    this->send_estia_first_gen_request_data(sensor_id);
+    return;
+  }
+
   DataFrame cmd{};
   cmd.source      = this->remote_address_;           // 0x40
   cmd.dest        = this->master_address_;    // usually 0x00
@@ -2392,7 +2430,8 @@ void ToshibaAbClimate::loop() {
     }
 
     if (frame_to_send.has_value()) {
-      if (frame_to_send->is_tu2c() && !this->has_tu2c_quiet_time_elapsed_(now)) {
+      if (frame_to_send->is_tu2c() && this->data_reader.frame_format() == FrameFormat::TU2C &&
+          !this->has_tu2c_quiet_time_elapsed_(now)) {
           return;
       }
       last_sent_frame_millis_ = now;
@@ -2400,7 +2439,11 @@ void ToshibaAbClimate::loop() {
         last_tu2c_sent_frame_millis_ = last_sent_frame_millis_;
       }
       auto frame = frame_to_send.value();
-      log_data_frame("Write frame", &frame);
+      if (frame.is_tu2c()) {
+        log_tu2c_data_frame("Write frame", &frame);
+      } else {
+        log_data_frame("Write frame", &frame);
+      }
       this->remember_tx_frame_for_echo_(frame.raw, frame.size(), frame.is_tu2c());
 
       auto log_tx_bytes = [this](const uint8_t *bytes, size_t size) {
@@ -2457,6 +2500,14 @@ void ToshibaAbClimate::loop() {
       estia_cmd_sent_ms_ = millis();
       this->raw_write_queue_.push(estia_pending_cmd_);
     }
+  }
+
+  // First-generation Estia status normally carries DHW cylinder temperature.
+  // If this master omits it, poll only that thermostat-critical value.
+  if (this->data_reader.frame_format() == FrameFormat::ESTIA && !this->estia_first_gen_status_reports_dhw_temp_ &&
+      !this->sensor_query_outstanding_ && (now - this->estia_first_gen_last_dhw_poll_ms_) >= ESTIA_FIRST_GEN_DHW_POLL_INTERVAL_MS) {
+    this->estia_first_gen_last_dhw_poll_ms_ = now;
+    this->send_sensor_query(ESTIA_FIRST_GEN_DHW_TEMP_REQUEST);
   }
 
   // Estia autonomous polling (runtime-toggleable)
@@ -2774,8 +2825,9 @@ void ToshibaAbClimate::send_command(const struct DataFrame command) {
     return;
   }
   if (this->autonomous_) {
-    if (this->data_reader.frame_format() == FrameFormat::TU2C) {
-      if (!this->announce_ack_received_ && !this->is_tu2c_registration_query_(command)) {
+    if (this->data_reader.frame_format() == FrameFormat::TU2C || this->data_reader.frame_format() == FrameFormat::ESTIA) {
+      if (this->data_reader.frame_format() == FrameFormat::TU2C && !this->announce_ack_received_ &&
+          !this->is_tu2c_registration_query_(command)) {
         ESP_LOGW(TAG, "Dropping TU2C command while awaiting registration ACK (autonomous mode)");
         return;
       }
@@ -2794,7 +2846,11 @@ void ToshibaAbClimate::send_command(const struct DataFrame command) {
     }
   }
 
-  log_data_frame("Enqueue command", &command);
+  if (command.is_tu2c()) {
+    log_tu2c_data_frame("Enqueue command", &command);
+  } else {
+    log_data_frame("Enqueue command", &command);
+  }
   this->write_queue_.push(command);
 }
 
@@ -3113,13 +3169,6 @@ bool ToshibaAbClimate::control_vent(bool state) {
   return send_new_state(&new_state) > 0;
 }
 
-static uint8_t estia_first_gen_checksum(const uint8_t *frame, size_t len) {
-  uint16_t sum = 0;
-  if (len < 4) return 0;
-  for (size_t i = 2; i < len - 2; i++) sum += frame[i];
-  return static_cast<uint8_t>(sum & 0xFF);
-}
-
 static uint8_t estia_first_gen_raw_checksum(const uint8_t *raw, size_t raw_len) {
   uint16_t sum = 0;
   if (raw_len < 2) return 0;
@@ -3127,44 +3176,42 @@ static uint8_t estia_first_gen_raw_checksum(const uint8_t *raw, size_t raw_len) 
   return static_cast<uint8_t>(sum & 0xFF);
 }
 
-static std::vector<uint8_t> make_estia_first_gen_frame(uint8_t src, uint8_t dst, const uint8_t *payload, size_t payload_len) {
-  std::vector<uint8_t> frame;
-  frame.reserve(payload_len + 7);
-  frame.push_back(0xF0);
-  frame.push_back(0xF0);
-  frame.push_back(static_cast<uint8_t>(payload_len + 7));
-  frame.push_back(src);
-  frame.push_back(dst);
-  for (size_t i = 0; i < payload_len; i++) frame.push_back(payload[i]);
-  frame.push_back(0x00);
-  frame.push_back(0xA0);
-  frame[frame.size() - 2] = estia_first_gen_checksum(frame.data(), frame.size());
+static DataFrame make_estia_first_gen_frame(uint8_t src, uint8_t dst, const uint8_t *payload, size_t payload_len) {
+  DataFrame frame{};
+  const size_t inner_size = payload_len + 4;
+  frame.raw[0] = static_cast<uint8_t>(payload_len + 7);
+  frame.raw[1] = src;
+  frame.raw[2] = dst;
+  for (size_t i = 0; i < payload_len; i++) frame.raw[3 + i] = payload[i];
+  frame.raw[inner_size - 1] = estia_first_gen_raw_checksum(frame.raw, inner_size);
+  frame.data_length = inner_size >= 5 ? inner_size - 5 : 0;
+  frame.set_tu2c(true);
   return frame;
 }
 
 void ToshibaAbClimate::send_estia_first_gen_zone1(bool on) {
   if (this->read_only_) return;
   const uint8_t payload[] = {0xE0, 0x01, 0x21, static_cast<uint8_t>(on ? 0x03 : 0x0A)};
-  this->raw_write_queue_.push(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
 void ToshibaAbClimate::send_estia_first_gen_dhw_boost(bool on) {
   if (this->read_only_) return;
   const uint8_t payload[] = {0xE0, 0x01, 0x21, static_cast<uint8_t>(on ? 0x0C : 0x08)};
-  this->raw_write_queue_.push(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
 void ToshibaAbClimate::send_estia_first_gen_dhw_setpoint(float target_temp) {
   if (this->read_only_) return;
   uint8_t encoded = static_cast<uint8_t>(std::round((target_temp + 16.0f) * 2.0f));
   const uint8_t payload[] = {0xE0, 0x01, 0x23, 0x08, 0x00, 0x00, 0xA0, encoded};
-  this->raw_write_queue_.push(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
 void ToshibaAbClimate::send_estia_first_gen_request_data(uint8_t request_code) {
   if (this->read_only_) return;
   const uint8_t payload[] = {0xE0, 0x41, 0x5C, 0x70, request_code};
-  this->raw_write_queue_.push(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
 void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *frame) {
@@ -3172,6 +3219,7 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
   const uint8_t len = frame->raw[0];
   const uint8_t raw_len = len > 3 ? len - 3 : 0;
   if (len < 7 || raw_len > DATA_FRAME_MAX_SIZE) return;
+  log_tu2c_data_frame("Estia first-gen RX", frame);
   if (frame->raw[raw_len - 1] != estia_first_gen_raw_checksum(frame->raw, raw_len)) {
     ESP_LOGD(TAG, "Estia first-gen checksum fail");
     return;
@@ -3199,6 +3247,7 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     this->mode = this->estia_first_gen_dhw_active_ ? climate::CLIMATE_MODE_HEAT : climate::CLIMATE_MODE_OFF;
     this->target_temperature = static_cast<float>(frame->raw[9]) / 2.0f - 16.0f;
     this->current_temperature = this->target_temperature;
+    this->estia_first_gen_status_reports_dhw_temp_ = true;
     this->publish_state();
     if (this->zone1_switch_) this->zone1_switch_->publish_state(this->estia_first_gen_zone1_active_);
     if (this->dhw_boost_switch_) this->dhw_boost_switch_->publish_state(this->estia_first_gen_dhw_boost_);
@@ -3207,7 +3256,25 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     this->estia_first_gen_pump_state_known_ = true;
   } else if (src == this->master_address_ && frame->raw[4] == 0x80 && frame->raw[5] == 0x5C && len > 8) {
     const uint16_t value = encode_uint16(frame->raw[6], frame->raw[7]);
-    if (this->outdoor_temp_sensor_) this->outdoor_temp_sensor_->publish_state(value);
+    bool published_polled_sensor = false;
+    if (this->last_sensor_query_id_ != 0xFF) {
+      if (this->last_sensor_query_id_ == ESTIA_FIRST_GEN_DHW_TEMP_REQUEST &&
+          !this->estia_first_gen_status_reports_dhw_temp_) {
+        this->current_temperature = static_cast<float>(value);
+        this->publish_state();
+      }
+      for (auto &ps : this->polled_sensors_) {
+        if (ps.id == this->last_sensor_query_id_ && ps.sensor != nullptr) {
+          ps.sensor->publish_state(static_cast<float>(value) * ps.scale);
+          published_polled_sensor = true;
+          ESP_LOGD(TAG, "Estia first-gen sensor: id=0x%02X raw=0x%04X", this->last_sensor_query_id_, value);
+          break;
+        }
+      }
+      this->sensor_query_outstanding_ = false;
+      this->last_sensor_query_id_ = 0xFF;
+    }
+    if (!published_polled_sensor && this->outdoor_temp_sensor_) this->outdoor_temp_sensor_->publish_state(value);
   } else {
     log_raw_data("Estia first-gen", frame->raw, len);
   }
