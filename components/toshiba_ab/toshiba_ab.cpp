@@ -1221,12 +1221,19 @@ void ToshibaAbClimate::setup() {
 #ifdef USE_ESP8266
   if (this->hw_uart_rx_enabled_) {
     s_bus_serial.setRxBufferSize(512);
-    s_bus_serial.begin(2400, SERIAL_8E1);
+    uint32_t hw_uart_config = SERIAL_8N1;
+    if (this->hw_uart_parity_ == 1) {
+      hw_uart_config = SERIAL_8E1;
+    } else if (this->hw_uart_parity_ == 2) {
+      hw_uart_config = SERIAL_8O1;
+    }
+    s_bus_serial.begin(2400, hw_uart_config);
     if (this->hw_uart_rx_pin_ == 13) {
       s_bus_serial.swap();  // UART0: RX GPIO3->GPIO13, TX GPIO1->GPIO15 (unused)
     }
-    ESP_LOGCONFIG(TAG, "Hardware UART0 RX enabled on GPIO%u%s", this->hw_uart_rx_pin_,
-                  this->hw_uart_rx_pin_ == 13 ? " (UART0 swapped RX)" : "");
+    ESP_LOGCONFIG(TAG, "Hardware UART0 RX enabled on GPIO%u%s (%s parity)", this->hw_uart_rx_pin_,
+                  this->hw_uart_rx_pin_ == 13 ? " (UART0 swapped RX)" : "",
+                  this->hw_uart_parity_ == 1 ? "even" : (this->hw_uart_parity_ == 2 ? "odd" : "no"));
   }
 #endif
 

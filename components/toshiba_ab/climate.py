@@ -135,6 +135,14 @@ REPORT_SENSOR_TEMP_SCHEMA = cv.Schema({
 
 
 CONF_HARDWARE_UART_RX_PIN = "hardware_uart_rx_pin"
+CONF_HARDWARE_UART_PARITY = "hardware_uart_parity"
+CONF_PARITY = "parity"
+
+HARDWARE_UART_PARITY = {
+    "NONE": 0,
+    "EVEN": 1,
+    "ODD": 2,
+}
 
 
 def _hardware_uart_rx_pin(value):
@@ -294,6 +302,13 @@ def _pin_number(config):
     return config.get(CONF_NUMBER)
 
 
+def _uart_hub_config(config, callback):
+    cv.Schema(
+        {cv.Required(CONF_UART_ID): fv.id_declaration_match_schema(callback)},
+        extra=cv.ALLOW_EXTRA,
+    )(config)
+
+
 def _auto_hardware_uart_rx_pin(config):
     # On ESP8266, a bus wired as TX=software pin + RX=GPIO13 makes ESPHome use
     # software serial for both directions. Remove RX from the ESPHome UART hub so
@@ -315,11 +330,20 @@ def _auto_hardware_uart_rx_pin(config):
             hub_config.pop(CONF_RX_PIN, None)
         return hub_config
 
-    cv.Schema(
-        {cv.Required(CONF_UART_ID): fv.id_declaration_match_schema(detect_hub)},
-        extra=cv.ALLOW_EXTRA,
-    )(config)
+    _uart_hub_config(config, detect_hub)
     return auto_pin
+
+
+def _hardware_uart_parity(config):
+    parity = None
+
+    def detect_hub(hub_config):
+        nonlocal parity
+        parity = hub_config.get(CONF_PARITY, "NONE")
+        return hub_config
+
+    _uart_hub_config(config, detect_hub)
+    return HARDWARE_UART_PARITY[str(parity).upper()]
 
 
 def validate_uart(config):
@@ -333,6 +357,8 @@ def validate_uart(config):
     )(config)
     if auto_rx_pin is not None:
         config[CONF_HARDWARE_UART_RX_PIN] = auto_rx_pin
+    if CONF_HARDWARE_UART_RX_PIN in config:
+        config[CONF_HARDWARE_UART_PARITY] = _hardware_uart_parity(config)
     return config
 
 
@@ -370,6 +396,8 @@ async def to_code(config):
         cg.add(var.set_autoreset_errors(config[CONF_AUTORESET_ERRORS]))
     if CONF_HARDWARE_UART_RX_PIN in config:
         cg.add(var.set_hardware_uart_rx_pin(config[CONF_HARDWARE_UART_RX_PIN]))
+    if CONF_HARDWARE_UART_PARITY in config:
+        cg.add(var.set_hardware_uart_parity(config[CONF_HARDWARE_UART_PARITY]))
 
     if CONF_CONNECTED in config:
         sens = await binary_sensor.new_binary_sensor(config[CONF_CONNECTED])
