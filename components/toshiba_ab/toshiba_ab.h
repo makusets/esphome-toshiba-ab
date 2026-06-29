@@ -861,6 +861,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
     this->hw_uart_rx_pin_ = pin;
     this->hw_uart_rx_enabled_ = true;
   }
+  void set_hardware_uart_parity(uint8_t parity) { this->hw_uart_parity_ = parity; }
 
   climate::ClimateTraits traits() override;
   void control(const climate::ClimateCall &call) override;
@@ -940,6 +941,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   // unless final validation detects the ESP8266 GPIO13 RX/software-TX case.
   bool hw_uart_rx_enabled_{false};
   uint8_t hw_uart_rx_pin_{0};
+  // 0 = none, 1 = even, 2 = odd. Mirrors the ESPHome UART hub parity setting
+  // so hardware-UART RX mode does not force the bus to 8E1.
+  uint8_t hw_uart_parity_{0};
 
   DataFrameReader data_reader;
   TccState tcc_state;
