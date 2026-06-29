@@ -3219,13 +3219,63 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
   const uint8_t len = frame->raw[0];
   const uint8_t raw_len = len > 3 ? len - 3 : 0;
   if (len < 7 || raw_len > DATA_FRAME_MAX_SIZE) return;
-  log_tu2c_data_frame("Estia first-gen RX", frame);
+
+  const uint8_t src = frame->raw[1];
+  const bool has_master_status_signature = frame->raw[3] == 0xE0 && frame->raw[5] == 0x31;
+  const bool has_master_keepalive_signature = len == 0x0A && frame->raw[5] == 0x3A;
+  const bool is_master_source = src == this->master_address_ ||
+                                (this->master_address_auto_ &&
+                                 (has_master_status_signature || has_master_keepalive_signature));
+  const bool is_remote_source = src == this->remote_address_ || (src >= 0x60 && src <= TOSHIBA_ESTIA_REMOTE_MAX);
+  auto unknown_label = [&]() -> std::string {
+    char buf[40];
+    if (is_master_source) {
+      return "unknown data from master";
+    }
+    if (is_remote_source) {
+      std::snprintf(buf, sizeof(buf), "unknown data from remote %02X", src);
+      return buf;
+    }
+    std::snprintf(buf, sizeof(buf), "unknown data from source %02X", src);
+    return buf;
+  };
+  auto frame_label = [&]() -> std::string {
+    if (is_master_source && has_master_keepalive_signature) {
+      return "Master keepalive";
+    }
+    if (is_master_source && has_master_status_signature) {
+      return "MASTER PARAMETERS";
+    }
+    if (is_master_source && frame->raw[4] == 0x80 && frame->raw[5] == 0x5C) {
+      return "Master reporting data/sensor value";
+    }
+    if (is_master_source) {
+      return unknown_label();
+    }
+    if (is_remote_source && len == 0x0C && frame->raw[4] == 0x41 && frame->raw[5] == 0x5C) {
+      return "remote data/sensor query";
+    }
+    if (is_remote_source && frame->raw[3] == 0xE0 && frame->raw[4] == 0x41 && frame->raw[5] == 0x5C) {
+      return "Remote Timer Read";
+    }
+    if (is_remote_source && frame->raw[3] == 0xE0 && frame->raw[4] == 0x01 && frame->raw[5] == 0x21) {
+      return "Remote command";
+    }
+    if (is_remote_source && frame->raw[3] == 0xE0 && frame->raw[4] == 0x01 && frame->raw[5] == 0x23) {
+      return "Remote command: setpoint change";
+    }
+    if (is_remote_source && frame->raw[3] == 0xE0 && frame->raw[5] == 0x31) {
+      return "Remote status";
+    }
+    return unknown_label();
+  };
+  const std::string label = frame_label();
+  log_tu2c_data_frame(label, frame);
+
   if (frame->raw[raw_len - 1] != estia_first_gen_raw_checksum(frame->raw, raw_len)) {
-    ESP_LOGD(TAG, "Estia first-gen checksum fail");
+    ESP_LOGD(TAG, "Estia first-gen checksum fail for %s", label.c_str());
     return;
   }
-  const uint8_t src = frame->raw[1];
-  const uint8_t dst = frame->raw[2];
   if (this->master_address_auto_ && frame->raw[3] == 0xE0 && frame->raw[5] == 0x31) {
     this->master_address_ = src;
     this->master_address_confirmed_ = true;
