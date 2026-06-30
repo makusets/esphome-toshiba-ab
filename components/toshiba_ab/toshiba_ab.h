@@ -845,6 +845,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_zone1_water_temp_sensor(sensor::Sensor *sensor) { zone1_water_temp_sensor_ = sensor; }
   void set_zone1_target_temperature_sensor(sensor::Sensor *sensor) { zone1_target_temperature_sensor_ = sensor; }
   void set_dhw_current_temp_sensor(sensor::Sensor *sensor) { dhw_current_temp_sensor_ = sensor; }
+  void set_hotwater_pump_heating_binary_sensor(binary_sensor::BinarySensor *sensor) { hotwater_pump_heating_binary_sensor_ = sensor; }
+  void set_hotwater_resistor_heating_binary_sensor(binary_sensor::BinarySensor *sensor) { hotwater_resistor_heating_binary_sensor_ = sensor; }
   void set_frame_format(FrameFormat format) {
     data_reader.set_frame_format(format);
     frame_format_auto_ = false;
@@ -915,6 +917,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void send_estia_first_gen_dhw_setpoint(float target_temp);
   void send_estia_first_gen_zone1(bool on);
   void send_estia_first_gen_dhw_boost(bool on);
+  void send_estia_first_gen_auto_mode(bool on);
   void send_estia_first_gen_request_data(uint8_t request_code);
   void send_estia_tracked_(const uint8_t *frame, size_t len, uint16_t ack_dtype);
   
@@ -1007,6 +1010,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   sensor::Sensor *zone1_water_temp_sensor_{nullptr};
   sensor::Sensor *zone1_target_temperature_sensor_{nullptr};
   sensor::Sensor *dhw_current_temp_sensor_{nullptr};
+  binary_sensor::BinarySensor *hotwater_pump_heating_binary_sensor_{nullptr};
+  binary_sensor::BinarySensor *hotwater_resistor_heating_binary_sensor_{nullptr};
 
   // rx handler for 0x1A (sensor) replies (called from process_received_data)
   void process_sensor_value_(const DataFrame *frame);
@@ -1129,6 +1134,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool estia_first_gen_zone1_active_{false};
   bool estia_first_gen_dhw_active_{false};
   bool estia_first_gen_dhw_boost_{false};
+  bool estia_first_gen_auto_mode_active_{false};
+  bool estia_first_gen_hotwater_pump_heating_{false};
+  bool estia_first_gen_hotwater_resistor_heating_{false};
   uint8_t estia_first_gen_dhw_encoded_{0};
   uint8_t estia_first_gen_zone1_encoded_{0};
   static const uint8_t ESTIA_FIRST_GEN_DHW_TEMP_REQUEST = 0x0A;

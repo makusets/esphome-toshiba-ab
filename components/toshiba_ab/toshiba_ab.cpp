@@ -2761,11 +2761,7 @@ void ToshibaAbClimate::control(const climate::ClimateCall &call) {
   if (this->data_reader.frame_format() == FrameFormat::ESTIA) {
     if (call.get_mode().has_value()) {
       auto new_mode = call.get_mode().value();
-      if (new_mode == climate::CLIMATE_MODE_OFF) {
-        this->send_estia_first_gen_dhw_boost(false);
-      } else {
-        this->send_estia_first_gen_dhw_boost(true);
-      }
+      this->send_estia_first_gen_auto_mode(new_mode != climate::CLIMATE_MODE_OFF);
     }
     if (call.get_target_temperature().has_value()) {
       this->send_estia_first_gen_dhw_setpoint(call.get_target_temperature().value());
@@ -3222,6 +3218,12 @@ void ToshibaAbClimate::send_estia_first_gen_dhw_boost(bool on) {
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
+void ToshibaAbClimate::send_estia_first_gen_auto_mode(bool on) {
+  if (this->read_only_) return;
+  const uint8_t payload[] = {0xE0, 0x01, 0x24, 0x01, static_cast<uint8_t>(on ? 0x01 : 0x00)};
+  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+}
+
 void ToshibaAbClimate::send_estia_first_gen_dhw_setpoint(float target_temp) {
   if (this->read_only_) return;
   uint8_t encoded = static_cast<uint8_t>(std::round((target_temp + 16.0f) * 2.0f));
@@ -3313,13 +3315,22 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     this->estia_first_gen_zone1_active_ = frame->raw[6] & 0x01;
     this->estia_first_gen_dhw_active_ = frame->raw[6] & 0x02;
     this->estia_first_gen_dhw_boost_ = this->estia_first_gen_dhw_active_;
+    this->estia_first_gen_auto_mode_active_ = frame->raw[7] & 0x04;
+    this->estia_first_gen_hotwater_resistor_heating_ = frame->raw[8] & 0x04;
+    this->estia_first_gen_hotwater_pump_heating_ = frame->raw[8] & 0x08;
     this->estia_first_gen_dhw_encoded_ = frame->raw[9];
     this->estia_first_gen_zone1_encoded_ = frame->raw[10];
-    this->mode = this->estia_first_gen_dhw_active_ ? climate::CLIMATE_MODE_HEAT : climate::CLIMATE_MODE_OFF;
+    this->mode = (this->estia_first_gen_auto_mode_active_ || this->estia_first_gen_dhw_active_)
+                     ? climate::CLIMATE_MODE_HEAT
+                     : climate::CLIMATE_MODE_OFF;
     this->target_temperature = static_cast<float>(frame->raw[9]) / 2.0f - 16.0f;
     this->publish_state();
     if (this->zone1_switch_) this->zone1_switch_->publish_state(this->estia_first_gen_zone1_active_);
     if (this->dhw_boost_switch_) this->dhw_boost_switch_->publish_state(this->estia_first_gen_dhw_boost_);
+    if (this->hotwater_pump_heating_binary_sensor_)
+      this->hotwater_pump_heating_binary_sensor_->publish_state(this->estia_first_gen_hotwater_pump_heating_);
+    if (this->hotwater_resistor_heating_binary_sensor_)
+      this->hotwater_resistor_heating_binary_sensor_->publish_state(this->estia_first_gen_hotwater_resistor_heating_);
     if (this->zone1_target_temperature_sensor_) this->zone1_target_temperature_sensor_->publish_state(static_cast<float>(frame->raw[10]) / 2.0f - 16.0f);
     if (len > 18 && this->zone1_water_temp_sensor_) this->zone1_water_temp_sensor_->publish_state(static_cast<float>(frame->raw[14]) / 2.0f - 16.0f);
     this->estia_first_gen_pump_state_known_ = true;
