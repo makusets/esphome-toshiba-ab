@@ -67,6 +67,8 @@ CONF_DHW_BOOST = "dhw_boost"
 CONF_ZONE1_WATER_TEMPERATURE = "zone1_water_temperature"
 CONF_ZONE1_TARGET_TEMPERATURE = "zone1_target_temperature"
 CONF_DHW_CURRENT_TEMPERATURE = "dhw_current_temperature"
+CONF_HOTWATER_PUMP_HEATING = "hotwater_pump_heating"
+CONF_HOTWATER_RESISTOR_HEATING = "hotwater_resistor_heating"
 
 #AC Sensors addresses
 
@@ -250,6 +252,8 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
             device_class=DEVICE_CLASS_TEMPERATURE,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
+        cv.Optional(CONF_HOTWATER_PUMP_HEATING): binary_sensor.binary_sensor_schema(),
+        cv.Optional(CONF_HOTWATER_RESISTOR_HEATING): binary_sensor.binary_sensor_schema(),
         cv.Optional(CONF_FAILED_CRCS): sensor.sensor_schema(
             accuracy_decimals=0,
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
@@ -457,6 +461,12 @@ async def to_code(config):
         dhw_current_sens = await sensor.new_sensor(config[CONF_DHW_CURRENT_TEMPERATURE])
         cg.add(var.set_dhw_current_temp_sensor(dhw_current_sens))
         cg.add(var.add_polled_sensor(0x0A, 1.0, cg.uint32(120000), dhw_current_sens))
+    if CONF_HOTWATER_PUMP_HEATING in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_HOTWATER_PUMP_HEATING])
+        cg.add(var.set_hotwater_pump_heating_binary_sensor(sens))
+    if CONF_HOTWATER_RESISTOR_HEATING in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_HOTWATER_RESISTOR_HEATING])
+        cg.add(var.set_hotwater_resistor_heating_binary_sensor(sens))
     if CONF_OUTDOOR_TEMPERATURE in config:
         sens = await sensor.new_sensor(config[CONF_OUTDOOR_TEMPERATURE])
         cg.add(var.set_outdoor_temp_sensor(sens))
