@@ -150,6 +150,17 @@ struct DataFrame {
    * Returns 0 if not present.
    */
   size_t size() const {
+    if (tu2c_) {
+      // TU2C/first-generation Estia frames store their wrapped length in raw[0].
+      // raw[3] is a protocol byte (for first-generation Estia this is commonly
+      // 0xE0), so do not use the data_length union member because it aliases
+      // raw[3] and would corrupt the frame.
+      if (raw[0] <= 3 || raw[0] > DATA_FRAME_MAX_SIZE + 3)
+        return 0;
+
+      return raw[0] - 3;
+    }
+
     if (!validate_bounds())
       return 0;
 
@@ -478,11 +489,9 @@ struct DataFrameReader {
           reset();
           return false;
         }
-        if (data_index_ >= DATA_OFFSET_FROM_START + 1) {
-          frame.data_length = data_index_ - DATA_OFFSET_FROM_START - 1;  // subtract CRC
-        } else {
-          frame.data_length = 0;
-        }
+        // Do not assign frame.data_length for TU2C/first-generation Estia frames:
+        // data_length is unioned with raw[3], which is an on-wire protocol byte.
+        // The frame size is derived from raw[0] by DataFrame::size().
         crc_valid = false;
         complete  = true;
 
