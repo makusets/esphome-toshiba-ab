@@ -1259,7 +1259,7 @@ void ToshibaAbClimate::setup() {
 #ifdef USE_ESP8266
   if (this->hw_uart_rx_enabled_) {
     s_bus_serial.setRxBufferSize(512);
-    uint32_t hw_uart_config = SERIAL_8N1;
+    SerialConfig hw_uart_config = SERIAL_8N1;
     if (this->hw_uart_parity_ == 1) {
       hw_uart_config = SERIAL_8E1;
     } else if (this->hw_uart_parity_ == 2) {
