@@ -950,9 +950,13 @@ void ToshibaAbClimate::process_sensor_value_(const DataFrame *frame) {
 
     if (prev_id != 0xFF) {
       for (auto &ps : this->polled_sensors_) {
-        if (ps.id == prev_id && ps.sensor != nullptr) {
+        if (ps.id == prev_id) {
           const float value = static_cast<float>(raw) * ps.scale;
-          ps.sensor->publish_state(value);
+          if (prev_id == ESTIA_FIRST_GEN_DHW_TEMP_REQUEST) {
+            this->publish_dhw_current_temperature_(value);
+          } else if (ps.sensor != nullptr) {
+            ps.sensor->publish_state(value);
+          }
           ESP_LOGD(TAG, "0x1A short: id=0x%02X raw=0x%04X -> %.3f", prev_id, raw, value);
           break;
         }
@@ -979,9 +983,13 @@ void ToshibaAbClimate::process_sensor_value_(const DataFrame *frame) {
     const uint16_t raw = (static_cast<uint16_t>(frame->data[7]) << 8) | frame->data[8];
 
     for (auto &ps : this->polled_sensors_) {
-      if (ps.id == id && ps.sensor != nullptr) {
+      if (ps.id == id) {
         const float value = static_cast<float>(raw) * ps.scale;
-        ps.sensor->publish_state(value);
+        if (id == ESTIA_FIRST_GEN_DHW_TEMP_REQUEST) {
+          this->publish_dhw_current_temperature_(value);
+        } else if (ps.sensor != nullptr) {
+          ps.sensor->publish_state(value);
+        }
         ESP_LOGD(TAG, "0x1A long:  id=0x%02X raw=0x%04X -> %.3f", id, raw, value);
         break;
       }
@@ -1002,6 +1010,25 @@ void ToshibaAbClimate::process_sensor_value_(const DataFrame *frame) {
   this->last_sensor_query_id_     = 0xFF;
 }
 
+
+void ToshibaAbClimate::publish_dhw_current_temperature_(float temperature) {
+  if (temperature < 0 || temperature > 95) {
+    ESP_LOGW(TAG, "Ignoring DHW current temperature %.1f °C outside expected range", temperature);
+    return;
+  }
+
+  bool changed = false;
+  if (this->current_temperature != temperature) {
+    this->current_temperature = temperature;
+    changed = true;
+  }
+  if (this->dhw_current_temp_sensor_ != nullptr) {
+    this->dhw_current_temp_sensor_->publish_state(temperature);
+  }
+  if (changed) {
+    this->publish_state();
+  }
+}
 
 uint8_t to_tcc_power(const climate::ClimateMode mode) {
   switch (mode) {
@@ -2502,14 +2529,6 @@ void ToshibaAbClimate::loop() {
     }
   }
 
-  // First-generation Estia status normally carries DHW cylinder temperature.
-  // If this master omits it, poll only that thermostat-critical value.
-  if (this->data_reader.frame_format() == FrameFormat::ESTIA && !this->estia_first_gen_status_reports_dhw_temp_ &&
-      !this->sensor_query_outstanding_ && (now - this->estia_first_gen_last_dhw_poll_ms_) >= ESTIA_FIRST_GEN_DHW_POLL_INTERVAL_MS) {
-    this->estia_first_gen_last_dhw_poll_ms_ = now;
-    this->send_sensor_query(ESTIA_FIRST_GEN_DHW_TEMP_REQUEST);
-  }
-
   // Estia autonomous polling (runtime-toggleable)
   if (this->autonomous_ && this->data_reader.frame_format() == FrameFormat::A0) {
     uint32_t now = millis();
@@ -3298,8 +3317,6 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     this->estia_first_gen_zone1_encoded_ = frame->raw[10];
     this->mode = this->estia_first_gen_dhw_active_ ? climate::CLIMATE_MODE_HEAT : climate::CLIMATE_MODE_OFF;
     this->target_temperature = static_cast<float>(frame->raw[9]) / 2.0f - 16.0f;
-    this->current_temperature = this->target_temperature;
-    this->estia_first_gen_status_reports_dhw_temp_ = true;
     this->publish_state();
     if (this->zone1_switch_) this->zone1_switch_->publish_state(this->estia_first_gen_zone1_active_);
     if (this->dhw_boost_switch_) this->dhw_boost_switch_->publish_state(this->estia_first_gen_dhw_boost_);
@@ -3310,14 +3327,13 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     const uint16_t value = encode_uint16(frame->raw[6], frame->raw[7]);
     bool published_polled_sensor = false;
     if (this->last_sensor_query_id_ != 0xFF) {
-      if (this->last_sensor_query_id_ == ESTIA_FIRST_GEN_DHW_TEMP_REQUEST &&
-          !this->estia_first_gen_status_reports_dhw_temp_) {
-        this->current_temperature = static_cast<float>(value);
-        this->publish_state();
-      }
       for (auto &ps : this->polled_sensors_) {
-        if (ps.id == this->last_sensor_query_id_ && ps.sensor != nullptr) {
-          ps.sensor->publish_state(static_cast<float>(value) * ps.scale);
+        if (ps.id == this->last_sensor_query_id_) {
+          if (this->last_sensor_query_id_ == ESTIA_FIRST_GEN_DHW_TEMP_REQUEST) {
+            this->publish_dhw_current_temperature_(static_cast<float>(value) * ps.scale);
+          } else if (ps.sensor != nullptr) {
+            ps.sensor->publish_state(static_cast<float>(value) * ps.scale);
+          }
           published_polled_sensor = true;
           ESP_LOGD(TAG, "Estia first-gen sensor: id=0x%02X raw=0x%04X", this->last_sensor_query_id_, value);
           break;

@@ -66,6 +66,7 @@ CONF_ZONE1_SWITCH = "zone1_switch"
 CONF_DHW_BOOST = "dhw_boost"
 CONF_ZONE1_WATER_TEMPERATURE = "zone1_water_temperature"
 CONF_ZONE1_TARGET_TEMPERATURE = "zone1_target_temperature"
+CONF_DHW_CURRENT_TEMPERATURE = "dhw_current_temperature"
 
 #AC Sensors addresses
 
@@ -238,6 +239,12 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
             state_class=STATE_CLASS_MEASUREMENT,
         ),
         cv.Optional(CONF_ZONE1_TARGET_TEMPERATURE): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS,
+            accuracy_decimals=0,
+            device_class=DEVICE_CLASS_TEMPERATURE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_DHW_CURRENT_TEMPERATURE): sensor.sensor_schema(
             unit_of_measurement=UNIT_CELSIUS,
             accuracy_decimals=0,
             device_class=DEVICE_CLASS_TEMPERATURE,
@@ -444,6 +451,12 @@ async def to_code(config):
     if CONF_ZONE1_TARGET_TEMPERATURE in config:
         sens = await sensor.new_sensor(config[CONF_ZONE1_TARGET_TEMPERATURE])
         cg.add(var.set_zone1_target_temperature_sensor(sens))
+
+    has_dhw_current_sensor = CONF_DHW_CURRENT_TEMPERATURE in config
+    if has_dhw_current_sensor:
+        dhw_current_sens = await sensor.new_sensor(config[CONF_DHW_CURRENT_TEMPERATURE])
+        cg.add(var.set_dhw_current_temp_sensor(dhw_current_sens))
+        cg.add(var.add_polled_sensor(0x0A, 1.0, cg.uint32(120000), dhw_current_sens))
     if CONF_OUTDOOR_TEMPERATURE in config:
         sens = await sensor.new_sensor(config[CONF_OUTDOOR_TEMPERATURE])
         cg.add(var.set_outdoor_temp_sensor(sens))
@@ -462,12 +475,21 @@ async def to_code(config):
         sens = await sensor.new_sensor(config[CONF_DEMAND])
         cg.add(var.set_demand_sensor(sens))
     
+    has_dhw_current_poll = has_dhw_current_sensor
     for item in config.get(CONF_SENSORS, []):
+        if item[CONF_ADDRESS] == 0x0A and has_dhw_current_sensor:
+            continue
         sens = await sensor.new_sensor(item["sensor"])  # creates the Sensor with name/units/etc.
         addr = item[CONF_ADDRESS]
         scale = item[CONF_SCALE]
         interval_ms = item[CONF_INTERVAL]
         cg.add(var.add_polled_sensor(addr, scale, cg.uint32(interval_ms), sens))
+        if addr == 0x0A:
+            cg.add(var.set_dhw_current_temp_sensor(sens))
+            has_dhw_current_poll = True
+
+    if not has_dhw_current_poll:
+        cg.add(var.add_polled_sensor(0x0A, 1.0, cg.uint32(120000), cg.nullptr))
 
     # Periodically report a local ESPHome temperature sensor to the AC as "remote temp"
     if (rst := config.get(CONF_REPORT_SENSOR_TEMP)) is not None:
