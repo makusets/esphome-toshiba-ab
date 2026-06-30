@@ -3184,7 +3184,9 @@ static DataFrame make_estia_first_gen_frame(uint8_t src, uint8_t dst, const uint
   frame.raw[2] = dst;
   for (size_t i = 0; i < payload_len; i++) frame.raw[3 + i] = payload[i];
   frame.raw[inner_size - 1] = estia_first_gen_raw_checksum(frame.raw, inner_size);
-  frame.data_length = inner_size >= 5 ? inner_size - 5 : 0;
+  // Do not assign frame.data_length here: it aliases raw[3], which is the
+  // first-generation Estia payload marker (typically 0xE0). DataFrame::size()
+  // derives TU2C/first-generation Estia length from raw[0].
   frame.set_tu2c(true);
   return frame;
 }
