@@ -472,11 +472,7 @@ void log_tu2c_data_frame(const std::string &msg, const struct DataFrame *frame) 
       res += "\033[0m";
     }
   }
-  const uint8_t src = size > 1 ? frame->raw[1] : 0;
-  const uint8_t dst = size > 2 ? frame->raw[2] : 0;
-  const uint8_t op1 = size > 4 ? frame->raw[4] : 0;
-  const uint8_t op2 = size > 5 ? frame->raw[5] : 0;
-  ESP_LOGD("RX", "%s: SRC=%02X DST=%02X OP=%02X:%02X %s", msg.c_str(), src, dst, op1, op2, res.c_str());
+  ESP_LOGD("RX", "%s: %s", msg.c_str(), res.c_str());
 }
 
 void log_raw_data(const std::string& prefix, const uint8_t raw[], size_t size) {
@@ -3283,11 +3279,16 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     if (is_master_source && frame->raw[4] == 0x80 && frame->raw[5] == 0x5C) {
       return "Master reporting data/sensor value";
     }
+    if (is_master_source && frame->raw[4] == 0x80 && frame->raw[5] == 0xA2) {
+      return "Master reporting data/sensor not available";
+    }
     if (is_master_source) {
       return unknown_label();
     }
     if (is_remote_source && len == 0x0C && frame->raw[4] == 0x41 && frame->raw[5] == 0x5C) {
-      return "remote data/sensor query";
+      char buf[40];
+      std::snprintf(buf, sizeof(buf), "remote data/sensor 0x%02X query", frame->raw[6]);
+      return buf;
     }
     if (is_remote_source && frame->raw[3] == 0xE0 && frame->raw[4] == 0x41 && frame->raw[5] == 0x5C) {
       return "Remote Timer Read";
@@ -3344,6 +3345,12 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
       this->hotwater_resistor_heating_binary_sensor_->publish_state(this->estia_first_gen_hotwater_resistor_heating_);
     if (this->zone1_target_temperature_sensor_) this->zone1_target_temperature_sensor_->publish_state(static_cast<float>(frame->raw[10]) / 2.0f - 16.0f);
     if (len > 18 && this->zone1_water_temp_sensor_) this->zone1_water_temp_sensor_->publish_state(static_cast<float>(frame->raw[14]) / 2.0f - 16.0f);
+    if (len > 14) {
+      ESP_LOGD(TAG, "Estia first-gen status temperatures: temperature 1=%.1f°C (raw 12=0x%02X), temperature 2=%.1f°C (raw 13=0x%02X), temperature 3=%.1f°C (raw 14=0x%02X)",
+               static_cast<float>(frame->raw[12]) / 2.0f - 16.0f, frame->raw[12],
+               static_cast<float>(frame->raw[13]) / 2.0f - 16.0f, frame->raw[13],
+               static_cast<float>(frame->raw[14]) / 2.0f - 16.0f, frame->raw[14]);
+    }
     this->estia_first_gen_pump_state_known_ = true;
   } else if (src == this->master_address_ && frame->raw[4] == 0x80 && frame->raw[5] == 0x5C && len > 8) {
     const uint16_t value = encode_uint16(frame->raw[6], frame->raw[7]);
@@ -3365,6 +3372,12 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
       this->last_sensor_query_id_ = 0xFF;
     }
     if (!published_polled_sensor && this->outdoor_temp_sensor_) this->outdoor_temp_sensor_->publish_state(value);
+  } else if (src == this->master_address_ && frame->raw[4] == 0x80 && frame->raw[5] == 0xA2) {
+    if (this->sensor_query_outstanding_ || this->last_sensor_query_id_ != 0xFF) {
+      ESP_LOGD(TAG, "Estia first-gen sensor not available: id=0x%02X", this->last_sensor_query_id_);
+    }
+    this->sensor_query_outstanding_ = false;
+    this->last_sensor_query_id_ = 0xFF;
   } else {
     log_raw_data("Estia first-gen", frame->raw, len);
   }
