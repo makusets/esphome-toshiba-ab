@@ -853,6 +853,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
     frame_format_confirmed_ = true;
     if (format == FrameFormat::ESTIA) {
       if (remote_address_auto_) remote_address_ = TOSHIBA_ESTIA_REMOTE_DEFAULT;
+      if (master_address_auto_ && master_address_ == 0x00) master_address_ = TOSHIBA_ESTIA_MASTER_DEFAULT;
     }
   }
   void set_frame_format_auto() {

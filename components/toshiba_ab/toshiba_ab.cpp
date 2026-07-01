@@ -141,8 +141,19 @@ bool ToshibaAbClimate::is_own_tx_echo_(const DataFrame *f) const { // used to fi
   if (!this->last_tx_frame_for_echo_.has_value() || f == nullptr) return false;
   if ((millis() - this->last_tx_frame_millis_) > ECHO_MATCH_WINDOW_MS) return false;
   const auto &tx = this->last_tx_frame_for_echo_.value();  // last frame we wrote
-  if (f->size() != tx.size()) return false;
-  return std::memcmp(f->raw, tx.raw, f->size()) == 0;
+  if (f->size() == tx.size() && std::memcmp(f->raw, tx.raw, f->size()) == 0) return true;
+
+  // First-generation Estia uses the TU2C reader path. On some adapters the
+  // local TX can be echoed back with slightly different wrapper/timing state,
+  // so fall back to dropping recent frames that still have our Estia source,
+  // current master destination and known local command/query markers.
+  if (this->data_reader.frame_format() == FrameFormat::ESTIA && f->is_tu2c() && f->size() >= 6 &&
+      f->raw[1] == this->remote_address_ && f->raw[2] == this->master_address_ &&
+      f->raw[3] == 0xE0 && (f->raw[4] == 0x01 || f->raw[4] == 0x41)) {
+    return true;
+  }
+
+  return false;
 }
 
 void ToshibaAbClimate::remember_tx_frame_for_echo_(const uint8_t *bytes, size_t size, bool tu2c) {
