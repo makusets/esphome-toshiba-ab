@@ -3299,6 +3299,9 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     if (is_master_source && frame->raw[4] == 0x80 && frame->raw[5] == 0xA2) {
       return "Master reporting data/sensor not available";
     }
+    if (is_master_source && frame->raw[4] == 0x80 && frame->raw[5] == 0x0C) {
+      return "Master ackowledging remote PING";
+    }
     if (is_master_source) {
       return unknown_label();
     }
@@ -3307,8 +3310,8 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
       std::snprintf(buf, sizeof(buf), "remote data/sensor 0x%02X query", frame->raw[6]);
       return buf;
     }
-    if (is_remote_source && frame->raw[3] == 0xE0 && frame->raw[4] == 0x41 && frame->raw[5] == 0x5C) {
-      return "Remote Timer Read";
+    if (is_remote_source && frame->raw[3] == 0xE0 && frame->raw[4] == 0x41 && frame->raw[5] == 0x0C) {
+      return "Remote PING";
     }
     if (is_remote_source && frame->raw[3] == 0xE0 && frame->raw[4] == 0x01 && frame->raw[5] == 0x21) {
       return "Remote command";
