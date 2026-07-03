@@ -3393,7 +3393,7 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     if (len > 12) this->publish_dhw_current_temperature_(static_cast<float>(frame->raw[12]) / 2.0f - 16.0f);
     if (len > 18 && this->zone1_water_temp_sensor_) this->zone1_water_temp_sensor_->publish_state(static_cast<float>(frame->raw[14]) / 2.0f - 16.0f);
     if (len > 14) {
-      ESP_LOGD(TAG, "Estia first-gen status temperatures: temperature 2=%.1f°C (raw 13=0x%02X),
+      ESP_LOGD(TAG, "Estia first-gen status temperatures: temperature 2=%.1f°C (raw 13=0x%02X)",
                static_cast<float>(frame->raw[13]) / 2.0f - 16.0f, frame->raw[13]);
     }
     this->estia_first_gen_pump_state_known_ = true;
