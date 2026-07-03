@@ -1,0 +1,193 @@
+###############################################################################
+# Complete ESPHome config example for Toshiba Estia first-generation heat pumps
+# using first-generation / R410A Estia frames on the AB-bus.
+#
+# Hardware: makusets "Toshiba AB D1 Mini" board or similar
+# Protocol: Estia first-generation TU2C-style protocol at 2400 baud 8N1
+# Important: this is NOT the R32 Estia A0 protocol. For R32/A0 systems, use
+# example_estia.yaml instead.
+###############################################################################
+
+substitutions:
+  device_name: toshiba-estia-1st-gen
+  friendly_name: "Toshiba Estia 1st Gen"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${friendly_name}
+
+esp8266:
+  board: esp12e
+
+# Disable serial logging so the hardware UART is available for the AB bus.
+logger:
+  baud_rate: 0
+  level: INFO
+
+api:
+
+ota:
+  password: "your_ota_password"
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: "Estia 1st Gen Fallback"
+    password: "your_ap_password"
+
+web_server:
+  port: 80
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/makusets/esphome-toshiba-ab
+    refresh: 0s
+
+# AB-bus UART for Estia first-generation frames.
+# Use parity NONE for first-generation / R410A Estia frames.
+# Adjust the pins for your board revision if needed.
+uart:
+  tx_pin: GPIO15
+  rx_pin: GPIO13
+  baud_rate: 2400
+  parity: NONE
+  rx_buffer_size: 2048
+
+climate:
+  - platform: toshiba_ab
+    name: ${friendly_name}
+    id: toshiba_estia
+
+    # Required for first-generation / R410A Estia frames.
+    # This format is not auto-detected, so set it explicitly.
+    frame_format: estia
+
+    # First-generation Estia uses wrapped TU2C-style frames; filtering can hide
+    # useful discovery traffic while commissioning, so leave it off initially.
+    filter_frames: false
+
+    # Set to true while observing an unknown bus. Set to false when you are ready
+    # to send commands such as Zone 1 on/off or DHW boost.
+    read_only: true
+
+    # Autonomous mode lets this ESP act as the active controller. Leave disabled
+    # unless you understand your installation and do not have another controller
+    # performing that role.
+    autonomous: false
+
+    # Keep periodic bus pings enabled so Home Assistant can track connectivity.
+    ping: true
+
+    # Diagnostic binary sensor: true when valid traffic has been seen.
+    connected:
+      name: "Estia Connected"
+
+    # Diagnostic sensor: number of frames that failed checksum/CRC validation.
+    failed_crcs:
+      name: "Estia Failed CRCs"
+
+    # Runtime safety switch exposed to Home Assistant. Turn this on to block
+    # command transmission without reflashing the ESP.
+    read_only_switch:
+      name: "Estia Read Only"
+
+    # First-generation Estia control switches.
+    # Zone 1 controls the main space-heating/cooling zone.
+    zone1_switch:
+      name: "Estia Zone 1"
+
+    # DHW boost requests domestic-hot-water operation. In the current first-gen
+    # implementation this uses the known DHW on/off command fallback.
+    dhw_boost:
+      name: "Estia DHW Boost"
+
+    # Status sensors decoded from first-generation Estia status frames.
+    # Temperature sensors use the protocol's half-degree encoded values.
+    zone1_target_temperature:
+      name: "Estia Zone 1 Target Temperature"
+
+    zone1_water_temperature:
+      name: "Estia Zone 1 Water Temperature"
+
+    dhw_current_temperature:
+      name: "Estia DHW Current Temperature"
+
+    # Heating-state binary sensors decoded from hot-water status flags.
+    hotwater_pump_heating:
+      name: "Estia Hot Water Pump Heating"
+
+    hotwater_resistor_heating:
+      name: "Estia Hot Water Resistor Heating"
+
+    # Estia/common sensors supported by the component. Availability depends on
+    # your unit and which frames or query responses it provides.
+    outdoor_temperature:
+      name: "Estia Outdoor Temperature"
+
+    compressor_hours:
+      name: "Estia Compressor Hours"
+
+    waterpump_hours:
+      name: "Estia Water Pump Hours"
+
+    backup_heater_hours:
+      name: "Estia Backup Heater Hours"
+
+    # Optional demand sensor. This is primarily useful on Estia A0/R32 installs;
+    # leave commented unless your first-generation setup reports demand values.
+    # demand:
+    #   name: "Estia Demand"
+
+    # Optional generic first-generation Estia sensor queries. These poll sensor
+    # IDs through the Estia data-query command and publish the returned raw value
+    # multiplied by the scale below. Not every unit supports every ID; watch logs
+    # for "sensor not available" responses and remove unsupported entries.
+    sensors:
+      # Common DHW current-temperature query. The scale of 0.5 matches the raw
+      # half-degree value used by known first-generation Estia temperature data.
+      - address: 0xEF
+        scale: 0.5
+        interval: 5min
+        sensor:
+          name: "Estia Polled DHW Temperature Raw"
+          unit_of_measurement: "°C"
+          device_class: temperature
+          state_class: measurement
+          accuracy_decimals: 1
+
+      # Known first-generation Estia-specific query ID; exact meaning may vary
+      # by model/installation, so keep the neutral name until verified.
+      - address: 0x0A
+        scale: 1.0
+        interval: 5min
+        sensor:
+          name: "Estia Polled Sensor 0x0A"
+          accuracy_decimals: 0
+
+# Optional runtime switch for changing autonomous mode from Home Assistant.
+# This does not persist in the climate configuration; it only calls the runtime
+# setter after boot.
+switch:
+  - platform: template
+    name: "Estia Autonomous"
+    id: estia_autonomous
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - lambda: id(toshiba_estia).set_autonomous(true);
+    turn_off_action:
+      - lambda: id(toshiba_estia).set_autonomous(false);
+
+  # Optional runtime switch to enable/disable demand emulation if you also enable
+  # demand support in the climate component. Usually not needed for first gen.
+  # - platform: template
+  #   name: "Estia Demand Enabled"
+  #   id: estia_demand_enabled
+  #   optimistic: true
+  #   restore_mode: RESTORE_DEFAULT_OFF
+  #   turn_on_action:
+  #     - lambda: id(toshiba_estia).set_demand_enabled(true);
+  #   turn_off_action:
+  #     - lambda: id(toshiba_estia).set_demand_enabled(false);
