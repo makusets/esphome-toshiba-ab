@@ -3270,6 +3270,7 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
   const uint8_t src = frame->raw[1];
   const bool has_master_status_signature = frame->raw[3] == 0xE0 && frame->raw[5] == 0x31;
   const bool has_master_keepalive_signature = len == 0x0A && frame->raw[5] == 0x3A;
+  const bool has_remote_ping_signature = frame->raw[3] == 0xE0 && frame->raw[4] == 0x41 && frame->raw[5] == 0x0C;
   const bool is_master_source = src == this->master_address_ ||
                                 (this->master_address_auto_ &&
                                  (has_master_status_signature || has_master_keepalive_signature));
@@ -3313,7 +3314,7 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
       std::snprintf(buf, sizeof(buf), "remote data/sensor 0x%02X query", frame->raw[6]);
       return buf;
     }
-    if (is_remote_source && frame->raw[3] == 0xE0 && frame->raw[4] == 0x41 && frame->raw[5] == 0x0C) {
+    if (is_remote_source && has_remote_ping_signature) {
       return "Remote PING";
     }
     if (is_remote_source && frame->raw[3] == 0xE0 && frame->raw[4] == 0x01 && frame->raw[5] == 0x21) {
@@ -3338,9 +3339,10 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     this->master_address_ = src;
     this->master_address_confirmed_ = true;
   }
-  if (this->remote_address_auto_ && src == this->remote_address_ && this->remote_address_ < TOSHIBA_ESTIA_REMOTE_MAX) {
+  if (this->remote_address_auto_ && src == this->remote_address_ && has_remote_ping_signature &&
+      this->remote_address_ < TOSHIBA_ESTIA_REMOTE_MAX) {
     this->remote_address_++;
-    ESP_LOGI(TAG, "Estia remote-address collision; switching to 0x%02X", this->remote_address_);
+    ESP_LOGI(TAG, "Estia remote-address collision from remote ping; switching to 0x%02X", this->remote_address_);
   }
   if (src == this->master_address_) {
     this->last_master_alive_millis_ = millis();
