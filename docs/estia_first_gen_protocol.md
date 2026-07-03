@@ -244,7 +244,7 @@ When `master_address_auto_` is enabled:
 1. Component watches for incoming frames
 2. On receipt of a master-status frame (0xE0:0x31), the source address is recorded as the master
 3. Keepalive frames (0xE0:0x3A) with matching keepalive signature confirm master identity
-4. **Remote address auto-detect**: If any frame has `src == remote_address_` and `remote_address_auto_` is true, the next address up to `0x69` is chosen (collision avoidance)
+4. **Remote address auto-detect**: If a received remote ping has `src == remote_address_` and `remote_address_auto_` is true, the next address up to `0x69` is chosen (collision avoidance)
 
 ### Master Alive Timeout
 
@@ -406,7 +406,7 @@ Decoded temperature: 66/2 - 16 = 33 - 16 = 17°C
 
 ### Auto-Detection Collisions
 
-- If received frame source matches current remote address and `remote_address_auto_` is true, increment remote address
+- If a received remote ping source matches current remote address and `remote_address_auto_` is true, increment remote address
 - Report collision in logs
 
 ### Timeouts
