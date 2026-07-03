@@ -81,6 +81,12 @@ climate:
     # implementation this uses the known DHW on/off command fallback, as boost command still unknown.
     dhw_boost:
       name: "Estia DHW Boost"
+      
+    # Read-only Zone 1 values decoded from status frames
+    zone1_water_temperature:
+      name: "Toshiba Estia Zone 1 Water Temperature"
+    zone1_target_temperature:
+      name: "Toshiba Estia Zone 1 Target Temperature"
 
 
     # Heating-state binary sensors decoded from hot-water status flags.
