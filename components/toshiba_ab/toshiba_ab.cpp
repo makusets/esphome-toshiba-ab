@@ -3299,6 +3299,9 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     if (is_master_source && frame->raw[4] == 0x80 && frame->raw[5] == 0xA2) {
       return "Master reporting data/sensor not available";
     }
+    if (is_master_source && len == 0x0A && frame->raw[4] == 0x80 && frame->raw[5] == 0xA1) {
+      return "Master acknowledging remote command";
+    }
     if (is_master_source && frame->raw[4] == 0x80 && frame->raw[5] == 0x0C) {
       return "Master ackowledging remote PING";
     }
