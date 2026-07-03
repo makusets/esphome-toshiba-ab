@@ -3257,6 +3257,16 @@ void ToshibaAbClimate::send_estia_first_gen_request_data(uint8_t request_code) {
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
+void ToshibaAbClimate::estia_first_gen_reset_remote_error_() {
+  ESP_LOGI(TAG, "Estia first-gen remote error reset: resending last known DHW state (%s)",
+           this->estia_first_gen_dhw_active_ ? "on" : "off");
+  if (this->estia_first_gen_dhw_active_) {
+    this->send_estia_first_gen_dhw_on();
+  } else {
+    this->send_estia_first_gen_dhw_off();
+  }
+}
+
 void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *frame) {
   if (frame == nullptr) return;
   const uint8_t len = frame->raw[0];
@@ -3320,7 +3330,12 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
       return "Remote command: setpoint change";
     }
     if (is_remote_source && frame->raw[3] == 0xE0 && frame->raw[5] == 0x31) {
-      return "Remote status";
+      if (frame->raw[6] == 0x00) {
+        return "Remote status OK";
+      }
+      char buf[40];
+      std::snprintf(buf, sizeof(buf), "Remote status error 0x%02X", frame->raw[6]);
+      return buf;
     }
     return unknown_label();
   };
@@ -3331,9 +3346,19 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     ESP_LOGD(TAG, "Estia first-gen checksum fail for %s", label.c_str());
     return;
   }
-  if (this->master_address_auto_ && frame->raw[3] == 0xE0 && frame->raw[5] == 0x31) {
+  if (this->master_address_auto_ && frame->raw[3] == 0xE0 && frame->raw[5] == 0x31 && !is_remote_source) {
     this->master_address_ = src;
     this->master_address_confirmed_ = true;
+  }
+  if (is_remote_source && frame->raw[3] == 0xE0 && frame->raw[5] == 0x31) {
+    if (frame->raw[6] == 0x00) {
+      ESP_LOGD(TAG, "Estia first-gen remote status OK");
+    } else {
+      ESP_LOGW(TAG, "Estia first-gen remote status error: 0x%02X", frame->raw[6]);
+      if (frame->raw[6] == 0x49) {
+        this->estia_first_gen_reset_remote_error_();
+      }
+    }
   }
   if (this->remote_address_auto_ && src == this->remote_address_ && has_remote_ping_signature &&
       this->remote_address_ < TOSHIBA_ESTIA_REMOTE_MAX) {
