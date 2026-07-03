@@ -22,7 +22,7 @@ esp8266:
 # Disable serial logging so the hardware UART is available for the AB bus.
 logger:
   baud_rate: 0
-  level: INFO
+  level: DEBUG
 
 api:
 
@@ -64,22 +64,6 @@ climate:
     # This format is not auto-detected, so set it explicitly.
     frame_format: estia
 
-    # First-generation Estia uses wrapped TU2C-style frames; filtering can hide
-    # useful discovery traffic while commissioning, so leave it off initially.
-    filter_frames: false
-
-    # Set to true while observing an unknown bus. Set to false when you are ready
-    # to send commands such as Zone 1 on/off or DHW boost.
-    read_only: true
-
-    # Autonomous mode lets this ESP act as the active controller. Leave disabled
-    # unless you understand your installation and do not have another controller
-    # performing that role.
-    autonomous: false
-
-    # Keep periodic bus pings enabled so Home Assistant can track connectivity.
-    ping: true
-
     # Diagnostic binary sensor: true when valid traffic has been seen.
     connected:
       name: "Estia Connected"
@@ -88,31 +72,16 @@ climate:
     failed_crcs:
       name: "Estia Failed CRCs"
 
-    # Runtime safety switch exposed to Home Assistant. Turn this on to block
-    # command transmission without reflashing the ESP.
-    read_only_switch:
-      name: "Estia Read Only"
-
     # First-generation Estia control switches.
     # Zone 1 controls the main space-heating/cooling zone.
     zone1_switch:
       name: "Estia Zone 1"
 
-    # DHW boost requests domestic-hot-water operation. In the current first-gen
-    # implementation this uses the known DHW on/off command fallback.
+    # Switch to activate boost mode for domestic-hot-water operation. In the current first-gen
+    # implementation this uses the known DHW on/off command fallback, as boost command still unknown.
     dhw_boost:
       name: "Estia DHW Boost"
 
-    # Status sensors decoded from first-generation Estia status frames.
-    # Temperature sensors use the protocol's half-degree encoded values.
-    zone1_target_temperature:
-      name: "Estia Zone 1 Target Temperature"
-
-    zone1_water_temperature:
-      name: "Estia Zone 1 Water Temperature"
-
-    dhw_current_temperature:
-      name: "Estia DHW Current Temperature"
 
     # Heating-state binary sensors decoded from hot-water status flags.
     hotwater_pump_heating:
@@ -121,73 +90,68 @@ climate:
     hotwater_resistor_heating:
       name: "Estia Hot Water Resistor Heating"
 
-    # Estia/common sensors supported by the component. Availability depends on
-    # your unit and which frames or query responses it provides.
-    outdoor_temperature:
-      name: "Estia Outdoor Temperature"
-
-    compressor_hours:
-      name: "Estia Compressor Hours"
-
-    waterpump_hours:
-      name: "Estia Water Pump Hours"
-
-    backup_heater_hours:
-      name: "Estia Backup Heater Hours"
-
-    # Optional demand sensor. This is primarily useful on Estia A0/R32 installs;
-    # leave commented unless your first-generation setup reports demand values.
-    # demand:
-    #   name: "Estia Demand"
 
     # Optional generic first-generation Estia sensor queries. These poll sensor
     # IDs through the Estia data-query command and publish the returned raw value
     # multiplied by the scale below. Not every unit supports every ID; watch logs
     # for "sensor not available" responses and remove unsupported entries.
     sensors:
-      # Common DHW current-temperature query. The scale of 0.5 matches the raw
-      # half-degree value used by known first-generation Estia temperature data.
-      - address: 0xEF
-        scale: 0.5
-        interval: 5min
+      - address: 0x6A           # Required for every sensor added, in this case, AC current sensor of the external unit
+        scale: 0.1              # default 1.0; here we decode raw/10 as current is reported in deciAmps
+        interval: 30s           # default 5min
         sensor:
-          name: "Estia Polled DHW Temperature Raw"
-          unit_of_measurement: "°C"
-          device_class: temperature
-          state_class: measurement
-          accuracy_decimals: 1
+          name: "Estia System Current"  #required
+          id: toshiba_current  #optional, but needed if used later in other yaml entries
 
-      # Known first-generation Estia-specific query ID; exact meaning may vary
-      # by model/installation, so keep the neutral name until verified.
-      - address: 0x0A
-        scale: 1.0
-        interval: 5min
+          #all other available options of sensor in esphome:
+
+          unit_of_measurement: "A"  #optional, defaults none
+          accuracy_decimals: 2  #optional
+          device_class: current  #optional but recommended for HA
+          state_class: measurement  #optional but recommended for HA
+
+      - address: 0x61        # Required for every sensor added, in this case, outdoor temperature sensor of the external unit
         sensor:
-          name: "Estia Polled Sensor 0x0A"
-          accuracy_decimals: 0
+          name: "Estia Outdoor Temperature" #required
+          unit_of_measurement: "°C" 
 
-# Optional runtime switch for changing autonomous mode from Home Assistant.
-# This does not persist in the climate configuration; it only calls the runtime
-# setter after boot.
-switch:
-  - platform: template
-    name: "Estia Autonomous"
-    id: estia_autonomous
-    optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF
-    turn_on_action:
-      - lambda: id(toshiba_estia).set_autonomous(true);
-    turn_off_action:
-      - lambda: id(toshiba_estia).set_autonomous(false);
 
-  # Optional runtime switch to enable/disable demand emulation if you also enable
-  # demand support in the climate component. Usually not needed for first gen.
-  # - platform: template
-  #   name: "Estia Demand Enabled"
-  #   id: estia_demand_enabled
-  #   optimistic: true
-  #   restore_mode: RESTORE_DEFAULT_OFF
-  #   turn_on_action:
-  #     - lambda: id(toshiba_estia).set_demand_enabled(true);
-  #   turn_off_action:
-  #     - lambda: id(toshiba_estia).set_demand_enabled(false);
+
+#********************** Possible sensor addresses, not all of them available in all units ****************************************
+
+
+# Control temperature (Hot water cylinder)  = 0x00
+# Control temperature (Zone1)  = 0x01
+# Control temperature (Zone2)  = 0x02
+# Remote controller sensor temperature  = 0x03
+# Condensed temperature (TC)  = 0x04
+# Water inlet temperature (TWI) = 0x06
+# Water outlet temperature (TWO)  =  0x07
+# Water heater outlet temperature (THO) = 0x08
+# Floor inlet temperature (TFI)  = 0x09
+# Hot water cylinder temperature (TTW)  = 0x0A
+# Mixing valve position  =   0x0B
+# Low pressure (Ps) × 1/10   =   0x0E
+
+# Heat exchange temperature (TE) = 0x60
+# Outside air temperature (TO)   = 0x61
+# Discharge temperature (TD) = 0x62
+# Suction temperature (TS)   = 0x63
+# Heat sink temperature (THS)    = 0x65
+# Current × 10   = 0x6A
+# Heat exchanger coil temperature (TL)   = 0x6D
+# Compressor operation Hz    =   0x70
+# Number of revolutions of outdoor fan   =   0x72
+# Outdoor PMV position × 1/10   =   0x74
+# Discharge pressure (PD) × 1/10  =   0x7A
+
+# Micro computer energized accumulation   (time × 1/100)  =   0xF0
+# Hot water compressor ON accumulation    (time × 1/100)  =   0xF1
+# Cooling compressor ON accumulation  (time × 1/100)  =   0xF2
+# Heating compressor ON accumulation  (time × 1/100)  =   0xF3
+# Built-in AC pump operation accumulation (time × 1/100)  =   0xF4
+# Hot water cylinder heater operation accumulation (time × 1/100) =   0xF5
+# Backup heater operation accumulation (time × 1/100) =   0xF6
+# Booster heater operation accumulation (time × 1/100)    =   0xF7
+
+
