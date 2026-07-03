@@ -975,6 +975,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   size_t send_new_state(const struct TccState *new_state);
   void sync_from_received_state();
   void autoreset_remote_error_();
+  void estia_first_gen_reset_remote_error_();
   bool is_own_tx_echo_(const DataFrame *f) const; //used to filter echo after sending frame
   void remember_tx_frame_for_echo_(const uint8_t *bytes, size_t size, bool tu2c);
   void update_frame_validation_();
