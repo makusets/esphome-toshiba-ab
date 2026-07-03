@@ -2761,14 +2761,16 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
 }
 
 void ToshibaAbClimate::control(const climate::ClimateCall &call) {
-  // Estia A0-protocol: power, mode, setpoint control
-  // Only one command at a time on the half-duplex AB-bus.
-  // When powering on with a mode change, send mode first, then power on
-  // after a delay so the WP starts in the correct mode.
+  // First-generation Estia: the climate entity represents domestic hot water.
+  // HEAT/OFF therefore maps to hot-water on/off, not space-heating auto mode.
   if (this->data_reader.frame_format() == FrameFormat::ESTIA) {
     if (call.get_mode().has_value()) {
       auto new_mode = call.get_mode().value();
-      this->send_estia_first_gen_auto_mode(new_mode != climate::CLIMATE_MODE_OFF);
+      if (new_mode == climate::CLIMATE_MODE_HEAT) {
+        this->send_estia_first_gen_dhw_on();
+      } else if (new_mode == climate::CLIMATE_MODE_OFF) {
+        this->send_estia_first_gen_dhw_off();
+      }
     }
     if (call.get_target_temperature().has_value()) {
       this->send_estia_first_gen_dhw_setpoint(call.get_target_temperature().value());
@@ -3219,10 +3221,25 @@ void ToshibaAbClimate::send_estia_first_gen_zone1(bool on) {
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
-void ToshibaAbClimate::send_estia_first_gen_dhw_boost(bool on) {
+void ToshibaAbClimate::send_estia_first_gen_dhw_on() {
   if (this->read_only_) return;
-  const uint8_t payload[] = {0xE0, 0x01, 0x21, static_cast<uint8_t>(on ? 0x0C : 0x08)};
+  const uint8_t payload[] = {0xE0, 0x01, 0x21, 0x0C};
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+}
+
+void ToshibaAbClimate::send_estia_first_gen_dhw_off() {
+  if (this->read_only_) return;
+  const uint8_t payload[] = {0xE0, 0x01, 0x21, 0x08};
+  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+}
+
+void ToshibaAbClimate::send_estia_first_gen_dhw_boost(bool on) {
+  // TODO: Replace this fallback once the first-generation Estia DHW boost command is known.
+  if (on) {
+    this->send_estia_first_gen_dhw_on();
+  } else {
+    this->send_estia_first_gen_dhw_off();
+  }
 }
 
 void ToshibaAbClimate::send_estia_first_gen_auto_mode(bool on) {
