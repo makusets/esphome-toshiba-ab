@@ -959,9 +959,7 @@ void ToshibaAbClimate::process_sensor_value_(const DataFrame *frame) {
       for (auto &ps : this->polled_sensors_) {
         if (ps.id == prev_id) {
           const float value = static_cast<float>(raw) * ps.scale;
-          if (prev_id == ESTIA_FIRST_GEN_DHW_TEMP_REQUEST) {
-            this->publish_dhw_current_temperature_(value);
-          } else if (ps.sensor != nullptr) {
+          if (ps.sensor != nullptr) {
             ps.sensor->publish_state(value);
           }
           ESP_LOGD(TAG, "0x1A short: id=0x%02X raw=0x%04X -> %.3f", prev_id, raw, value);
@@ -992,9 +990,7 @@ void ToshibaAbClimate::process_sensor_value_(const DataFrame *frame) {
     for (auto &ps : this->polled_sensors_) {
       if (ps.id == id) {
         const float value = static_cast<float>(raw) * ps.scale;
-        if (id == ESTIA_FIRST_GEN_DHW_TEMP_REQUEST) {
-          this->publish_dhw_current_temperature_(value);
-        } else if (ps.sensor != nullptr) {
+        if (ps.sensor != nullptr) {
           ps.sensor->publish_state(value);
         }
         ESP_LOGD(TAG, "0x1A long:  id=0x%02X raw=0x%04X -> %.3f", id, raw, value);
@@ -3369,10 +3365,10 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     if (this->hotwater_resistor_heating_binary_sensor_)
       this->hotwater_resistor_heating_binary_sensor_->publish_state(this->estia_first_gen_hotwater_resistor_heating_);
     if (this->zone1_target_temperature_sensor_) this->zone1_target_temperature_sensor_->publish_state(static_cast<float>(frame->raw[10]) / 2.0f - 16.0f);
+    if (len > 12) this->publish_dhw_current_temperature_(static_cast<float>(frame->raw[12]) / 2.0f - 16.0f);
     if (len > 18 && this->zone1_water_temp_sensor_) this->zone1_water_temp_sensor_->publish_state(static_cast<float>(frame->raw[14]) / 2.0f - 16.0f);
     if (len > 14) {
-      ESP_LOGD(TAG, "Estia first-gen status temperatures: temperature 1=%.1f°C (raw 12=0x%02X), temperature 2=%.1f°C (raw 13=0x%02X), temperature 3=%.1f°C (raw 14=0x%02X)",
-               static_cast<float>(frame->raw[12]) / 2.0f - 16.0f, frame->raw[12],
+      ESP_LOGD(TAG, "Estia first-gen status temperatures: temperature 2=%.1f°C (raw 13=0x%02X), temperature 3=%.1f°C (raw 14=0x%02X)",
                static_cast<float>(frame->raw[13]) / 2.0f - 16.0f, frame->raw[13],
                static_cast<float>(frame->raw[14]) / 2.0f - 16.0f, frame->raw[14]);
     }
@@ -3383,9 +3379,7 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     if (this->last_sensor_query_id_ != 0xFF) {
       for (auto &ps : this->polled_sensors_) {
         if (ps.id == this->last_sensor_query_id_) {
-          if (this->last_sensor_query_id_ == ESTIA_FIRST_GEN_DHW_TEMP_REQUEST) {
-            this->publish_dhw_current_temperature_(static_cast<float>(value) * ps.scale);
-          } else if (ps.sensor != nullptr) {
+          if (ps.sensor != nullptr) {
             ps.sensor->publish_state(static_cast<float>(value) * ps.scale);
           }
           published_polled_sensor = true;
