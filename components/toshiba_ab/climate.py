@@ -42,7 +42,6 @@ CONF_FAILED_CRCS = "failed_crcs"
 CONF_ON_DATA_RECEIVED = "on_data_received"
 CONF_MASTER = "master"
 CONF_REMOTE = "remote"
-CONF_MASTER_ADDRESS_AUTO = "master_address_auto"
 CONF_COMMAND_MODE_READ = "command_mode_read"
 CONF_COMMAND_MODE_WRITE = "command_mode_write"
 CONF_FRAME_FORMAT = "frame_format"
@@ -178,7 +177,6 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
     {
         cv.Optional(CONF_MASTER): cv.uint8_t,
         cv.Optional(CONF_REMOTE): cv.uint8_t,
-        cv.Optional(CONF_MASTER_ADDRESS_AUTO, default=True): cv.boolean,
         cv.Optional(CONF_COMMAND_MODE_READ, default=0x08): cv.uint8_t,
         cv.Optional(CONF_COMMAND_MODE_WRITE, default=0x80): cv.uint8_t,
         cv.Optional(CONF_FRAME_FORMAT, default="auto"): cv.one_of(*FRAME_FORMATS, lower=True),
@@ -391,9 +389,7 @@ async def to_code(config):
         cg.add(var.set_master_address(config[CONF_MASTER]))
     if CONF_REMOTE in config:
         cg.add(var.set_remote_address(config[CONF_REMOTE]))
-    
-    if CONF_MASTER_ADDRESS_AUTO in config:
-        cg.add(var.set_master_address_auto(config[CONF_MASTER_ADDRESS_AUTO]))
+
     if CONF_COMMAND_MODE_READ in config:
         cg.add(var.set_command_mode_read(config[CONF_COMMAND_MODE_READ]))
     if CONF_COMMAND_MODE_WRITE in config:

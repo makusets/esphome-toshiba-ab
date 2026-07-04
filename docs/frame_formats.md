@@ -27,7 +27,11 @@ SRC:DST:OPCODE1:LEN:DATA[0..LEN-1]:CRC
 
 - `SRC` and `DST` are 8-bit source and destination addresses. Common values are
   `0x00` for the master/indoor unit and `0x40` for a wall remote or this ESP
-  when emulating one.
+  when emulating one. If `master` is omitted from YAML, the component keeps
+  address auto-detection enabled and seeds the master address from the selected
+  frame format (`0x00` for normal/HM/A0, `0x90` for TU2C, and `0x70` for
+  first-generation Estia); an explicit `master` value is never overwritten by
+  auto mode.
 - `OPCODE1` identifies the broad message type, for example `0x10` ping,
   `0x11` parameter/status command, `0x15` read envelope, `0x18` ACK, `0x1A`
   sensor value, `0x1C` status, `0x55` temperature report, or `0x58` extended
@@ -224,6 +228,8 @@ climate:
 ### Structure
 
 The `estia` option selects the component's first-generation Estia support path.
+When `master` is omitted, this format defaults the master address to `0x70`
+and keeps address auto-detection enabled.
 It uses the TU2C-style format rather than the Estia R32 A0 style and parity NONE:
 
 ```text
