@@ -22,6 +22,7 @@ const uint32_t FRAME_SEND_MILLIS_FROM_LAST_RECEIVE = 500;
 const uint32_t FRAME_SEND_MILLIS_FROM_LAST_SEND = 500;
 
 // const uint8_t TOSHIBA_MASTER = 0x00;  replaced by master_address_ which is set up in yaml
+const uint8_t TOSHIBA_MASTER_DEFAULT = 0x00;
 const uint8_t TOSHIBA_REMOTE_DEFAULT = 0x40;
 const uint8_t TOSHIBA_REMOTE_MAX = 0x49;
 const uint8_t TOSHIBA_TU2C_REMOTE_DEFAULT = 0x50;
@@ -809,7 +810,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void setup() override;
   void loop() override;
 
-  uint8_t master_address_ = 0x00;
+  uint8_t master_address_ = TOSHIBA_MASTER_DEFAULT;
   bool master_address_confirmed_{false};
   uint8_t remote_address_{TOSHIBA_REMOTE_DEFAULT};
   bool remote_address_auto_{true};
@@ -823,9 +824,6 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
     remote_address_ = std::min(address, static_cast<uint8_t>(TOSHIBA_ESTIA_REMOTE_MAX));
     remote_address_auto_ = false;
     remote_address_confirmed_ = true;
-  }
-  void set_master_address_auto(bool auto_detect) {
-    master_address_auto_ = auto_detect;
   }
   bool get_master_address_auto() const { return master_address_auto_; }
   void set_filter_frames(bool filter_frames) {
@@ -853,14 +851,38 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
     frame_format_confirmed_ = true;
     if (format == FrameFormat::ESTIA) {
       if (remote_address_auto_) remote_address_ = TOSHIBA_ESTIA_REMOTE_DEFAULT;
-      if (master_address_auto_ && master_address_ == 0x00) master_address_ = TOSHIBA_ESTIA_MASTER_DEFAULT;
     }
+    this->apply_default_master_address_for_frame_format_();
   }
   void set_frame_format_auto() {
     data_reader.set_frame_format(FrameFormat::NORMAL);
     frame_format_auto_ = true;
     frame_format_confirmed_ = false;
   }
+ private:
+  void apply_default_master_address_for_frame_format_() {
+    if (!this->master_address_auto_ || this->master_address_confirmed_) {
+      return;
+    }
+
+    switch (this->data_reader.frame_format()) {
+      case FrameFormat::ESTIA:
+        this->master_address_ = TOSHIBA_ESTIA_MASTER_DEFAULT;
+        break;
+      case FrameFormat::TU2C:
+        this->master_address_ = TOSHIBA_TU2C_MASTER_DEFAULT;
+        this->tu2c_master_address_ = TOSHIBA_TU2C_MASTER_DEFAULT;
+        break;
+      case FrameFormat::NORMAL:
+      case FrameFormat::HM:
+      case FrameFormat::A0:
+      default:
+        this->master_address_ = TOSHIBA_MASTER_DEFAULT;
+        break;
+    }
+  }
+
+ public:
   bool is_hm_variant() const { return data_reader.frame_format() == FrameFormat::HM; }
   bool is_estia_first_gen() const { return data_reader.frame_format() == FrameFormat::ESTIA; }
 

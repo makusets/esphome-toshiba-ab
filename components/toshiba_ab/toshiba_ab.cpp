@@ -197,6 +197,7 @@ void ToshibaAbClimate::confirm_frame_format_(FrameFormat format, const char *rea
   }
   this->data_reader.set_frame_format(format);
   this->frame_format_confirmed_ = true;
+  this->apply_default_master_address_for_frame_format_();
   const char *fmt = "normal";
   switch (format) {
     case FrameFormat::TU2C: fmt = "tu2c"; break;
@@ -3463,6 +3464,7 @@ void ToshibaAbReadOnlySwitch::write_state(bool state) {
 
 void ToshibaAbClimate::set_master_address(uint8_t address) {
   this->master_address_ = address;
+  this->tu2c_master_address_ = address;
   this->master_address_auto_ = false;
   this->master_address_confirmed_ = false;
 }
