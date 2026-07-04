@@ -176,7 +176,7 @@ def _hardware_uart_rx_pin(value):
 
 CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
     {
-        cv.Optional(CONF_MASTER, default=0x00): cv.uint8_t,
+        cv.Optional(CONF_MASTER): cv.uint8_t,
         cv.Optional(CONF_REMOTE): cv.uint8_t,
         cv.Optional(CONF_MASTER_ADDRESS_AUTO, default=True): cv.boolean,
         cv.Optional(CONF_COMMAND_MODE_READ, default=0x08): cv.uint8_t,
