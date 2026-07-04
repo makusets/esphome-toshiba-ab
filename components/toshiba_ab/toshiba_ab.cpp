@@ -3277,10 +3277,11 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
   const bool has_master_status_signature = frame->raw[3] == 0xE0 && frame->raw[5] == 0x31;
   const bool has_master_keepalive_signature = len == 0x0A && frame->raw[5] == 0x3A;
   const bool has_remote_ping_signature = frame->raw[3] == 0xE0 && frame->raw[4] == 0x41 && frame->raw[5] == 0x0C;
-  const bool is_master_source = src == this->master_address_ ||
-                                (this->master_address_auto_ &&
-                                 (has_master_status_signature || has_master_keepalive_signature));
   const bool is_remote_source = src == this->remote_address_ || (src >= 0x60 && src <= TOSHIBA_ESTIA_REMOTE_MAX);
+  const bool is_possible_master_source = !is_remote_source;
+  const bool is_master_source = src == this->master_address_ ||
+                                (this->master_address_auto_ && !this->master_address_confirmed_ &&
+                                 is_possible_master_source && has_master_keepalive_signature);
   auto unknown_label = [&]() -> std::string {
     char buf[40];
     if (is_master_source) {
@@ -3346,9 +3347,16 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     ESP_LOGD(TAG, "Estia first-gen checksum fail for %s", label.c_str());
     return;
   }
-  if (this->master_address_auto_ && frame->raw[3] == 0xE0 && frame->raw[5] == 0x31 && !is_remote_source) {
-    this->master_address_ = src;
-    this->master_address_confirmed_ = true;
+  if (has_master_keepalive_signature && is_possible_master_source) {
+    if (this->master_address_auto_ && !this->master_address_confirmed_ && src != this->master_address_) {
+      ESP_LOGI(TAG, "Estia first-gen master keepalive from 0x%02X; switching master address from 0x%02X",
+               src, this->master_address_);
+      this->master_address_ = src;
+    }
+    if (src == this->master_address_ && !this->master_address_confirmed_) {
+      this->master_address_confirmed_ = true;
+      ESP_LOGI(TAG, "Estia first-gen master address confirmed: 0x%02X", this->master_address_);
+    }
   }
   if (is_remote_source && frame->raw[3] == 0xE0 && frame->raw[5] == 0x31) {
     if (frame->raw[6] == 0x00) {
@@ -3455,6 +3463,7 @@ void ToshibaAbReadOnlySwitch::write_state(bool state) {
 
 void ToshibaAbClimate::set_master_address(uint8_t address) {
   this->master_address_ = address;
+  this->master_address_auto_ = false;
   this->master_address_confirmed_ = false;
 }
 
