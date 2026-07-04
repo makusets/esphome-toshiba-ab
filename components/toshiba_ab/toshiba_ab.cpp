@@ -3300,7 +3300,7 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
       return "Master keepalive";
     }
     if (is_master_source && has_master_status_signature) {
-      return "MASTER PARAMETERS";
+      return "Master status";
     }
     if (is_master_source && frame->raw[4] == 0x80 && frame->raw[5] == 0x5C) {
       return "Master reporting data/sensor value";
@@ -3361,7 +3361,6 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
   }
   if (is_remote_source && frame->raw[3] == 0xE0 && frame->raw[5] == 0x31) {
     if (frame->raw[6] == 0x00) {
-      ESP_LOGD(TAG, "Estia first-gen remote status OK");
       if (this->remote_error_binary_sensor_) this->remote_error_binary_sensor_->publish_state(false);
     } else {
       ESP_LOGW(TAG, "Estia first-gen remote status error: 0x%02X", frame->raw[6]);
