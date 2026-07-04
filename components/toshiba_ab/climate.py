@@ -69,6 +69,7 @@ CONF_ZONE1_TARGET_TEMPERATURE = "zone1_target_temperature"
 CONF_DHW_CURRENT_TEMPERATURE = "dhw_current_temperature"
 CONF_HOTWATER_PUMP_HEATING = "hotwater_pump_heating"
 CONF_HOTWATER_RESISTOR_HEATING = "hotwater_resistor_heating"
+CONF_REMOTE_ERROR = "remote_error"
 
 #AC Sensors addresses
 
@@ -254,6 +255,9 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
         ),
         cv.Optional(CONF_HOTWATER_PUMP_HEATING): binary_sensor.binary_sensor_schema(),
         cv.Optional(CONF_HOTWATER_RESISTOR_HEATING): binary_sensor.binary_sensor_schema(),
+        cv.Optional(CONF_REMOTE_ERROR): binary_sensor.binary_sensor_schema(
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
         cv.Optional(CONF_FAILED_CRCS): sensor.sensor_schema(
             accuracy_decimals=0,
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
@@ -465,6 +469,9 @@ async def to_code(config):
     if CONF_HOTWATER_RESISTOR_HEATING in config:
         sens = await binary_sensor.new_binary_sensor(config[CONF_HOTWATER_RESISTOR_HEATING])
         cg.add(var.set_hotwater_resistor_heating_binary_sensor(sens))
+    if CONF_REMOTE_ERROR in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_REMOTE_ERROR])
+        cg.add(var.set_remote_error_binary_sensor(sens))
     if CONF_OUTDOOR_TEMPERATURE in config:
         sens = await sensor.new_sensor(config[CONF_OUTDOOR_TEMPERATURE])
         cg.add(var.set_outdoor_temp_sensor(sens))

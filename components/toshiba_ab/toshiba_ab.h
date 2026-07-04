@@ -907,6 +907,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_read_only(bool en) { read_only_ = en; }
   void set_ping_enabled(bool en) { ping_enabled_ = en; }
   void set_autoreset_errors(bool en) { autoreset_errors_ = en; }
+  void set_remote_error_binary_sensor(binary_sensor::BinarySensor *sensor) { remote_error_binary_sensor_ = sensor; }
   void set_estia_source_address(uint16_t addr) { estia_source_address_ = addr; }
   void send_estia_setpoint(float target_temp);
   void send_estia_power(bool on);
@@ -1016,6 +1017,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   sensor::Sensor *dhw_current_temp_sensor_{nullptr};
   binary_sensor::BinarySensor *hotwater_pump_heating_binary_sensor_{nullptr};
   binary_sensor::BinarySensor *hotwater_resistor_heating_binary_sensor_{nullptr};
+  binary_sensor::BinarySensor *remote_error_binary_sensor_{nullptr};
 
   // rx handler for 0x1A (sensor) replies (called from process_received_data)
   void process_sensor_value_(const DataFrame *frame);
