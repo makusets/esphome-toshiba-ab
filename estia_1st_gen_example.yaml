@@ -72,6 +72,15 @@ climate:
     failed_crcs:
       name: "Estia Failed CRCs"
 
+    # Optional: true when a first-generation remote status error is detected,
+    # false again after a remote status OK frame is received.
+    remote_error:
+      name: "Estia Remote Error"
+
+    # Optional, defaults to false. Set true to send the automatic
+    # first-generation remote error reset command after error 0x49.
+    autoreset_errors: false
+
     # First-generation Estia control switches.
     # Zone 1 controls the main space-heating/cooling zone.
     zone1_switch:

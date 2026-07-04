@@ -3353,10 +3353,16 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
   if (is_remote_source && frame->raw[3] == 0xE0 && frame->raw[5] == 0x31) {
     if (frame->raw[6] == 0x00) {
       ESP_LOGD(TAG, "Estia first-gen remote status OK");
+      if (this->remote_error_binary_sensor_) this->remote_error_binary_sensor_->publish_state(false);
     } else {
       ESP_LOGW(TAG, "Estia first-gen remote status error: 0x%02X", frame->raw[6]);
+      if (this->remote_error_binary_sensor_) this->remote_error_binary_sensor_->publish_state(true);
       if (frame->raw[6] == 0x49) {
-        this->estia_first_gen_reset_remote_error_();
+        if (this->autoreset_errors_) {
+          this->estia_first_gen_reset_remote_error_();
+        } else {
+          ESP_LOGD(TAG, "Ignoring Estia first-gen remote error reset because autoreset_errors is disabled");
+        }
       }
     }
   }
