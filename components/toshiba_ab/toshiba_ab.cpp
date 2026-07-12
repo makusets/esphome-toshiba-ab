@@ -376,7 +376,7 @@ bool ToshibaAbClimate::should_track_tu2c_command_ack_(const DataFrame &frame) co
   }
 
   // Track ACKs for TU2C/first-gen Estia write commands.
-  return frame.raw[5] == 0x21 || frame.raw[5] == 0x23 || frame.raw[5] == 0x2C;
+  return frame.raw[5] == 0x21 || frame.raw[5] == 0x23 || frame.raw[5] == 0x24 || frame.raw[5] == 0x2C;
 }
 
 bool ToshibaAbClimate::should_track_command_ack_(const DataFrame &frame) const {
