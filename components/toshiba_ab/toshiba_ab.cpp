@@ -369,7 +369,8 @@ bool ToshibaAbClimate::should_track_tu2c_command_ack_(const DataFrame &frame) co
   }
 
   // Track ACKs for TU2C/first-gen Estia write commands.
-  return frame.raw[5] == 0x21 || frame.raw[5] == 0x23 || frame.raw[5] == 0x24 || frame.raw[5] == 0x2C;
+  return frame.raw[5] == 0x21 || frame.raw[5] == 0x22 || frame.raw[5] == 0x23 ||
+         frame.raw[5] == 0x24 || frame.raw[5] == 0x2C;
 }
 
 bool ToshibaAbClimate::should_track_command_ack_(const DataFrame &frame) const {
@@ -612,6 +613,42 @@ void write_power_off_tu2c(struct DataFrame *command, uint8_t remote_address, uin
   command->raw[5] = marker_lsb;
   command->raw[6] = power_off_code;
   command->raw[7] = calculate_tu2c_power_off_crc(command->raw, 7);
+}
+void write_power_on_tu2c(struct DataFrame *command, uint8_t remote_address, uint8_t master_address) {
+  // Mirrors the wall remote's power-on frame: 0B:50:90:C0:01:21:03:D0
+  constexpr uint8_t tu2c_length = 0x0B;
+  constexpr uint8_t marker_msb = 0x01;
+  constexpr uint8_t marker_lsb = 0x21;
+  constexpr uint8_t power_on_code = 0x03;
+
+  command->set_tu2c(true);
+  command->raw[0] = tu2c_length;
+  command->raw[1] = remote_address;
+  command->raw[2] = master_address;
+  command->raw[3] = TU2C_FRAME_MARKER;
+  command->raw[4] = marker_msb;
+  command->raw[5] = marker_lsb;
+  command->raw[6] = power_on_code;
+  command->raw[7] = calculate_tu2c_crc(command->raw, 7);
+}
+
+void write_set_mode_tu2c(struct DataFrame *command, uint8_t remote_address, uint8_t master_address,
+                         const struct TccState *state) {
+  // Wall remote mode frames: 0B:50:90:C0:01:22:MM
+  // MM = 01 heat, 02 cool, 03 fan_only, 04 dry (matches TccState::mode)
+  constexpr uint8_t tu2c_length = 0x0B;
+  constexpr uint8_t marker_msb = 0x01;
+  constexpr uint8_t marker_lsb = 0x22;
+
+  command->set_tu2c(true);
+  command->raw[0] = tu2c_length;
+  command->raw[1] = remote_address;
+  command->raw[2] = master_address;
+  command->raw[3] = TU2C_FRAME_MARKER;
+  command->raw[4] = marker_msb;
+  command->raw[5] = marker_lsb;
+  command->raw[6] = state->mode;
+  command->raw[7] = calculate_tu2c_crc(command->raw, 7);
 }
 
 void write_set_parameter_mode(struct DataFrame *command, uint8_t remote_address, uint8_t master_address, uint8_t command_mode_read,
@@ -2689,7 +2726,11 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
       // turn on
       ESP_LOGD(TAG, "Turning on");
       auto command = DataFrame{};
-      write_set_parameter_power(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
+      if (use_tu2c) {
+        write_power_on_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_);
+      } else {
+        write_set_parameter_power(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
+      }
       commands.push_back(command);
     } else {
       // turn off
@@ -2709,8 +2750,11 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
   if (new_state->mode != tcc_state.mode) {
     ESP_LOGD(TAG, "Changing mode");
     auto command = DataFrame{};
-    write_set_parameter_mode(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
-    commands.push_back(command);
+    if (use_tu2c) {
+      write_set_mode_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_, new_state);
+    } else {
+      write_set_parameter_mode(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
+    }
   }
 
   if (new_state->fan != tcc_state.fan) {
