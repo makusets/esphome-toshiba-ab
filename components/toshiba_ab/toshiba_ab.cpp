@@ -2755,6 +2755,7 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
     } else {
       write_set_parameter_mode(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
     }
+    commands.push_back(command);
   }
 
   if (new_state->fan != tcc_state.fan) {
