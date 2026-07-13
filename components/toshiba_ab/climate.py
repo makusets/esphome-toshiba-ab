@@ -63,6 +63,7 @@ CONF_DEMAND = "demand"
 CONF_DEMAND_ENABLED = "demand_enabled"
 CONF_ZONE1_SWITCH = "zone1_switch"
 CONF_DHW_BOOST = "dhw_boost"
+CONF_ANTIBACTERIA = "antibacteria"
 CONF_ZONE1_WATER_TEMPERATURE = "zone1_water_temperature"
 CONF_ZONE1_TARGET_TEMPERATURE = "zone1_target_temperature"
 CONF_DHW_CURRENT_TEMPERATURE = "dhw_current_temperature"
@@ -101,6 +102,9 @@ ToshibaAbEstiaZone1Switch = toshiba_ab_ns.class_(
 )
 ToshibaAbEstiaDhwBoostSwitch = toshiba_ab_ns.class_(
     "ToshibaAbEstiaDhwBoostSwitch", switch.Switch, cg.Component
+)
+ToshibaAbEstiaAntibacteriaSwitch = toshiba_ab_ns.class_(
+    "ToshibaAbEstiaAntibacteriaSwitch", switch.Switch, cg.Component
 )
 
 ToshibaAbOnDataReceivedTrigger = toshiba_ab_ns.class_(
@@ -228,6 +232,16 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
                 cv.Schema(
                     {
                         cv.GenerateID(): cv.declare_id(ToshibaAbEstiaDhwBoostSwitch),
+                    }
+                )
+            ),
+            key=CONF_NAME,
+        ),
+        cv.Optional(CONF_ANTIBACTERIA): cv.maybe_simple_value(
+            switch._SWITCH_SCHEMA.extend(
+                cv.Schema(
+                    {
+                        cv.GenerateID(): cv.declare_id(ToshibaAbEstiaAntibacteriaSwitch),
                     }
                 )
             ),
@@ -430,6 +444,9 @@ async def to_code(config):
     if CONF_DHW_BOOST in config:
         sw = await switch.new_switch(config[CONF_DHW_BOOST], var)
         cg.add(var.set_dhw_boost_switch(sw))
+    if CONF_ANTIBACTERIA in config:
+        sw = await switch.new_switch(config[CONF_ANTIBACTERIA], var)
+        cg.add(var.set_antibacteria_switch(sw))
 
     if CONF_ON_DATA_RECEIVED in config:
         for on_data_received in config.get(CONF_ON_DATA_RECEIVED, []):

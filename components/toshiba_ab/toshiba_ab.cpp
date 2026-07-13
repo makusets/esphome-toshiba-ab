@@ -1268,8 +1268,13 @@ void ToshibaAbClimate::setup() {
     }
     this->traits_.set_supported_fan_modes({});
     this->traits_.set_supported_swing_modes({});
-    this->traits_.set_visual_min_temperature(20);
-    this->traits_.set_visual_max_temperature(65);
+    if (this->data_reader.frame_format() == FrameFormat::ESTIA) {
+      this->traits_.set_visual_min_temperature(45);
+      this->traits_.set_visual_max_temperature(60);
+    } else {
+      this->traits_.set_visual_min_temperature(20);
+      this->traits_.set_visual_max_temperature(65);
+    }
     this->traits_.set_visual_temperature_step(0.5);
   }
   
@@ -3214,7 +3219,7 @@ static DataFrame make_estia_first_gen_frame(uint8_t src, uint8_t dst, const uint
 
 void ToshibaAbClimate::send_estia_first_gen_zone1(bool on) {
   if (this->read_only_) return;
-  const uint8_t payload[] = {0xE0, 0x01, 0x21, static_cast<uint8_t>(on ? 0x03 : 0x0A)};
+  const uint8_t payload[] = {0xE0, 0x01, 0x21, static_cast<uint8_t>(on ? 0x03 : 0x02)};
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
@@ -3231,12 +3236,15 @@ void ToshibaAbClimate::send_estia_first_gen_dhw_off() {
 }
 
 void ToshibaAbClimate::send_estia_first_gen_dhw_boost(bool on) {
-  // TODO: Replace this fallback once the first-generation Estia DHW boost command is known.
-  if (on) {
-    this->send_estia_first_gen_dhw_on();
-  } else {
-    this->send_estia_first_gen_dhw_off();
-  }
+  if (this->read_only_) return;
+  const uint8_t payload[] = {0xE0, 0x01, 0x24, 0x10, static_cast<uint8_t>(on ? 0x10 : 0x00)};
+  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+}
+
+void ToshibaAbClimate::send_estia_first_gen_antibacteria(bool on) {
+  if (this->read_only_) return;
+  const uint8_t payload[] = {0xE0, 0x01, 0x24, 0x60, static_cast<uint8_t>(on ? 0x20 : 0x00)};
+  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
 void ToshibaAbClimate::send_estia_first_gen_auto_mode(bool on) {
@@ -3248,7 +3256,7 @@ void ToshibaAbClimate::send_estia_first_gen_auto_mode(bool on) {
 void ToshibaAbClimate::send_estia_first_gen_dhw_setpoint(float target_temp) {
   if (this->read_only_) return;
   uint8_t encoded = static_cast<uint8_t>(std::round((target_temp + 16.0f) * 2.0f));
-  const uint8_t payload[] = {0xE0, 0x01, 0x23, 0x08, 0x00, 0x00, 0xA0, encoded};
+  const uint8_t payload[] = {0xE0, 0x01, 0x23, 0x08, 0x00, 0x00, encoded, 0x00};
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
@@ -3386,7 +3394,8 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
   if (src == this->master_address_ && frame->raw[3] == 0xE0 && frame->raw[5] == 0x31 && len > 11) {
     this->estia_first_gen_zone1_active_ = frame->raw[6] & 0x01;
     this->estia_first_gen_dhw_active_ = frame->raw[6] & 0x02;
-    this->estia_first_gen_dhw_boost_ = this->estia_first_gen_dhw_active_;
+    this->estia_first_gen_dhw_boost_ = frame->raw[7] & 0x40;
+    this->estia_first_gen_antibacteria_ = frame->raw[7] & 0x80;
     this->estia_first_gen_auto_mode_active_ = frame->raw[7] & 0x04;
     this->estia_first_gen_hotwater_resistor_heating_ = frame->raw[8] & 0x04;
     this->estia_first_gen_hotwater_pump_heating_ = frame->raw[8] & 0x08;
@@ -3399,14 +3408,18 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     this->publish_state();
     if (this->zone1_switch_) this->zone1_switch_->publish_state(this->estia_first_gen_zone1_active_);
     if (this->dhw_boost_switch_) this->dhw_boost_switch_->publish_state(this->estia_first_gen_dhw_boost_);
+    if (this->antibacteria_switch_) this->antibacteria_switch_->publish_state(this->estia_first_gen_antibacteria_);
     if (this->hotwater_pump_heating_binary_sensor_)
       this->hotwater_pump_heating_binary_sensor_->publish_state(this->estia_first_gen_hotwater_pump_heating_);
     if (this->hotwater_resistor_heating_binary_sensor_)
       this->hotwater_resistor_heating_binary_sensor_->publish_state(this->estia_first_gen_hotwater_resistor_heating_);
     if (this->zone1_target_temperature_sensor_) this->zone1_target_temperature_sensor_->publish_state(static_cast<float>(frame->raw[10]) / 2.0f - 16.0f);
-    if (len > 12) this->publish_dhw_current_temperature_(static_cast<float>(frame->raw[12]) / 2.0f - 16.0f);
-    if (len > 18 && this->zone1_water_temp_sensor_) this->zone1_water_temp_sensor_->publish_state(static_cast<float>(frame->raw[14]) / 2.0f - 16.0f);
-    if (len > 14) {
+    const bool has_status_temperatures = frame->raw[0] == 0x15 && len > 18;
+    if (has_status_temperatures)
+      this->publish_dhw_current_temperature_(static_cast<float>(frame->raw[12]) / 2.0f - 16.0f);
+    if (has_status_temperatures && this->zone1_water_temp_sensor_)
+      this->zone1_water_temp_sensor_->publish_state(static_cast<float>(frame->raw[14]) / 2.0f - 16.0f);
+    if (has_status_temperatures) {
       ESP_LOGD(TAG, "Estia first-gen status temperatures: temperature 2=%.1f°C (raw 13=0x%02X)",
                static_cast<float>(frame->raw[13]) / 2.0f - 16.0f, frame->raw[13]);
     }
@@ -3446,6 +3459,10 @@ void ToshibaAbEstiaZone1Switch::write_state(bool state) {
 
 void ToshibaAbEstiaDhwBoostSwitch::write_state(bool state) {
   this->climate_->send_estia_first_gen_dhw_boost(state);
+}
+
+void ToshibaAbEstiaAntibacteriaSwitch::write_state(bool state) {
+  this->climate_->send_estia_first_gen_antibacteria(state);
 }
 
 void ToshibaAbVentSwitch::write_state(bool state) {
