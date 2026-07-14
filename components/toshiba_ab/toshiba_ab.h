@@ -910,6 +910,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_read_only_switch(switch_::Switch *read_only_switch) { read_only_switch_ = read_only_switch; }
   void set_zone1_switch(switch_::Switch *zone1_switch) { zone1_switch_ = zone1_switch; }
   void set_dhw_boost_switch(switch_::Switch *dhw_boost_switch) { dhw_boost_switch_ = dhw_boost_switch; }
+  void set_antibacteria_switch(switch_::Switch *antibacteria_switch) { antibacteria_switch_ = antibacteria_switch; }
 
   void set_failed_crcs_sensor(sensor::Sensor *failed_crcs_sensor) { this->failed_crcs_sensor_ = failed_crcs_sensor; }
 
@@ -943,6 +944,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void send_estia_first_gen_dhw_on();
   void send_estia_first_gen_dhw_off();
   void send_estia_first_gen_dhw_boost(bool on);
+  void send_estia_first_gen_antibacteria(bool on);
   void send_estia_first_gen_auto_mode(bool on);
   void send_estia_first_gen_request_data(uint8_t request_code);
   void send_estia_tracked_(const uint8_t *frame, size_t len, uint16_t ack_dtype);
@@ -1024,6 +1026,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   switch_::Switch *read_only_switch_{nullptr};
   switch_::Switch *zone1_switch_{nullptr};
   switch_::Switch *dhw_boost_switch_{nullptr};
+  switch_::Switch *antibacteria_switch_{nullptr};
   sensor::Sensor *failed_crcs_sensor_{nullptr};
 
   sensor::Sensor *current_sensor_{nullptr}; // Sensor for current, x10 A
@@ -1162,6 +1165,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool estia_first_gen_zone1_active_{false};
   bool estia_first_gen_dhw_active_{false};
   bool estia_first_gen_dhw_boost_{false};
+  bool estia_first_gen_antibacteria_{false};
   bool estia_first_gen_auto_mode_active_{false};
   bool estia_first_gen_hotwater_pump_heating_{false};
   bool estia_first_gen_hotwater_resistor_heating_{false};
@@ -1203,6 +1207,14 @@ class ToshibaAbEstiaZone1Switch : public switch_::Switch, public Component {
 class ToshibaAbEstiaDhwBoostSwitch : public switch_::Switch, public Component {
  public:
   ToshibaAbEstiaDhwBoostSwitch(ToshibaAbClimate *climate) { climate_ = climate; }
+ protected:
+  void write_state(bool state) override;
+  ToshibaAbClimate *climate_;
+};
+
+class ToshibaAbEstiaAntibacteriaSwitch : public switch_::Switch, public Component {
+ public:
+  ToshibaAbEstiaAntibacteriaSwitch(ToshibaAbClimate *climate) { climate_ = climate; }
  protected:
   void write_state(bool state) override;
   ToshibaAbClimate *climate_;
