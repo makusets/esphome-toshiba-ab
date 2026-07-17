@@ -2,12 +2,18 @@
 ### (not suitable for most split systems typically using IR remotes)
 <img src="hardware/v3.2/v3_2.png" width="30%">   <img src="card.JPG" width="30%">
 
+
+## Updated code (Jul 2026) - Toshiba ESTIA R410A Heat Pumps Support
+
+Thanks to [@JuhaniVu](https://github.com/JuhaniVu), the first-generation Toshiba ESTIA R410A frame format is now fully implemented in this component. In YAML this protocol is selected with `frame_format: estia` and the UART must use `parity: NONE` (2400 baud, 8N1).
+
+See [`estia_R410A.yaml`](estia_R410A.yaml) for a complete first-generation / R410A ESTIA example configuration.
+
 ## Updated code (May 2026) - Toshiba ESTIA R32 Heat Pumps Support and more
 
 Thanks to [@7tobias](https://github.com/7tobias) the code now supports interfacing with Toshiba R32 Estia Heat Pumps, the board has been tested with the R32 ESTIA Series 1.
 The protocol in ESTIA Heat Pumps changed with the introduction of R32 pumps around 2021.
-Older ESTIA models using R410A use a different protocol. Have a look at https://github.com/vakkeli/toshiba_uart_ctrl for R410 models, [@vakkeli](https://github.com/vakkeli) integration should be compatible with this board (with the correct UART pins setup in yaml)
-Have a look at the bottom of this page for details and to the example_estia.yaml for setup.
+Older ESTIA models using R410A use the first-generation ESTIA frame format, now supported directly by this component as `frame_format: estia` with UART `parity: NONE`. Have a look at the bottom of this page for details and to `estia_R410A.yaml` for setup.
 
 - The esp will now detect what protocol is in use on the AB line automatically, if none is specified.
 - Adress assignment has changed to avoid duplicated adresses that would trigger an E09 error.
@@ -110,8 +116,8 @@ If you want to help test the board with the TU2C protocol, see: https://github.c
 
 ## Estia heat pumps
 
-Thanks to [@7tobias](https://github.com/7tobias) this component also supports Toshiba R32 Estia heat pumps that use a variation of the TU2C protocol, different to that of previous R410A ESTIA pumps. See below for yaml configuration instructions.
-Older ESTIA models using R410A use a different protocol. Have a look at https://github.com/vakkeli/toshiba_uart_ctrl for R410 models, [@vakkeli](https://github.com/vakkeli) integration should be compatible with this board (with the correct UART pins setup in yaml). Happy to integrate that protocol into this repo if someone wants to run the tests.
+Thanks to [@7tobias](https://github.com/7tobias) this component also supports Toshiba R32 Estia heat pumps that use a variation of the TU2C protocol, different to that of previous R410A ESTIA pumps. See below for YAML configuration instructions.
+Thanks to [@JuhaniVu](https://github.com/JuhaniVu), older ESTIA models using R410A are now supported directly through the first-generation ESTIA frame format. Select it in YAML with `frame_format: estia` and configure the UART with `parity: NONE`. See `estia_R410A.yaml` for a complete example.
 
 
 # Installation
@@ -281,6 +287,27 @@ climate:
 ```
 
 See `example_estia.yaml` for a complete configuration including optional 0-10V demand emulation and runtime switches.
+
+## Estia R410A / first-generation YAML configuration
+
+First-generation Toshiba ESTIA R410A systems use the `estia` frame format. This format is not auto-detected, so set `frame_format: estia` explicitly and use UART `parity: NONE`.
+
+```yaml
+uart:
+  tx_pin: GPIO15
+  rx_pin: GPIO13
+  baud_rate: 2400
+  parity: NONE
+  rx_buffer_size: 2048
+
+climate:
+  - platform: toshiba_ab
+    name: "Toshiba Estia R410A"
+    id: toshiba_estia
+    frame_format: estia
+```
+
+See `estia_R410A.yaml` for a complete first-generation / R410A configuration.
 
 ## Estia protocol details
 
