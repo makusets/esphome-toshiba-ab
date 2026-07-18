@@ -114,22 +114,6 @@ uint8_t calculate_tu2c_crc(const uint8_t *data, size_t size) {
   return static_cast<uint8_t>(sum & 0xFF);
 }
 
-uint8_t calculate_tu2c_set_parameter_flags_crc(const uint8_t *data, size_t size) {
-  return calculate_tu2c_crc(data, size);
-}
-
-uint8_t calculate_tu2c_power_off_crc(const uint8_t *data, size_t size) {
-  return calculate_tu2c_crc(data, size);
-}
-
-uint8_t calculate_tu2c_registration_query_crc(const uint8_t *data, size_t size) {
-  return calculate_tu2c_crc(data, size);
-}
-
-uint8_t calculate_tu2c_keepalive_crc(const uint8_t *data, size_t size) {
-  return calculate_tu2c_crc(data, size);
-}
-
 bool ToshibaAbClimate::is_own_tx_echo_(const DataFrame *f) const { // used to filter out echo from our last command sent
   if (!this->last_tx_frame_for_echo_.has_value() || f == nullptr) return false;
   if ((millis() - this->last_tx_frame_millis_) > ECHO_MATCH_WINDOW_MS) return false;
@@ -595,7 +579,7 @@ void write_set_parameter_flags_tu2c(struct DataFrame *command, uint8_t remote_ad
   command->raw[10] = get_heat_cool_bits(state->mode);
   command->raw[11] = get_heat_cool_bits(state->mode);
 
-  command->raw[12] = calculate_tu2c_set_parameter_flags_crc(command->raw, 12);
+  command->raw[12] = calculate_tu2c_crc(command->raw, 12);
 }
 
 void write_power_off_tu2c(struct DataFrame *command, uint8_t remote_address, uint8_t master_address) {
@@ -612,7 +596,7 @@ void write_power_off_tu2c(struct DataFrame *command, uint8_t remote_address, uin
   command->raw[4] = marker_msb;
   command->raw[5] = marker_lsb;
   command->raw[6] = power_off_code;
-  command->raw[7] = calculate_tu2c_power_off_crc(command->raw, 7);
+  command->raw[7] = calculate_tu2c_crc(command->raw, 7);
 }
 void write_power_on_tu2c(struct DataFrame *command, uint8_t remote_address, uint8_t master_address) {
   // Mirrors the wall remote's power-on frame: 0B:50:90:C0:01:21:03:D0
@@ -791,7 +775,7 @@ void ToshibaAbClimate::tu2c_remote_announce() {
   cmd.raw[3] = TU2C_FRAME_MARKER;
   cmd.raw[4] = 0x49;
   cmd.raw[5] = 0x0D;
-  cmd.raw[6] = calculate_tu2c_registration_query_crc(cmd.raw, 6);
+  cmd.raw[6] = calculate_tu2c_crc(cmd.raw, 6);
 
   this->send_command(cmd);
 }
@@ -810,7 +794,7 @@ void ToshibaAbClimate::tu2c_send_ping() {
   cmd.raw[5] = 0x5C;
   cmd.raw[6] = 0x90;
   cmd.raw[7] = 0xF3;
-  cmd.raw[8] = calculate_tu2c_keepalive_crc(cmd.raw, 8);
+  cmd.raw[8] = calculate_tu2c_crc(cmd.raw, 8);
 
   this->send_command(cmd);
 }
