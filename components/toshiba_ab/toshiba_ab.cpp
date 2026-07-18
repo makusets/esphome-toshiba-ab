@@ -96,45 +96,38 @@ uint8_t get_fan_bit_mask_for_mode(uint8_t mode) {
   return 0;
 }
 
-uint8_t calculate_tu2c_set_parameter_flags_crc(const uint8_t *data, size_t size) {
-  constexpr uint8_t crc_seed = 0xB8;
-  uint16_t sum = crc_seed;
+// Byte 4 of a TU2C frame (after LEN:SRC:DST) is a constant 0xC0, not a data
+// length. Verified on every frame seen on the bus — master and remote —
+// regardless of payload size (3 to 14 bytes).
+static constexpr uint8_t TU2C_FRAME_MARKER = 0xC0;
+
+uint8_t calculate_tu2c_crc(const uint8_t *data, size_t size) {
+  // Plain 8-bit sum of all frame bytes from LEN up to the last data byte.
+  // The previous per-command "seeds" (0xB8/0xBC/0xBD/0xBE) were each exactly
+  // 0xC0 minus that command's payload_length: they compensated for writing
+  // payload_length into raw[3] instead of the constant 0xC0. With the marker
+  // written correctly, no seed is needed and every CRC is unchanged.
+  uint16_t sum = 0;
   for (size_t i = 0; i < size; i++) {
     sum += data[i];
   }
   return static_cast<uint8_t>(sum & 0xFF);
+}
+
+uint8_t calculate_tu2c_set_parameter_flags_crc(const uint8_t *data, size_t size) {
+  return calculate_tu2c_crc(data, size);
 }
 
 uint8_t calculate_tu2c_power_off_crc(const uint8_t *data, size_t size) {
-  // Based on observed TU2C power-off frame:
-  // 0B:50:90:03:01:21:02:CF
-  constexpr uint8_t crc_seed = 0xBD;
-  uint16_t sum = crc_seed;
-  for (size_t i = 0; i < size; i++) {
-    sum += data[i];
-  }
-  return static_cast<uint8_t>(sum & 0xFF);
+  return calculate_tu2c_crc(data, size);
 }
 
 uint8_t calculate_tu2c_registration_query_crc(const uint8_t *data, size_t size) {
-  // Observed for short query frames like 0A:50:90:02:49:0D:00
-  // CRC = (sum(bytes) - 0x42) & 0xFF
-  constexpr uint8_t crc_seed = 0xBE;
-  uint16_t sum = crc_seed;
-  for (size_t i = 0; i < size; i++) {
-    sum += data[i];
-  }
-  return static_cast<uint8_t>(sum & 0xFF);
+  return calculate_tu2c_crc(data, size);
 }
 
 uint8_t calculate_tu2c_keepalive_crc(const uint8_t *data, size_t size) {
-  // Observed for keepalive frames like 0C:50:90:04:41:5C:90:F3:CC
-  constexpr uint8_t crc_seed = 0xBC;
-  uint16_t sum = crc_seed;
-  for (size_t i = 0; i < size; i++) {
-    sum += data[i];
-  }
-  return static_cast<uint8_t>(sum & 0xFF);
+  return calculate_tu2c_crc(data, size);
 }
 
 bool ToshibaAbClimate::is_own_tx_echo_(const DataFrame *f) const { // used to filter out echo from our last command sent
@@ -376,7 +369,8 @@ bool ToshibaAbClimate::should_track_tu2c_command_ack_(const DataFrame &frame) co
   }
 
   // Track ACKs for TU2C/first-gen Estia write commands.
-  return frame.raw[5] == 0x21 || frame.raw[5] == 0x23 || frame.raw[5] == 0x24 || frame.raw[5] == 0x2C;
+  return frame.raw[5] == 0x21 || frame.raw[5] == 0x22 || frame.raw[5] == 0x23 ||
+         frame.raw[5] == 0x24 || frame.raw[5] == 0x2C;
 }
 
 bool ToshibaAbClimate::should_track_command_ack_(const DataFrame &frame) const {
@@ -581,10 +575,8 @@ void write_set_parameter_flags(struct DataFrame *command, uint8_t remote_address
     write_set_parameter(command, remote_address, master_address, command_mode_read, OPCODE2_SET_TEMP_WITH_FAN, payload, sizeof(payload));
   }
 }
-
 void write_set_parameter_flags_tu2c(struct DataFrame *command, uint8_t remote_address, uint8_t master_address,
                                        const struct TccState *state, uint8_t set_flags) {
-  constexpr uint8_t payload_length = 0x08;
   constexpr uint8_t tu2c_length = 0x10;
   constexpr uint8_t tu2c_header_marker_msb = 0x01;
   constexpr uint8_t tu2c_header_marker_lsb = 0x2C;
@@ -593,7 +585,7 @@ void write_set_parameter_flags_tu2c(struct DataFrame *command, uint8_t remote_ad
   command->raw[0] = tu2c_length;
   command->raw[1] = remote_address;
   command->raw[2] = master_address;
-  command->raw[3] = payload_length;
+  command->raw[3] = TU2C_FRAME_MARKER;
   command->raw[4] = tu2c_header_marker_msb;
   command->raw[5] = tu2c_header_marker_lsb;
   command->raw[6] = static_cast<uint8_t>(state->mode | set_flags);
@@ -608,7 +600,6 @@ void write_set_parameter_flags_tu2c(struct DataFrame *command, uint8_t remote_ad
 
 void write_power_off_tu2c(struct DataFrame *command, uint8_t remote_address, uint8_t master_address) {
   constexpr uint8_t tu2c_length = 0x0B;
-  constexpr uint8_t payload_length = 0x03;
   constexpr uint8_t marker_msb = 0x01;
   constexpr uint8_t marker_lsb = 0x21;
   constexpr uint8_t power_off_code = 0x02;
@@ -617,11 +608,47 @@ void write_power_off_tu2c(struct DataFrame *command, uint8_t remote_address, uin
   command->raw[0] = tu2c_length;
   command->raw[1] = remote_address;
   command->raw[2] = master_address;
-  command->raw[3] = payload_length;
+  command->raw[3] = TU2C_FRAME_MARKER;
   command->raw[4] = marker_msb;
   command->raw[5] = marker_lsb;
   command->raw[6] = power_off_code;
   command->raw[7] = calculate_tu2c_power_off_crc(command->raw, 7);
+}
+void write_power_on_tu2c(struct DataFrame *command, uint8_t remote_address, uint8_t master_address) {
+  // Mirrors the wall remote's power-on frame: 0B:50:90:C0:01:21:03:D0
+  constexpr uint8_t tu2c_length = 0x0B;
+  constexpr uint8_t marker_msb = 0x01;
+  constexpr uint8_t marker_lsb = 0x21;
+  constexpr uint8_t power_on_code = 0x03;
+
+  command->set_tu2c(true);
+  command->raw[0] = tu2c_length;
+  command->raw[1] = remote_address;
+  command->raw[2] = master_address;
+  command->raw[3] = TU2C_FRAME_MARKER;
+  command->raw[4] = marker_msb;
+  command->raw[5] = marker_lsb;
+  command->raw[6] = power_on_code;
+  command->raw[7] = calculate_tu2c_crc(command->raw, 7);
+}
+
+void write_set_mode_tu2c(struct DataFrame *command, uint8_t remote_address, uint8_t master_address,
+                         const struct TccState *state) {
+  // Wall remote mode frames: 0B:50:90:C0:01:22:MM
+  // MM = 01 heat, 02 cool, 03 fan_only, 04 dry (matches TccState::mode)
+  constexpr uint8_t tu2c_length = 0x0B;
+  constexpr uint8_t marker_msb = 0x01;
+  constexpr uint8_t marker_lsb = 0x22;
+
+  command->set_tu2c(true);
+  command->raw[0] = tu2c_length;
+  command->raw[1] = remote_address;
+  command->raw[2] = master_address;
+  command->raw[3] = TU2C_FRAME_MARKER;
+  command->raw[4] = marker_msb;
+  command->raw[5] = marker_lsb;
+  command->raw[6] = state->mode;
+  command->raw[7] = calculate_tu2c_crc(command->raw, 7);
 }
 
 void write_set_parameter_mode(struct DataFrame *command, uint8_t remote_address, uint8_t master_address, uint8_t command_mode_read,
@@ -761,7 +788,7 @@ void ToshibaAbClimate::tu2c_remote_announce() {
   cmd.raw[0] = 0x0A;
   cmd.raw[1] = source;
   cmd.raw[2] = dest;
-  cmd.raw[3] = 0x02;
+  cmd.raw[3] = TU2C_FRAME_MARKER;
   cmd.raw[4] = 0x49;
   cmd.raw[5] = 0x0D;
   cmd.raw[6] = calculate_tu2c_registration_query_crc(cmd.raw, 6);
@@ -778,7 +805,7 @@ void ToshibaAbClimate::tu2c_send_ping() {
   cmd.raw[0] = 0x0C;
   cmd.raw[1] = source;
   cmd.raw[2] = dest;
-  cmd.raw[3] = 0x04;
+  cmd.raw[3] = TU2C_FRAME_MARKER;
   cmd.raw[4] = 0x41;
   cmd.raw[5] = 0x5C;
   cmd.raw[6] = 0x90;
@@ -2704,7 +2731,11 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
       // turn on
       ESP_LOGD(TAG, "Turning on");
       auto command = DataFrame{};
-      write_set_parameter_power(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
+      if (use_tu2c) {
+        write_power_on_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_);
+      } else {
+        write_set_parameter_power(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
+      }
       commands.push_back(command);
     } else {
       // turn off
@@ -2724,7 +2755,11 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
   if (new_state->mode != tcc_state.mode) {
     ESP_LOGD(TAG, "Changing mode");
     auto command = DataFrame{};
-    write_set_parameter_mode(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
+    if (use_tu2c) {
+      write_set_mode_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_, new_state);
+    } else {
+      write_set_parameter_mode(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
+    }
     commands.push_back(command);
   }
 
