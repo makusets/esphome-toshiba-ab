@@ -16,6 +16,23 @@ namespace toshiba_ab {
 
 static const char *const TAG = "tcc_link.climate";
 
+static uint8_t command_opcode_for_ack_log(const DataFrame &frame) {
+  if (frame.is_tu2c()) {
+    // TU2C and first-generation Estia frames are stored as
+    // LEN:SRC:DST:MARKER:CLASS:OPCODE:... after stripping the F0:F0 prefix,
+    // so the normal-protocol opcode1 union member aliases DST.
+    return frame.size() > 5 ? frame.raw[5] : frame.opcode1;
+  }
+
+  if (frame.is_estia()) {
+    // A0-protocol frames are stored after the A0:00 prefix; raw[0] is the
+    // command/type byte. The normal opcode1 member aliases another header byte.
+    return frame.estia_size() > 0 ? frame.raw[0] : frame.opcode1;
+  }
+
+  return frame.opcode1;
+}
+
 #ifdef USE_ESP8266
 // Optional hardware UART0 instance, used for RX only when GPIO13 RX is
 // auto-detected on ESP8266 (or hardware_uart_rx_pin is configured). ESPHome
@@ -376,7 +393,7 @@ void ToshibaAbClimate::handle_pending_command_ack_(const DataFrame *frame) {
 
   if (this->is_ack_for_pending_command_(frame)) {
     ESP_LOGD(TAG, "Command ACK received for opcode 0x%02X after %u attempt(s)",
-             this->last_unconfirmed_command_->opcode1,
+             command_opcode_for_ack_log(*this->last_unconfirmed_command_),
              static_cast<unsigned>(this->last_unconfirmed_command_attempts_));
     this->last_unconfirmed_command_.reset();
     this->last_unconfirmed_command_attempts_ = 0;
@@ -2412,7 +2429,8 @@ void ToshibaAbClimate::loop() {
       const uint8_t max_attempts = pending_is_tu2c ? TU2C_MAX_COMMAND_SEND_ATTEMPTS : MAX_COMMAND_SEND_ATTEMPTS;
       if (retry_due) {
         if (this->last_unconfirmed_command_attempts_ >= max_attempts) {
-        ESP_LOGE(TAG, "Command opcode 0x%02X not acknowledged after %u attempts", this->last_unconfirmed_command_->opcode1,
+        ESP_LOGE(TAG, "Command opcode 0x%02X not acknowledged after %u attempts",
+                 command_opcode_for_ack_log(*this->last_unconfirmed_command_),
                  static_cast<unsigned>(this->last_unconfirmed_command_attempts_));
         this->last_unconfirmed_command_.reset();
         this->last_unconfirmed_command_attempts_ = 0;
@@ -2427,7 +2445,8 @@ void ToshibaAbClimate::loop() {
                      static_cast<unsigned>(this->last_unconfirmed_command_attempts_),
                      static_cast<unsigned>(max_attempts));
           } else {
-            ESP_LOGD(TAG, "Resending command opcode 0x%02X (attempt %u/%u)", frame_to_send->opcode1,
+            ESP_LOGD(TAG, "Resending command opcode 0x%02X (attempt %u/%u)",
+                     command_opcode_for_ack_log(*frame_to_send),
                      static_cast<unsigned>(this->last_unconfirmed_command_attempts_),
                      static_cast<unsigned>(max_attempts));
           }
