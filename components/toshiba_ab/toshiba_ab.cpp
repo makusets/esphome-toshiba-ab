@@ -96,17 +96,12 @@ uint8_t get_fan_bit_mask_for_mode(uint8_t mode) {
   return 0;
 }
 
-// Byte 4 of a TU2C frame (after LEN:SRC:DST) is a constant 0xC0, not a data
-// length. Verified on every frame seen on the bus — master and remote —
-// regardless of payload size (3 to 14 bytes).
+// Byte 4 of a TU2C frame (after LEN:SRC:DST) is a constant 0xC0
 static constexpr uint8_t TU2C_FRAME_MARKER = 0xC0;
 
 uint8_t calculate_tu2c_crc(const uint8_t *data, size_t size) {
   // Plain 8-bit sum of all frame bytes from LEN up to the last data byte.
-  // The previous per-command "seeds" (0xB8/0xBC/0xBD/0xBE) were each exactly
-  // 0xC0 minus that command's payload_length: they compensated for writing
-  // payload_length into raw[3] instead of the constant 0xC0. With the marker
-  // written correctly, no seed is needed and every CRC is unchanged.
+
   uint16_t sum = 0;
   for (size_t i = 0; i < size; i++) {
     sum += data[i];
@@ -124,6 +119,7 @@ bool ToshibaAbClimate::is_own_tx_echo_(const DataFrame *f) const { // used to fi
   // local TX can be echoed back with slightly different wrapper/timing state,
   // so fall back to dropping recent frames that still have our Estia source,
   // current master destination and known local command/query markers.
+  // Maybe not needed????
   if (this->data_reader.frame_format() == FrameFormat::ESTIA && f->is_tu2c() && f->size() >= 6 &&
       f->raw[1] == this->remote_address_ && f->raw[2] == this->master_address_ &&
       f->raw[3] == 0xE0 && (f->raw[4] == 0x01 || f->raw[4] == 0x41)) {
