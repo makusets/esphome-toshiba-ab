@@ -63,15 +63,15 @@ climate:
     # This format is not auto-detected, so set it explicitly.
     frame_format: estia
 
-    # Diagnostic binary sensor: true when valid traffic has been seen.
+    # Optional diagnostic binary sensor: true when valid traffic has been seen.
     connected:
       name: "Estia Connected"
 
-    # Diagnostic sensor: number of frames that failed checksum/CRC validation.
+    # Optional diagnostic sensor: number of frames that failed checksum/CRC validation.
     failed_crcs:
       name: "Estia Failed CRCs"
 
-    # Optional: true when a first-generation remote status error is detected,
+    # Optional binary sensor: true when a first-generation remote status error is detected,
     # false again after a remote status OK frame is received.
     remote_error:
       name: "Estia Remote Error"
@@ -105,17 +105,19 @@ climate:
       name: "Estia Hot Water Resistor Heating"
 
 
-    # Optional generic first-generation Estia sensor queries. These poll sensor
-    # IDs through the Estia data-query command and publish the returned raw value
-    # multiplied by the scale below. Not every unit supports every ID; watch logs
-    # for "sensor not available" responses and remove unsupported entries.
+    # Optional generic first-generation Estia sensor queries. These poll extra
+    # information from the master unit, using the specific sensor addresses,
+    # and publish the returned raw value multiplied by the scale below.
+    # Not every unit supports every sensor; watch logs for "sensor not available"
+    # responses and remove unsupported entries.
+    
     sensors:
-      - address: 0x6A           # Required for every sensor added, in this case, AC current sensor of the external unit
+      - address: 0x6A           # Address is required for every sensor added, in this case, AC current sensor of the external unit
         scale: 0.1              # default 1.0; here we decode raw/10 as current is reported in deciAmps
         interval: 30s           # default 5min
         sensor:
-          name: "Estia System Current"  #required
-          id: toshiba_current  #optional, but needed if used later in other yaml entries
+          name: "Estia System Current"  # name is required
+          id: toshiba_current  # optional, but needed if used later in other yaml entries
 
           #all other available options of sensor in esphome:
 
@@ -124,7 +126,7 @@ climate:
           device_class: current  #optional but recommended for HA
           state_class: measurement  #optional but recommended for HA
 
-      - address: 0x61        # Required for every sensor added, in this case, outdoor temperature sensor of the external unit
+      - address: 0x61        # Address is required for every sensor added, in this case, outdoor temperature sensor of the external unit
         sensor:
           name: "Estia Outdoor Temperature" #required
           unit_of_measurement: "°C" 
