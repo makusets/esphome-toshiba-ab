@@ -1,9 +1,9 @@
 ###############################################################################
 # Example ESPHome config for Toshiba Estia heat pump via AB-bus (A0-protocol)
 #
-# Hardware: makusets "Toshiba AB D1 Mini" board or similar
 # Protocol: Estia A0-protocol at 2400 baud 8E1 (NOT TCC-Link or TU2C)
-# Tested with: Toshiba Estia R32
+# Compatible with Toshiba Estia R32 systems. For ESTIA R410A systems, use
+# estia_R410A.yaml instead.
 ###############################################################################
 
 esphome:
@@ -54,8 +54,8 @@ climate:
     frame_format: a0
     filter_frames: false
 
-    # Read-only mode: set to false to allow sending commands
-    read_only: true
+    # Read-only mode: needs to be set to false to allow sending commands
+    read_only: false
 
     # Autonomous polling: query E8:C0 (temperatures) and E8:C1 (operating hours)
     # without requiring a KNX gateway on the bus
