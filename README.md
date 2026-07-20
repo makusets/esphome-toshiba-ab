@@ -10,7 +10,11 @@ ESTIA hydronic heat-pump systems that communicate over the two-wire **AB bus**.
 
 ## Changelog
 
-### July 2026 — ESTIA R410A support
+### July 2026 — TU2C and ESTIA R410A support
+
+The TU2C protocol is now fully functional, thanks to contributions from
+[@yvertman](https://github.com/yvertman) and
+[@Dieghito72](https://github.com/Dieghito72).
 
 Thanks to [@JuhaniVu](https://github.com/JuhaniVu), the first-generation Toshiba
 ESTIA R410A frame format is fully implemented. Select `frame_format: estia` and
@@ -225,5 +229,7 @@ ESPHome component by [@muxa](https://github.com/muxa) in
 Special thanks to [@7tobias](https://github.com/7tobias) for ESTIA R32 support,
 [@JuhaniVu](https://github.com/JuhaniVu) for first-generation/R410A ESTIA support,
 [@mtthidoteu](https://github.com/mtthidoteu) for HM support and hardware UART
-improvements, and every contributor and tester who has shared hardware findings,
-models, captures, code and documentation.
+improvements, and [@yvertman](https://github.com/yvertman) and
+[@Dieghito72](https://github.com/Dieghito72) for their contributions to fully
+functional TU2C support. Thanks also to every contributor and tester who has
+shared hardware findings, models, captures, code and documentation.
