@@ -1,8 +1,7 @@
 ###############################################################################
-# Complete ESPHome config example for Toshiba Estia R410A heat pumps
+# Complete ESPHome config example for Toshiba Estia R410A hydronic heat pumps
 # using first-generation Estia frames on the AB-bus.
 #
-# Hardware: makusets "Toshiba AB D1 Mini" board or similar
 # Protocol: Estia first-generation TU2C-style protocol at 2400 baud 8N1
 # Important: this is NOT the R32 Estia A0 protocol. For R32/A0 systems, use
 # example_estia.yaml instead.
