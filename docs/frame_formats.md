@@ -13,7 +13,7 @@ traffic. Not all protocols are automatically identified.
 | `n`, `normal`, `tcc-link` | Classic TCC-Link | Most central HVAC systems using the AB bus | `EVEN` | Yes | The component confirms this when it sees a valid master keepalive. |
 | `hm` | HM / newer RAV-RM  | Newer HM-range/RAV-RM indoor units | `EVEN` | Yes | Uses an `A0:00` prefix and different source/destination byte positions, then is normalised internally. |
 | `a0`, `estia_a0` | Estia R32 protocol | R32 Estia heat pumps | `EVEN` | Yes | Very similar to HM, Uses two-byte CRC-16. |
-| `u`, `tu2c`, `wrapped` | TU2C protocol | Newer U-series HVAC systems | `NONE` | No, set explicitly | Work in progress. Frames are prefixed with `F0:F0` and trailing `A0`. |
+| `u`, `tu2c`, `wrapped` | TU2C protocol | Newer U-series HVAC systems | `NONE` | No, set explicitly | Fully supported. Frames are prefixed with `F0:F0` and have a trailing `A0`. |
 | `estia` | Estia R410A (first gen) TU2C variant | R410A Estia heat pumps | `NONE` | No, set explicitly | Uses the TU2C reader path and Estia-specific control/decoding logic. |
 
 ## Common fields used by frames
