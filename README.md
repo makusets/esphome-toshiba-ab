@@ -1,296 +1,176 @@
-# ESP12 based Hardware design and ESPHome component for Toshiba central HVAC systems and ESTIA Hydronic Heat Pumps (using AB line)
-### (not suitable for most split systems typically using IR remotes)
-<img src="hardware/v3.2/v3_2.png" width="30%">   <img src="card.JPG" width="30%">
+# ESPHome Toshiba AB
 
+ESPHome hardware and component support for Toshiba central air-conditioning and
+ESTIA hydronic heat-pump systems that communicate over the two-wire **AB bus**.
 
-## Updated code (Jul 2026) - Toshiba ESTIA R410A Heat Pumps Support
+> This project is not suitable for most split systems that are controlled only
+> by an infrared remote.
 
-Thanks to [@JuhaniVu](https://github.com/JuhaniVu), the first-generation Toshiba ESTIA R410A frame format is now fully implemented in this component. In YAML this protocol is selected with `frame_format: estia` and the UART must use `parity: NONE` (2400 baud, 8N1).
+<img src="hardware/v3.2/v3_2.png" width="30%" alt="Toshiba AB v3.2 board"> <img src="card.JPG" width="30%" alt="Assembled Toshiba AB board">
 
-See [`estia_R410A.yaml`](estia_R410A.yaml) for a complete first-generation / R410A ESTIA example configuration.
+## Changelog
 
-## Updated code (May 2026) - Toshiba ESTIA R32 Heat Pumps Support and more
+### July 2026 — ESTIA R410A support
 
-Thanks to [@7tobias](https://github.com/7tobias) the code now supports interfacing with Toshiba R32 Estia Heat Pumps, the board has been tested with the R32 ESTIA Series 1.
-The protocol in ESTIA Heat Pumps changed with the introduction of R32 pumps around 2021.
-Older ESTIA models using R410A use the first-generation ESTIA frame format, now supported directly by this component as `frame_format: estia` with UART `parity: NONE`. Have a look at the bottom of this page for details and to `estia_R410A.yaml` for setup.
+Thanks to [@JuhaniVu](https://github.com/JuhaniVu), the first-generation Toshiba
+ESTIA R410A frame format is fully implemented. Select `frame_format: estia` and
+use a 2400 baud, 8N1 UART (`parity: NONE`). See the
+[complete R410A configuration](estia_R410A.yaml).
 
-- The esp will now detect what protocol is in use on the AB line automatically, if none is specified.
-- Adress assignment has changed to avoid duplicated adresses that would trigger an E09 error.
-- Thanks to [@mtthidoteu](https://github.com/mtthidoteu), a new protocol variant has been implemented which increases compatibility with some newer models, it is auto detected, and is named "hm" in the code.
-- Thanks to [@mtthidoteu](https://github.com/mtthidoteu)  again, the esp will now use hardware UART, which should reduce blocking of code execution and triggering reboots by the watchdog.
+### May 2026 — ESTIA R32 and protocol improvements
 
+Thanks to [@7tobias](https://github.com/7tobias), Toshiba R32 ESTIA Series 1
+systems are supported. The component can detect the normal TCC-Link, HM and
+ESTIA R32/A0 formats, and address assignment avoids duplicate-address E09
+errors. Thanks to [@mtthidoteu](https://github.com/mtthidoteu), HM-format support
+and hardware UART operation improve compatibility and stability.
 
-## D1 mini board variant
+### January 2026 — autonomous mode
 
-In collaboration with [@issalig](https://github.com/issalig), the initial developer of this project, we have designed a simpler board to be used with a D1 mini.
+The component can operate without another wall controller, supports configurable
+commercial-system read/write command modes and a filter-alert sensor, and has
+more robust frame handling and logging. See the relevant complete YAML example
+below for the optional settings.
 
-- The board will work with this code or with [@issalig](https://github.com/issalig) code.
-- UART pins are different. RX: D7 / TX: D8
-- Have a look at issalig project: https://github.com/issalig/toshiba_air_cond
-- Files here: https://github.com/makusets/esphome-toshiba-ab/tree/main/hardware/D1%20mini
+### Hardware releases
 
-<img src="hardware/D1%20mini/D1Mini.JPG" width="30%">
+- **v3.2:** revised UART pins, a 3300 µF 3.3 V rail capacitor, easier-to-solder
+  USB-C, boot/reset buttons, a power-selection jumper and easier assembly.
+- **D1 mini:** a simpler board designed with
+  [@issalig](https://github.com/issalig), using RX D7 and TX D8.
+- **v3:** wider AB-line voltage range, improved filtering, a comparator-based
+  receiver and selectable AB/USB power.
 
+## About this project
 
-## v3.2 is here!
+The component decodes traffic between a Toshiba indoor unit and its wired remote,
+reports the system to ESPHome/Home Assistant, and sends commands as a wall remote
+would. It supports:
 
-Improvements over v3:
-- Changed GPIO Pins for the UART component to improve stability and compatibility, GPI10 was not the best choice
-- Increased the size of the 3.3V rail capacitor to 3300uF, within the supported parameters of the DEXU DC-DC, better noise suppression
-- Changed the USB-C port to an easier to solder one.
-- Removed some components that allowed to flash the unit without having to press a boot button, and added a boot and reset button
-- Changed the slide switch to a jumper, for safety, as it makes sure the board is depowered before changing power source
-- Changed the big electrolytic capacitors to through-hole on the bottom side of the board. Makes it easy to solder and bend flat.
-- Overall easier to assemble and cheaper to build.
-- Fits in the same case as v3.
+- conventional **air-to-air systems** using classic TCC-Link, its HM variation,
+  or the now fully functional TU2C protocol;
+- **ESTIA hydronic systems**, including tested R410A and R32 generations;
+- operation alongside a wall remote or, where supported, autonomous operation.
 
-<img src="hardware/v3.2/v3_2.png" width="30%">
+The hardware is an ESP8266/ESP-12 interface board designed in EasyEDA. It powers
+from the AB line or USB (depending on board revision) and converts the AB bus to
+UART safely. **Do not connect the AB terminals directly to an ESP UART.**
 
-## Updated code (Jan 2026) - New Autonomous Mode
-- Added the option of using the board without any other controller or wall remote (autonomous mode). Details in "complete_example.yaml"
-- Added the option of changing read/write codes needed for some comercial systems.
-- Added the option of a filter alert sensor.
-- Refined protocol reading to include variations, specifically frames preceded by 0xF0 0xF0 and followed by 0xA0 at the end.
-- Removed filters that prevented some messages from being read.
-- Improved logs.
-- Other small changes.
+### Hardware requirements and application range
 
-## v3 is here!
-v3 board is here (v2 never saw the light)
+You need a supported ESPHome board/interface from the [`hardware`](hardware/)
+folder (or an electrically equivalent reader/writer circuit), access to the
+unit's wired **A/B remote terminals**, and an ESPHome/Home Assistant installation.
+The current board has been used with Toshiba central/commercial HVAC, multi-split
+indoor units that expose an AB wired-controller connection, and ESTIA heat pumps.
 
-Improvements over v1:
-- Works with a wide voltage range in the AB line (v1 only worked within a very narrow voltage window on the AB line), which should expand compatibility to more toshiba models.
-- Much better filtering of noise and virtually no noise introduced on the AB line.
-- Robust comparator design for data processing with DC filtering capacitor.
-- Selectable power source with slide switch: AB line or USB. Only switch power source with the board completely disconnected, otherwise there is high risk of damaging the circuit. USB data will operate even with AB power.
+Model names are useful hints, not guarantees: Toshiba has used different
+protocols within related product ranges. Confirm that your unit has an AB port,
+then use the selection tables below and the
+[protocol/frame-format reference](docs/frame_formats.md).
 
-notes:
+<details>
+<summary><strong>Hardware design, construction, installation and case</strong></summary>
 
-- The ESP consumes a lot more energy than the conventional wall remotes due to Wi-Fi. Therefore, the board is powered using a buck converter, as opposed to the LDO used in original Toshiba wall remote. This has the potential of introducing noise and interfere with data transmission. Through testing, I found that the specific make and model of the buck had a big impact on data corruption; as well as a good size capacitor on the 3.3v rail (at least 1000uF). This design has been tested with a DEXU branded buck,both K7803-500 and K7803-1000 and works without issues. If you test other components, please let me know what you found out.
-- The DCDC buck provides 3.3V and then is fed into a 3.3V LDO, although this is counterintuitive, the LDO reduces noise further and is needed for USB power anyway, the specific model chosen allows for 3.3V input.
-- The data reading is done using DC filtering and then a comparator. The size of the DC filter capacitor is important.
-- The writing is done by pulling the A line low (to B) across a 330ohm resistor for a "0" bit, this is the same approach adopted by toshiba original board.
+The recommended v3.2 board includes AB-line power conversion, noise filtering,
+a comparator receiver and a transistor writer. Isolate the HVAC system before
+opening a controller or changing AB wiring. Select USB power for initial flashing
+and AB power only after USB power has been disconnected.
 
+Board fabrication files, schematics, bills of materials, assembly advice,
+installation steps and enclosure details are collected in the
+[hardware guide](docs/hardware.md). Go directly to a board revision:
 
-# ESPHome Toshiba_AB AC Component
+- [v3.2](hardware/v3.2/README.md) — recommended full board
+- [D1 mini](hardware/D1%20mini/README.md) — simpler modular variant
+- [v3](hardware/v3/README.md) and [v1](hardware/v1/README.md) — older revisions
+- [all hardware and printable case files](hardware/)
 
-<img src="hardware/v3/Final.jpg" width="30%">    <img src="hardware/v3/Final2.jpg" width="30%"> <img src="card.JPG" width="30%">
+</details>
 
+<details>
+<summary><strong>Air-to-air systems (conventional air conditioning)</strong></summary>
 
+### Choosing a protocol
 
-ESPHome component to integrate with Toshiba Air Conditioners using the two wire AB line connection to remote.
+Air-to-air units use one of three supported AB protocol variations:
 
-This project implements all necessary functions to decode and interact with the Toshiba TCC protocol over the AB line. It interprets and reports all messages between remote controllers and central unit and sends commands as it was the wall remote.
+| Variation | Typical systems and examples | UART | `frame_format` |
+| --- | --- | --- | --- |
+| **TCC-Link** | Most established central/commercial systems. Tested examples include indoor `RAV-SM1103DT-A` and `MMD-AP0366BHP1-E` with `RBC-AMT32E`/`RBC-AMT54E` controllers; repository reports also include `RAV-SM802BT-E`. | 2400 baud, **8E1** (`EVEN`) | `auto` (recommended) or `normal` |
+| **HM (TCC-Link variation)** | Newer RAV-HM/RAV-RM systems. Examples reported in this repository include `RAV-RM801BTP-E` + `RAV-GM801ATP-E`, `RAV-RM801KRTP-E`, and `RAV-HM561KRTP-E`. HM retains TCC-Link semantics but uses a different envelope. | 2400 baud, **8E1** (`EVEN`) | `auto` or `hm` |
+| **TU2C** | Common in newer **U-series** systems; examples include `RAS-M16U2MUVG`, `RAS-M24U2DVG-E` and `M07U2DVG-E`. TU2C support is fully functional, but it is not auto-detected. | 2400 baud, **8N1** (`NONE`) | `tu2c` |
 
-The hardware side of this project includes a ESP12 based board design that connects to the system.
+Some Toshiba documentation describes changing a TU2C-capable unit back to
+TCC-Link through its main board or DN code `FC`; do not assume this is available
+on every model. Prefer the unit's native protocol unless its service manual says
+otherwise. For byte-level differences, aliases and detection behavior, read
+[Toshiba AB protocol frame formats](docs/frame_formats.md).
 
-In particular, this project has been tested with remote control unit RBC-AMT32E and RBC-AMT54E and central unit RAV-SM1103DT-A and MMD-AP0366BHP1-E but should work with other models using the AB protocol.
+### Minimal ESPHome configuration
 
-
-Requires reader & writer circuit to interface with the AB line, connected to the remote AB ports.
-The circuit board was designed in easyEDA and all necessary files are included here.
-
-Most of the work is based on previous work, hard bits of decoding and initial board design by [@issalig](https://github.com/issalig) https://github.com/issalig/toshiba_air_cond and an initial esphome component from [@muxa](https://github.com/muxa): https://github.com/muxa/esphome-tcc-link
-
-# Toshiba protocols compatibility
-
-For a detailed byte-level comparison of the supported frame formats, example frames, auto-detection behavior, and YAML snippets, see [docs/frame_formats.md](docs/frame_formats.md).
-
-
-## TCC-Link
-
-Toshiba systems using the AB line for communication employ at least two major known protocol variations, with further variations within each of them. This project was designed and tested for the initial TCC-Link protocol. And two variations of that protocol are supported at the moment.
-
-Newer HM-range indoor units — the `RAV-RM…BTP-E` series (e.g. **RAV-RM801BTP-E**), typically paired with a outdoor such as the `RAV-GM…ATP-E` series (e.g. **RAV-GM801ATP-E**) — speak a dialect of the classic TCC-Link that the current code should autodetect thanks to [@mtthidoteu](https://github.com/mtthidoteu). Otherwise, it can be set in yaml with `frame_format: hm`.
-The HM dialect differs from classic TCC-Link in a few ways: two fixed intial bytes `A0:00`, source/destination addresses at different byte positions, a longer payload, and few other changes.
-
-## TU2C
-
-Compatibilty with the newer TU2C protocol variants is a work-in-progress and is not yet finalised. If your system model name includes a "U", it will most likely use the newer TU2C protocol. For example: RAS-M16U2MUVG or M07U2DVG-E
-
-Toshiba explains that the protocol in newer units can be changed back to TCC-Link, from the unit mainboard or in cases by using the DN Code "FC" and setting it back to "0000". But I have not tested it, if you do, please let me know.
-For more info see: https://github.com/makusets/esphome-toshiba-ab/blob/main/50598241NOTICE2.pdf
-
-If you want to help test the board with the TU2C protocol, see: https://github.com/makusets/esphome-toshiba-ab/issues/24
-
-## Estia heat pumps
-
-Thanks to [@7tobias](https://github.com/7tobias) this component also supports Toshiba R32 Estia heat pumps that use a variation of the TU2C protocol, different to that of previous R410A ESTIA pumps. See below for YAML configuration instructions.
-Thanks to [@JuhaniVu](https://github.com/JuhaniVu), older ESTIA models using R410A are now supported directly through the first-generation ESTIA frame format. Select it in YAML with `frame_format: estia` and configure the UART with `parity: NONE`. See `estia_R410A.yaml` for a complete example.
-
-
-# Installation
-## Add or modify these sections in your esphome device yaml file
+This is the complete component-specific portion for TCC-Link/HM. Add your normal
+ESPHome device, Wi-Fi, API and OTA sections. For TU2C, change both highlighted
+settings to `parity: NONE` and `frame_format: tu2c`.
 
 ```yaml
-
 logger:
-  baud_rate: 0  #disable hardware UART log to use pins for UART communication with the AC unit
-  level: DEBUG
+  baud_rate: 0
 
 external_components:
-  - source:
-      type: git
-      url: https://github.com/makusets/esphome-toshiba-ab
-    refresh: 0s  #optional, how often to download fresh files from source, defaults to 1 day, use 0 to force updates
+  - source: github://makusets/esphome-toshiba-ab
 
 uart:
-  tx_pin: GPIO12  #GPIO10 if using v3 board or GPIO15 if using v1 board
-  rx_pin: GPIO13
+  tx_pin: GPIO12       # GPIO10 on v3; GPIO15 on v1; D8 on D1 mini
+  rx_pin: GPIO13       # D7 on D1 mini
   baud_rate: 2400
-  parity: EVEN
-  rx_buffer_size: 2048    # increase buffer to avoid dropped bytes
-
+  parity: EVEN         # NONE for TU2C
+  rx_buffer_size: 2048
 
 climate:
   - platform: toshiba_ab
     name: "Toshiba AC"
     id: toshiba_ac
-
+    frame_format: auto # use tu2c for TU2C systems
 ```
 
-## Optional section if you install a BME280 sensor
+See [`complete_example.yaml`](complete_example.yaml) for autonomous operation,
+addresses, temperature reporting, diagnostic sensors, power estimation and all
+other air-to-air options. [`example.yaml`](example.yaml) is a ready-to-edit,
+smaller device configuration.
 
-The option of a BME280 sensor is added to give the option of reading the temperature, pressure and humidity from the thermostat. It is done as any other sensor in the ESPHome environment. If configured, it will be exposed to the frontend. If you want to use this or another sensor to control the AC system, have a look at the complete_exmple.yaml file.
+### Optional BME280
 
-```yaml
-# If installed, it will report the BME280 temp, humidity and pressure values
+The boards expose I²C so a BME280 can publish local temperature, humidity and
+pressure. Its temperature can also be sent to the air conditioner as the room
+temperature. The relevant I²C, sensor and `report_sensor_temp` YAML belongs in
+the example configuration rather than this overview; see
+[`complete_example.yaml`](complete_example.yaml).
 
-i2c:
-  sda: GPIO4 #GPIO02 if using v3 or v1 board
-  scl: GPIO14
-  scan: True
+</details>
 
+<details>
+<summary><strong>Hydronic systems (Toshiba ESTIA)</strong></summary>
 
-sensor:
-  - platform: bme280_i2c
-    temperature:
-      name: "Indoor Temperature"
-      id: bme_temp
-      oversampling: 1x
-    pressure:
-      name: "Indoor Pressure"
-      id: bme_pressure
-      accuracy_decimals: 0
-      oversampling: 1x
-    humidity:
-      name: "Indoor Humidity"
-      id: bme_humidity
-      accuracy_decimals: 0
-      oversampling: 2x
-    address: 0x76
-    update_interval: 30s
+### Tested generations and protocols
 
-```
+ESTIA changed protocol between the R410A and R32 generations. Both are supported,
+but their UART parity and frame-format settings are not interchangeable.
 
-# Hardware installation
+| Generation | Protocol | Example/tested models | UART | `frame_format` |
+| --- | --- | --- | --- | --- |
+| **R410A / first generation** | First-generation ESTIA, TU2C-style wrapped frames | R410A ESTIA systems using first-generation wired controllers | 2400 baud, **8N1** (`NONE`) | `estia` (must be explicit) |
+| **R32** | ESTIA A0 protocol | Series 1 `HWT-1101HRW-E` outdoor + `HWT-1101XWHT9W-E` indoor; `HWT-1102S21SM3W-E` is also reported in the repository | 2400 baud, **8E1** (`EVEN`) | `a0` |
 
-You will need to build the esphome compatible hardware. Instructions below.
+R32/A0 provides bidirectional power, heat/cool mode and setpoint control,
+autonomous temperature/runtime polling, optional 0–10 V demand-interface
+emulation, runtime sensors and command retries. First-generation support includes
+the R410A status, setpoint, Zone 1 and domestic-hot-water controls documented in
+its complete example. See the [protocol reference](docs/frame_formats.md) and
+[first-generation ESTIA protocol notes](docs/estia_first_gen_protocol.md) for
+technical detail.
 
-- Most likely, the first time, you will have to flash the board with the firmware via USB, typical ESPHome process. If using v3.2 board, you will need to hold the boot button while plugging usb power for the board to boot into flashing mode. Once up and running, OTA updates will work.
-  - More information on first connection here: https://esphome.io/guides/physical_device_connection/#connecting-to-the-esp
-  - **While connected to USB, the board needs to have the Power Selector set to USB**
-- Isolate the AC unit completely off (at the electrical distribution board ideally)
-- Take out the cover of your remote controller
-- Loose the screws of AB terminals.
-- Wire the remote A,B terminals to the pcb. V1 board is polarity sensitive. V3 board can be connected both ways.
-  - **Set the Power Selector to AB**
-
-![image](https://github.com/issalig/toshiba_air_cond/blob/master/pcb/remote_back_pcb.jpg)
-
-# Hardware design
-
-This is the schematic of the V3.2 board, it is powered by the AB line
-
-<img src="hardware/v3.2/v3_2 Schematic.png" width="99%">
-
-
-It should look something like this:
-
-<img src="hardware/v3.2/v3_2.png" width="70%">
-
-
-I2C headers have been added for the BME280 I2C sensor option, also for future inclusion of a screen or other I2C device
-If a BME280 sensor is installed and setup in yaml it will report the readings to HA
-
-All files necessary can be found in the hardware folder, including the EasyEDA Project:
-
-https://github.com/makusets/esphome-toshiba-ab/tree/main/hardware
-
-# Case
-
-A suitable enclosure for the board was designed to be 3D printed in two parts, STL files are available in the hardware folder. The case was designed using OnShape online designing software, the original file is public and can be found and modified by searching "toshiba_esp_case" within OnShape environment.
-The case looks like this:
-
-<img src="hardware/v3/toshiba_top_case.png" width="49%"> <img src="hardware/v3/toshiba_bot_case.png" width="49%">
-
-
-# Toshiba Estia Heat Pump Support
-
-This component also supports Toshiba R32 Estia heat pumps using the A0-protocol on the AB-bus. This seems to be a variation of the TU2C protocol and different to that of previous R410A ESTIA pumps.
-
-This componennt supports Estia R32 Heat Pumps (tested with Series 1) and possibly other similar models.
-
-<img src="docs/estia-esphome.png" width="45%"> <img src="docs/estia-log.png" width="45%">
-
-## Features
-
-- Full bidirectional control: power on/off, mode (heat/cool), setpoint
-- Autonomous polling mode: reads temperatures (E8:C0) and operating hours (E8:C1) without a KNX gateway
-- 0-10V demand interface emulation in software (address 0x0041)
-- Sensors: outdoor temperature, compressor hours, water pump hours, backup heater hours
-- ACK tracking with automatic retry (3 attempts)
-- Robust frame synchronization with inter-byte timeout
-
-## Estia YAML configuration
-
-```yaml
-logger:
-  baud_rate: 0    # Free hardware UART for AB-protocol
-  level: INFO
-
-external_components:
-  - source:
-      type: git
-      url: https://github.com/makusets/esphome-toshiba-ab
-    refresh: 0s
-
-uart:
-  tx_pin: GPIO15    # Adjust for your board variant
-  rx_pin: GPIO13
-  baud_rate: 2400
-  parity: EVEN
-  rx_buffer_size: 2048
-
-climate:
-  - platform: toshiba_ab
-    name: "Toshiba Estia"
-    id: toshiba_estia
-    frame_format: a0
-    filter_frames: false
-    read_only: false
-    autonomous: true
-    demand_enabled: false
-    connected:
-      name: "Estia Connected"
-    failed_crcs:
-      name: "Estia Failed CRCs"
-    outdoor_temperature:
-      name: "Estia Outdoor Temperature"
-    compressor_hours:
-      name: "Estia Compressor Hours"
-    waterpump_hours:
-      name: "Estia Water Pump Hours"
-    backup_heater_hours:
-      name: "Estia Backup Heater Hours"
-```
-
-See `example_estia.yaml` for a complete configuration including optional 0-10V demand emulation and runtime switches.
-
-## Estia R410A / first-generation YAML configuration
-
-First-generation Toshiba ESTIA R410A systems use the `estia` frame format. This format is not auto-detected, so set `frame_format: estia` explicitly and use UART `parity: NONE`.
+### Minimal R410A configuration
 
 ```yaml
 uart:
@@ -298,32 +178,52 @@ uart:
   rx_pin: GPIO13
   baud_rate: 2400
   parity: NONE
-  rx_buffer_size: 2048
 
 climate:
   - platform: toshiba_ab
     name: "Toshiba Estia R410A"
-    id: toshiba_estia
     frame_format: estia
 ```
 
-See `estia_R410A.yaml` for a complete first-generation / R410A configuration.
+Use [`estia_R410A.yaml`](estia_R410A.yaml) for the complete R410A configuration.
 
-## Estia protocol details
+### Minimal R32 configuration
 
-- **UART**: 2400 baud, 8E1 (EVEN parity)
-- **Frame format**: `A0:00:TYPE:LEN:00:SRC:DST:DTYPE:[DATA]:CRC_H:CRC_L`
-- **CRC**: CRC-16/MCRF4XX (init 0xFFFF, poly 0x8408 reflected), big-endian
-- **Addresses**: Master=0x0800, Remote=0x0040, 0-10V=0x0041, Broadcast=0x00FE
-- **Temperature encoding**: `°C = value / 2 - 16`
+```yaml
+uart:
+  tx_pin: GPIO15
+  rx_pin: GPIO13
+  baud_rate: 2400
+  parity: EVEN
 
-## Tested with
+climate:
+  - platform: toshiba_ab
+    name: "Toshiba Estia R32"
+    frame_format: a0
+```
 
-- Toshiba Estia HWT-1101HRW-E outdoor unit (2023, R32)
-- Toshiba Estia HWT-1101XWHT9W-E indoor unit (2023)
-- makusets "Toshiba AB D1 Mini" board (LMV331TP comparator)
+Use [`example_estia.yaml`](example_estia.yaml) for the complete R32 configuration,
+including optional demand emulation, sensors and runtime switches.
 
+### Optional BME280
 
-# More options and complete yaml
+A BME280 may be connected to the board's I²C header to expose local temperature,
+humidity and pressure in ESPHome. ESTIA-specific control and polling do not
+require it. Keep the actual BME280 configuration in the appropriate complete
+YAML file if you choose to add one.
 
-Have a look at the complete_example.yaml file for more options available for the component. It includes details about protocols, remote IDs, reporting a chosen temperature to the AC central unit or reading extra sensors (power, pressure, runtime, temp...)
+</details>
+
+## Credits and thanks
+
+This project builds on the difficult protocol-decoding and initial hardware work
+by [@issalig](https://github.com/issalig) in
+[`toshiba_air_cond`](https://github.com/issalig/toshiba_air_cond), and the initial
+ESPHome component by [@muxa](https://github.com/muxa) in
+[`esphome-tcc-link`](https://github.com/muxa/esphome-tcc-link).
+
+Special thanks to [@7tobias](https://github.com/7tobias) for ESTIA R32 support,
+[@JuhaniVu](https://github.com/JuhaniVu) for first-generation/R410A ESTIA support,
+[@mtthidoteu](https://github.com/mtthidoteu) for HM support and hardware UART
+improvements, and every contributor and tester who has shared hardware findings,
+models, captures, code and documentation.

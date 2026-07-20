@@ -76,7 +76,7 @@ climate:
     command_mode_read: 0x08     # optional, defaults to 0x08 if omitted; use 0x0D for some commercial systems
     command_mode_write: 0x80    # optional, defaults to 0x80 if omitted; use 0xD0 for some commercial systems
     
-    frame_format: N             # optional, defaults to autodetect, otherwise can be forced to "n" for TCC-Link, or "hm" for Estia HM variant, use "U" if your unit uses TU2C protocol, check parity in UART section too
+    frame_format: N             # optional, defaults to autodetect; force "n" for TCC-Link, "hm" for its HM variation, or "U" for TU2C; check UART parity too
     filter_frames: true         # optional, default true; reject normal TCC-Link frames with source > 0xA0
 
     # --- Bus collision guard ---
