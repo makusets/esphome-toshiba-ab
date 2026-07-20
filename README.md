@@ -53,7 +53,7 @@ would. It supports:
 - operation alongside a wall remote or, where supported, autonomous operation.
 
 The hardware is an ESP8266/ESP-12 interface board designed in EasyEDA. It powers
-from the AB line or USB (depending on board revision) and converts the AB bus to
+from the AB line (or USB for initial flashing only, no commms) and converts the AB bus to
 UART safely. **Do not connect the AB terminals directly to an ESP UART.**
 
 ### Hardware requirements and application range
