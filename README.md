@@ -105,10 +105,7 @@ Air-to-air units use one of three supported AB protocol variations:
 | **HM (TCC-Link variation)** | Newer RAV-HM/RAV-RM systems. Examples reported in this repository include `RAV-RM801BTP-E` + `RAV-GM801ATP-E`, `RAV-RM801KRTP-E`, and `RAV-HM561KRTP-E`. HM retains TCC-Link semantics but uses a different envelope. | 2400 baud, **8E1** (`EVEN`) | `auto` or `hm` |
 | **TU2C** | Common in newer **U-series** systems; examples include `RAS-M16U2MUVG`, `RAS-M24U2DVG-E` and `M07U2DVG-E`. TU2C support is fully functional, but it is not auto-detected. | 2400 baud, **8N1** (`NONE`) | `tu2c` |
 
-Some Toshiba documentation describes changing a TU2C-capable unit back to
-TCC-Link through its main board or DN code `FC`; do not assume this is available
-on every model. Prefer the unit's native protocol unless its service manual says
-otherwise. For byte-level differences, aliases and detection behavior, read
+For byte-level differences, aliases and detection behavior, read
 [Toshiba AB protocol frame formats](docs/frame_formats.md).
 
 ### Minimal ESPHome configuration
