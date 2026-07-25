@@ -131,7 +131,7 @@ climate:
 TU2C frames are easily identified by a two-byte prefix and one-byte suffix:
 
 ```text
-F0:F0:TOTAL_LEN:SRC:DEST:DATA_LEN:DATA...:CRC:A0
+F0:F0:TOTAL_LEN:SRC:DEST:C0:DATA...:CRC:A0
 ```
 
 `TOTAL_LEN` includes the two `F0` prefix bytes, the length byte itself, and the
@@ -140,9 +140,9 @@ to but not including the final `A0` as the frame payload to decode messages.
 TU2C command examples:
 
 ```text
-F0:F0:0B:50:90:03:01:21:02:CF:A0  # power-off example
-F0:F0:0A:50:90:02:49:0D:00:A0     # registration/query example
-F0:F0:0C:50:90:04:41:5C:90:F3:CC:A0  # keepalive example
+F0:F0:0B:50:90:C0:01:21:02:CF:A0  # power-off example
+F0:F0:0A:50:90:C0:49:0D:00:A0     # registration/query example
+F0:F0:0C:50:90:C0:41:5C:90:F3:CC:A0  # keepalive example
 ```
 
 ### Auto-detection
