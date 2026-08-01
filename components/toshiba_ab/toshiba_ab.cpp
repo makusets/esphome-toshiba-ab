@@ -1517,15 +1517,42 @@ void ToshibaAbClimate::sync_from_received_state() {
 }
 
 void ToshibaAbClimate::autoreset_remote_error_() {
-  ESP_LOGI(TAG, "Autoreset errors: resending current mode/fan/target temperature");
   auto command = DataFrame{};
   if (this->data_reader.frame_format() == FrameFormat::TU2C) {
+    ESP_LOGI(TAG, "Autoreset errors: resending current mode/fan/target temperature");
     write_set_parameter_flags_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_, &this->tcc_state,
                                    COMMAND_SET_TEMP | COMMAND_SET_FAN);
-  } else {
-    write_set_parameter_flags(&command, this->remote_address_, this->master_address_, this->command_mode_read_, &this->tcc_state,
-                              COMMAND_SET_TEMP | COMMAND_SET_FAN, this->is_hm_variant());
+    this->send_command(command);
+    return;
   }
+
+  // A normal TCC-Link remote clears error 0x49 by cycling the unit's power.
+  // Snapshot all settings before queuing the power-off command so subsequent
+  // status reports cannot change the state that will be restored.
+  const TccState last_state = this->tcc_state;
+  TccState power_state = last_state;
+
+  ESP_LOGI(TAG, "Autoreset errors: power cycling and restoring mode/fan/target temperature/vent");
+  power_state.power = POWER_OFF;
+  write_set_parameter_power(&command, this->remote_address_, this->master_address_, this->command_mode_read_, &power_state);
+  this->send_command(command);
+
+  power_state.power = POWER_ON;
+  command = DataFrame{};
+  write_set_parameter_power(&command, this->remote_address_, this->master_address_, this->command_mode_read_, &power_state);
+  this->send_command(command);
+
+  command = DataFrame{};
+  write_set_parameter_mode(&command, this->remote_address_, this->master_address_, this->command_mode_read_, &last_state);
+  this->send_command(command);
+
+  command = DataFrame{};
+  write_set_parameter_flags(&command, this->remote_address_, this->master_address_, this->command_mode_read_, &last_state,
+                            COMMAND_SET_TEMP | COMMAND_SET_FAN, this->is_hm_variant());
+  this->send_command(command);
+
+  command = DataFrame{};
+  write_set_parameter_vent(&command, this->remote_address_, this->master_address_, this->command_mode_read_, &last_state);
   this->send_command(command);
 }
 
