@@ -19,6 +19,7 @@ from esphome.const import (
     CONF_UART_ID,
     DEVICE_CLASS_CONNECTIVITY,
     DEVICE_CLASS_DURATION,
+    DEVICE_CLASS_PROBLEM,
     DEVICE_CLASS_TEMPERATURE,
     ENTITY_CATEGORY_DIAGNOSTIC,
     STATE_CLASS_MEASUREMENT,
@@ -268,6 +269,7 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
         cv.Optional(CONF_HOTWATER_PUMP_HEATING): binary_sensor.binary_sensor_schema(),
         cv.Optional(CONF_HOTWATER_RESISTOR_HEATING): binary_sensor.binary_sensor_schema(),
         cv.Optional(CONF_REMOTE_ERROR): binary_sensor.binary_sensor_schema(
+            device_class=DEVICE_CLASS_PROBLEM,
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
         ),
         cv.Optional(CONF_FAILED_CRCS): sensor.sensor_schema(
