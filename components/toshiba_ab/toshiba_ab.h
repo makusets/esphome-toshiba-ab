@@ -1001,6 +1001,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void sync_from_received_state();
   void autoreset_remote_error_();
   void estia_first_gen_reset_remote_error_();
+  bool begin_remote_error_autoreset_();
+  void update_remote_error_(bool active);
   bool is_own_tx_echo_(const DataFrame *f) const; //used to filter echo after sending frame
   void remember_tx_frame_for_echo_(const uint8_t *bytes, size_t size, bool tu2c);
   void update_frame_validation_();
@@ -1043,6 +1045,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   binary_sensor::BinarySensor *hotwater_pump_heating_binary_sensor_{nullptr};
   binary_sensor::BinarySensor *hotwater_resistor_heating_binary_sensor_{nullptr};
   binary_sensor::BinarySensor *remote_error_binary_sensor_{nullptr};
+  bool remote_error_active_{false};
+  uint8_t remote_error_autoreset_attempts_{0};
+  bool remote_error_autoreset_give_up_logged_{false};
 
   // rx handler for 0x1A (sensor) replies (called from process_received_data)
   void process_sensor_value_(const DataFrame *frame);

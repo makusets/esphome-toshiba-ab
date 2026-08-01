@@ -1516,7 +1516,24 @@ void ToshibaAbClimate::sync_from_received_state() {
   }
 }
 
+bool ToshibaAbClimate::begin_remote_error_autoreset_() {
+  static constexpr uint8_t MAX_REMOTE_ERROR_AUTORESET_ATTEMPTS = 10;
+  if (this->remote_error_autoreset_attempts_ >= MAX_REMOTE_ERROR_AUTORESET_ATTEMPTS) {
+    if (!this->remote_error_autoreset_give_up_logged_) {
+      ESP_LOGW(TAG, "Autoreset errors: error remains after %u attempts; giving up",
+               MAX_REMOTE_ERROR_AUTORESET_ATTEMPTS);
+      this->remote_error_autoreset_give_up_logged_ = true;
+    }
+    return false;
+  }
+  this->remote_error_autoreset_attempts_++;
+  ESP_LOGI(TAG, "Autoreset errors: attempt %u/%u", this->remote_error_autoreset_attempts_,
+           MAX_REMOTE_ERROR_AUTORESET_ATTEMPTS);
+  return true;
+}
+
 void ToshibaAbClimate::autoreset_remote_error_() {
+  if (!this->begin_remote_error_autoreset_()) return;
   auto command = DataFrame{};
   if (this->data_reader.frame_format() == FrameFormat::TU2C) {
     ESP_LOGI(TAG, "Autoreset errors: resending current mode/fan/target temperature");
@@ -1554,6 +1571,16 @@ void ToshibaAbClimate::autoreset_remote_error_() {
   command = DataFrame{};
   write_set_parameter_vent(&command, this->remote_address_, this->master_address_, this->command_mode_read_, &last_state);
   this->send_command(command);
+}
+
+void ToshibaAbClimate::update_remote_error_(bool active) {
+  if (this->remote_error_active_ == active) return;
+  this->remote_error_active_ = active;
+  if (this->remote_error_binary_sensor_) this->remote_error_binary_sensor_->publish_state(active);
+  if (!active) {
+    this->remote_error_autoreset_attempts_ = 0;
+    this->remote_error_autoreset_give_up_logged_ = false;
+  }
 }
 
 void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
@@ -1729,6 +1756,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         // tcc_state.room_temp = rmt; we don't update the state here, we wait for the next status update from master
         log_data_frame("Remote temperature", frame);
         ESP_LOGD(TAG, "Toshiba Wall Remote reports: %.1f °C", rmt);
+        this->update_remote_error_(false);
         // sync_from_received_state(); we don't update the state, we wait for the next status update from master
         // remote temperature is sent regardless of DN32 setting, ac decides wether to use it or ignore it
         
@@ -1738,6 +1766,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
                  frame->data_length == 2 &&
                  frame->data[1] == 0x49) {
         log_data_frame("Remote error report", frame);
+        this->update_remote_error_(true);
         if (this->autoreset_errors_) {
           this->autoreset_remote_error_();
         } else {
@@ -3328,6 +3357,7 @@ void ToshibaAbClimate::send_estia_first_gen_request_data(uint8_t request_code) {
 }
 
 void ToshibaAbClimate::estia_first_gen_reset_remote_error_() {
+  if (!this->begin_remote_error_autoreset_()) return;
   ESP_LOGI(TAG, "Estia first-gen remote error reset: resending last known DHW state (%s)",
            this->estia_first_gen_dhw_active_ ? "on" : "off");
   if (this->estia_first_gen_dhw_active_) {
@@ -3430,11 +3460,11 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
   }
   if (is_remote_source && frame->raw[3] == 0xE0 && frame->raw[5] == 0x31) {
     if (frame->raw[6] == 0x00) {
-      if (this->remote_error_binary_sensor_) this->remote_error_binary_sensor_->publish_state(false);
+      this->update_remote_error_(false);
     } else {
       ESP_LOGW(TAG, "Estia first-gen remote status error: 0x%02X", frame->raw[6]);
-      if (this->remote_error_binary_sensor_) this->remote_error_binary_sensor_->publish_state(true);
       if (frame->raw[6] == 0x49) {
+        this->update_remote_error_(true);
         if (this->autoreset_errors_) {
           this->estia_first_gen_reset_remote_error_();
         } else {
