@@ -113,6 +113,12 @@ uint8_t get_fan_bit_mask_for_mode(uint8_t mode) {
   return 0;
 }
 
+uint8_t encode_tu2c_fan(uint8_t fan) {
+  // TU2C uses bits 1-3 for the fan speed and keeps bit 5 set in every
+  // climate mode. This differs from the encoding used by TCC-Link and Estia.
+  return static_cast<uint8_t>((fan << 1) | 0b00100000);
+}
+
 // Byte 4 of a TU2C frame (after LEN:SRC:DST) is a constant 0xC0
 static constexpr uint8_t TU2C_FRAME_MARKER = 0xC0;
 
@@ -586,7 +592,7 @@ void write_set_parameter_flags_tu2c(struct DataFrame *command, uint8_t remote_ad
   command->raw[4] = tu2c_header_marker_msb;
   command->raw[5] = tu2c_header_marker_lsb;
   command->raw[6] = static_cast<uint8_t>(state->mode | set_flags);
-  command->raw[7] = static_cast<uint8_t>(state->fan | get_fan_bit_mask_for_mode(state->mode));
+  command->raw[7] = encode_tu2c_fan(state->fan);
   command->raw[8] = temp_celcius_to_payload(state->target_temp);
   command->raw[9] = EMPTY_DATA;
   command->raw[10] = get_heat_cool_bits(state->mode);
