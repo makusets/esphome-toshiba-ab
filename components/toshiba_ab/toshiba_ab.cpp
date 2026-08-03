@@ -1616,13 +1616,19 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         log_data_frame("ACK", frame);
         this->handle_pending_command_ack_(frame);
 
-        // Check for announce ACK pattern: 6th raw byte == 0x0D (index 5)
-        // When this is received after boot, the remote can stop announcing itself
+        // Check for an announce ACK addressed to this remote: 6th raw byte == 0x0D (index 5).
+        // When this is received after boot, the remote can stop announcing itself.
         // The full raw frame may be longer; guard on size()
         if (frame->size() > 5 && frame->raw[5] == 0x0D) {
-          this->announce_ack_received_ = true;
-          this->update_frame_validation_();
-          ESP_LOGI(TAG, "Received announce ACK (0x0D) from 0x%02X, stopping announce", frame->source);
+          if (frame->dest != this->remote_address_) {
+            ESP_LOGI(TAG, "Ignoring announce ACK (0x0D) from 0x%02X addressed to remote 0x%02X; this remote is "
+                          "0x%02X",
+                     frame->source, frame->dest, this->remote_address_);
+          } else {
+            this->announce_ack_received_ = true;
+            this->update_frame_validation_();
+            ESP_LOGI(TAG, "Received announce ACK (0x0D) from 0x%02X, stopping announce", frame->source);
+          }
         }
         break;
       }
@@ -1851,11 +1857,15 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
     // Auto-detect master address from master parameters frame
       if (this->master_address_auto_) {
       // First, check for announce ACK pattern from an unknown source: if the
-      // raw frame contains 0x0D at byte index 5, treat that source as the new
-      // master.
+      // raw frame contains 0x0D at byte index 5 and is addressed to this remote,
+      // treat that source as the new master.
       if (frame->size() > 5 && frame->raw[5] == 0x0D) {
-        // Only act on announce ACK if we haven't already seen one
-        if (!this->announce_ack_received_) {
+        // Only act on an addressed announce ACK if we haven't already seen one.
+        if (frame->dest != this->remote_address_) {
+          ESP_LOGI(TAG, "Ignoring announce ACK (0x0D) from 0x%02X addressed to remote 0x%02X; this remote is "
+                        "0x%02X",
+                   frame->source, frame->dest, this->remote_address_);
+        } else if (!this->announce_ack_received_) {
           ESP_LOGI(TAG, "Auto-detected master address from announce ACK: 0x%02X, updating master address", frame->source);
           this->master_address_ = frame->source;
           // Mark that we've received the announce ACK so we don't repeatedly auto-update
