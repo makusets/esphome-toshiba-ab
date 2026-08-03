@@ -1265,6 +1265,8 @@ void ToshibaAbClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "  Polled sensors configured: %zu", this->polled_sensors_.size());
   ESP_LOGCONFIG(TAG, "  Connected sensor: %s", this->connected_binary_sensor_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Failed CRCs sensor: %s", this->failed_crcs_sensor_ ? "yes" : "no");
+  LOG_SENSOR("  ", "Noise Rate", this->noise_rate_sensor_);
+  LOG_SENSOR("  ", "CRC Failure Rate", this->crc_failures_5min_sensor_);
   ESP_LOGCONFIG(TAG, "  Reader diagnostics: enabled (30s updates)");
   ESP_LOGCONFIG(TAG, "  Filter alert sensor: %s", this->filter_alert_sensor_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Vent switch: %s", this->vent_switch_ ? "yes" : "no");
