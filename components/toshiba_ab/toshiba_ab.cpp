@@ -1344,8 +1344,9 @@ void ToshibaAbClimate::setup() {
   }
 #endif
 
-  // If autonomous mode is enabled, we need to send ping, E8 read, and external temp periodically
-  // Send all these if autonomous mode is enabled using set_interval calls
+  // Autonomous mode additionally needs registration and temperature reporting.
+  // Keep-alive and E8 polling are configured separately below because a wall
+  // remote also sends them when the component is not autonomous.
   if (this->autonomous_) {
     if (this->data_reader.frame_format() == FrameFormat::A0) {
       // Estia polling is handled in loop() so it respects runtime autonomous_ toggle
@@ -1359,6 +1360,9 @@ void ToshibaAbClimate::setup() {
       });
 
       this->set_interval(this->ping_interval_ms_, [this]() {
+        if (!this->ping_enabled_) {
+          return;
+        }
         if (this->announce_ack_received_) {
           ESP_LOGV(TAG, "Autonomous TU2C: sending keepalive");
           this->tu2c_send_ping();
@@ -1366,10 +1370,6 @@ void ToshibaAbClimate::setup() {
       });
     } else {
       this->set_interval(this->ping_interval_ms_, [this]() { //30s
-        // Ping (keep-alive) from remote
-        this->send_ping();  // just enqueues; loop() will transmit
-        ESP_LOGV(TAG, "Autonomous: enqueued PING (keep-alive)");
-
         float t = NAN;
         if (this->ext_temp_sensor_ && this->ext_temp_sensor_->has_state()) {
           t = this->ext_temp_sensor_->state;
@@ -1397,11 +1397,6 @@ void ToshibaAbClimate::setup() {
           ESP_LOGV(TAG, "Autonomous: remote temperature frame enqueued (dest=0x%02X)", this->master_address_);
         }
       });
-      this->set_interval(this->read08_interval_ms, [this]() {
-        ESP_LOGV(TAG, "Autonomous: enqueuing read hourly counter block E8");
-        this->send_read_block(0xE8, 0x0001, 0x009E);
-      });
-
       this->announce_ack_received_ = false;
       this->set_interval(2000, [this]() {
         if (!this->announce_ack_received_) {
@@ -1410,21 +1405,37 @@ void ToshibaAbClimate::setup() {
         }
       });
     }
-  } else if (this->ping_enabled_) {
+  }
+
+  // Mimic the wall remote's periodic traffic in both operating modes. The
+  // single YAML ping option controls both periodic frames.
+  if (this->ping_enabled_) {
     this->set_interval(this->ping_interval_ms_, [this]() {
       if (this->data_reader.frame_format() != FrameFormat::NORMAL) {
         return;
       }
-      if (!this->remote_address_confirmed_) {
+      if (!this->autonomous_ && !this->remote_address_confirmed_) {
         ESP_LOGV(TAG, "Ping skipped: remote address is not confirmed yet");
         return;
       }
-      if (!this->master_address_confirmed_) {
+      if (!this->autonomous_ && !this->master_address_confirmed_) {
         ESP_LOGV(TAG, "Ping skipped: master address is not confirmed yet");
         return;
       }
       this->send_ping();
       ESP_LOGV(TAG, "Enqueued remote PING (keep-alive)");
+    });
+
+    this->set_interval(this->read08_interval_ms, [this]() {
+      if (this->data_reader.frame_format() != FrameFormat::NORMAL) {
+        return;
+      }
+      if (!this->autonomous_ && (!this->remote_address_confirmed_ || !this->master_address_confirmed_)) {
+        ESP_LOGV(TAG, "E8 read skipped: remote or master address is not confirmed yet");
+        return;
+      }
+      ESP_LOGV(TAG, "Enqueuing read hourly counter block E8");
+      this->send_read_block(0xE8, 0x0001, 0x009E);
     });
   }
 
