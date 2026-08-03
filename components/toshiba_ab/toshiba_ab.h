@@ -325,8 +325,12 @@ struct DataFrameReader {
   uint8_t normal_replay_count_{0};
   uint32_t estia_last_byte_ms_{0};
   static const uint32_t ESTIA_BYTE_TIMEOUT_MS = 20;  // inter-byte timeout: ~4 byte-times at 2400 baud
+  uint32_t reset_count_{0};
 
-  void reset() {
+  // Clear reader state. Successful frame completion and configuration changes
+  // pass false so only recovery/error resets contribute to the diagnostic rate.
+  void reset(bool count_as_error) {
+    if (count_as_error) count_reset();
     reset_frame_state_();
     tu2c_      = false;
     prefix_match_ = 0;
@@ -367,10 +371,7 @@ struct DataFrameReader {
       if (estia_ && (millis() - estia_last_byte_ms_) > ESTIA_BYTE_TIMEOUT_MS) {
         ESP_LOGV("READER", "Estia inter-byte timeout after %ums gap (%u/%u bytes); resync",
                  (unsigned)(millis() - estia_last_byte_ms_), data_index_, estia_expected_total_);
-        estia_ = false;
-        data_index_ = 0;
-        estia_expected_total_ = 0;
-        prefix_match_ = 0;
+        reset(true);
         // Don't return — process this byte as potential new frame start below
       }
       // Wait for A0 prefix
@@ -402,7 +403,7 @@ struct DataFrameReader {
           frame.raw[data_index_] = byte;
         } else {
           ESP_LOGV("READER", "Estia frame buffer overflow; resetting");
-          reset();
+          reset(true);
           return false;
         }
 
@@ -412,7 +413,7 @@ struct DataFrameReader {
           frame.set_estia_len(byte);  // store outside union so raw[3] won't clobber it
           if (estia_expected_total_ < 6 || estia_expected_total_ > DATA_FRAME_MAX_SIZE) {
             ESP_LOGV("READER", "Invalid Estia length 0x%02X; resetting", byte);
-            reset();
+            reset(true);
             return false;
           }
         }
@@ -473,7 +474,7 @@ struct DataFrameReader {
         tu2c_len_pending_ = false;
         if (tu2c_expected_total_ < 1 || (tu2c_expected_total_ - 1) > DATA_FRAME_MAX_SIZE) {
           ESP_LOGV("READER", "Invalid TU2C length 0x%02X; resetting reader", current_byte);
-          reset();
+          reset(true);
           return false;
         }
         frame.raw[data_index_] = current_byte;
@@ -487,7 +488,7 @@ struct DataFrameReader {
         if (current_byte != 0xA0) {
           ESP_LOGV("READER", "TU2C frame ended without 0xA0 (seen=%u expected=%u); resetting",
                    tu2c_bytes_seen_, tu2c_expected_total_);
-          reset();
+          reset(true);
           return false;
         }
         // Do not assign frame.data_length for TU2C/first-generation Estia frames:
@@ -507,7 +508,7 @@ struct DataFrameReader {
 
       if (tu2c_expected_total_ > 0 && tu2c_bytes_seen_ > tu2c_expected_total_) {
         ESP_LOGV("READER", "TU2C frame exceeded expected length; resetting");
-        reset();
+        reset(true);
         return false;
       }
     }
@@ -515,6 +516,7 @@ struct DataFrameReader {
     // Optionally filter obvious invalid source values at frame start.
     if (!use_tu2c && data_index_ == 0 && filter_frames_ && current_byte > 0xA0) {
       ESP_LOGV("READER", "Ignoring packet with out-of-range source: 0x%02X", current_byte);
+      reset(true);
       return false;
     }
     if (frame_format_ == FrameFormat::NORMAL && handle_normal_restart_candidates_(current_byte)) {
@@ -549,7 +551,7 @@ struct DataFrameReader {
       if (!allow_same_source_dest_ && frame.raw[0] == frame.raw[1]) {
           ESP_LOGV("READER", "Ignoring packet where source == dest: 0x%02X", frame.raw[0]);
           // reset reader state so next byte is treated as new frame start
-          reset();
+          reset(true);
           return false;
       }
     }
@@ -560,7 +562,7 @@ struct DataFrameReader {
       if (!frame.validate_bounds()) {    // early length sanity check
         ESP_LOGV("READER", "Invalid length 0x%02X; resetting reader", frame.data_length);
         // Resync
-        reset();
+        reset(true);
         return false;
       }
       expected_total_ = DATA_OFFSET_FROM_START + frame.data_length + 1;  // 4 + len + crc
@@ -617,7 +619,7 @@ struct DataFrameReader {
     // Guard against runaway input
     if (data_index_ == DATA_FRAME_MAX_SIZE) {
       ESP_LOGW("READER", "Went over buffer; resetting");
-      reset();
+      reset(true);
     }
 
     return false;
@@ -653,9 +655,15 @@ struct DataFrameReader {
   void set_allow_same_source_dest(bool allow_same) { allow_same_source_dest_ = allow_same; }
   void set_frame_format(FrameFormat format) {
     frame_format_ = format;
-    reset();
+    reset(false);
   }
   FrameFormat frame_format() const { return frame_format_; }
+  void count_reset() { reset_count_++; }
+  uint32_t consume_reset_count() {
+    const uint32_t count = reset_count_;
+    reset_count_ = 0;
+    return count;
+  }
 
 private:
   void reset_normal_restart_state_() {
@@ -736,6 +744,7 @@ private:
                  static_cast<unsigned>(candidate.marker_index + 1), candidate.header[0], candidate.header[1],
                  candidate.header[2]);
         const std::array<uint8_t, 4> restarted_header = candidate.follow;
+        count_reset();
         reset_frame_state_();
         frame.raw[0] = restarted_header[0];
         frame.raw[1] = restarted_header[1];
@@ -745,7 +754,7 @@ private:
         data_index_ = 4;
         if (!frame.validate_bounds()) {
           ESP_LOGV("READER", "Invalid restarted frame length 0x%02X; resetting reader", frame.data_length);
-          reset();
+          reset(true);
         } else {
           expected_total_ = DATA_OFFSET_FROM_START + frame.data_length + 1;
         }
@@ -913,6 +922,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_antibacteria_switch(switch_::Switch *antibacteria_switch) { antibacteria_switch_ = antibacteria_switch; }
 
   void set_failed_crcs_sensor(sensor::Sensor *failed_crcs_sensor) { this->failed_crcs_sensor_ = failed_crcs_sensor; }
+  void set_reader_reset_rate_sensor(sensor::Sensor *sensor) { this->reader_reset_rate_sensor_ = sensor; }
+  void set_crc_failures_5min_sensor(sensor::Sensor *sensor) { this->crc_failures_5min_sensor_ = sensor; }
 
   void send_command(struct DataFrame command);
   bool send_raw_frame_from_text(const std::string &frame_text);
@@ -1006,6 +1017,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool is_own_tx_echo_(const DataFrame *f) const; //used to filter echo after sending frame
   void remember_tx_frame_for_echo_(const uint8_t *bytes, size_t size, bool tu2c);
   void update_frame_validation_();
+  void record_crc_failure_();
+  void publish_reader_diagnostics_();
   bool has_bus_quiet_time_elapsed_(uint32_t now) const;
   bool has_tu2c_quiet_time_elapsed_(uint32_t now) const;
   bool should_auto_detect_frame_format_() const { return frame_format_auto_ && !frame_format_confirmed_; }
@@ -1030,6 +1043,13 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   switch_::Switch *dhw_boost_switch_{nullptr};
   switch_::Switch *antibacteria_switch_{nullptr};
   sensor::Sensor *failed_crcs_sensor_{nullptr};
+  sensor::Sensor *reader_reset_rate_sensor_{nullptr};
+  sensor::Sensor *crc_failures_5min_sensor_{nullptr};
+  uint32_t crc_failure_count_{0};
+  uint32_t last_diagnostics_publish_ms_{0};
+  static const uint8_t CRC_HISTORY_SIZE = 10;
+  std::array<uint32_t, CRC_HISTORY_SIZE> crc_history_counts_{{0}};
+  uint8_t crc_history_next_{0};
 
   sensor::Sensor *current_sensor_{nullptr}; // Sensor for current, x10 A
 
