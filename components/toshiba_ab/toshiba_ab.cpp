@@ -1265,6 +1265,7 @@ void ToshibaAbClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "  Polled sensors configured: %zu", this->polled_sensors_.size());
   ESP_LOGCONFIG(TAG, "  Connected sensor: %s", this->connected_binary_sensor_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Failed CRCs sensor: %s", this->failed_crcs_sensor_ ? "yes" : "no");
+  ESP_LOGCONFIG(TAG, "  Reader diagnostics: enabled (30s updates)");
   ESP_LOGCONFIG(TAG, "  Filter alert sensor: %s", this->filter_alert_sensor_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Vent switch: %s", this->vent_switch_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Read-only switch: %s", this->read_only_switch_ ? "yes" : "no");
@@ -1274,6 +1275,9 @@ void ToshibaAbClimate::setup() {
   if (this->failed_crcs_sensor_ != nullptr) {
     this->failed_crcs_sensor_->publish_state(0);
   }
+  this->last_diagnostics_publish_ms_ = millis();
+  if (this->noise_rate_sensor_ != nullptr) this->noise_rate_sensor_->publish_state(0);
+  if (this->crc_failures_5min_sensor_ != nullptr) this->crc_failures_5min_sensor_->publish_state(0);
   ESP_LOGD("toshiba", "Setting up ToshibaClimate...");
 
   // Restore last-known mode/target_temp/fan_mode from preferences so we never
@@ -2036,9 +2040,7 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
           ESP_LOGD(TAG, "  dtype=%02X:%02X", frame->raw[7], frame->raw[8]);
         }
       }
-      if (this->failed_crcs_sensor_ != nullptr) {
-        this->failed_crcs_sensor_->publish_state(this->failed_crcs_sensor_->state + 1);
-      }
+      this->record_crc_failure_();
       return false;
     }
     uint8_t frame_type = frame->raw[0];
@@ -2418,6 +2420,16 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
 
     return true;
   }
+  // Wrapped TU2C and first-generation Estia frames both carry an additive
+  // checksum as the final byte before the (already stripped) A0 delimiter.
+  if (frame->is_tu2c()) {
+    const size_t size = frame->size();
+    if (size < 2 || frame->raw[size - 1] != calculate_tu2c_crc(frame->raw, size - 1)) {
+      ESP_LOGW(TAG, "TU2C checksum failed");
+      this->record_crc_failure_();
+      return false;
+    }
+  }
   DataFrame auto_detected_frame{};
   if (this->should_auto_detect_frame_format_() && this->is_hm_wire_frame_from_master_(frame)) {
     auto_detected_frame = *frame;
@@ -2427,14 +2439,12 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
   }
 
   if (!frame->is_tu2c() && frame->crc() != frame->calculate_crc()) {
-    if (this->failed_crcs_sensor_ != nullptr) {
-      this->failed_crcs_sensor_->publish_state(this->failed_crcs_sensor_->state + 1);
-    }
     // Classic TCC-Link: the XOR CRC is the unit's actual algorithm, so a
     // mismatch means the frame is corrupt — drop it. The HM variant uses
     // a different (still-undecoded) CRC algorithm, so every frame fails
     // the XOR check by design; tolerate the mismatch and process anyway.
     if (!this->is_hm_variant()) {
+      this->record_crc_failure_();
       ESP_LOGW(TAG, "CRC check failed");
       log_data_frame("Failed frame", frame);
       return false;
@@ -2463,7 +2473,38 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
 }
 
 
+void ToshibaAbClimate::record_crc_failure_() {
+  this->crc_failure_count_++;
+  if (this->failed_crcs_sensor_ != nullptr) {
+    this->failed_crcs_sensor_->publish_state(this->failed_crcs_sensor_->state + 1);
+  }
+}
+
+void ToshibaAbClimate::publish_reader_diagnostics_() {
+  const uint32_t now = millis();
+  const uint32_t elapsed_ms = now - this->last_diagnostics_publish_ms_;
+  this->last_diagnostics_publish_ms_ = now;
+  const uint32_t noise_errors = this->data_reader.consume_reset_count();
+
+  if (this->noise_rate_sensor_ != nullptr) {
+    this->noise_rate_sensor_->publish_state(elapsed_ms == 0 ? 0.0f : noise_errors * 60000.0f / elapsed_ms);
+  }
+
+  this->crc_history_counts_[this->crc_history_next_] = this->crc_failure_count_;
+  this->crc_failure_count_ = 0;
+  this->crc_history_next_ = (this->crc_history_next_ + 1) % CRC_HISTORY_SIZE;
+
+  uint32_t failures_5min = 0;
+  for (const uint32_t count : this->crc_history_counts_) {
+    failures_5min += count;
+  }
+  if (this->crc_failures_5min_sensor_ != nullptr) {
+    this->crc_failures_5min_sensor_->publish_state(failures_5min);
+  }
+}
+
 void ToshibaAbClimate::loop() {
+  if (millis() - this->last_diagnostics_publish_ms_ >= 30000) this->publish_reader_diagnostics_();
   // TODO: check if last_unconfirmed_command_ was not confirmed after a timeout
   // and log warning/error
 
@@ -2710,7 +2751,7 @@ void ToshibaAbClimate::loop() {
         if (!receive_data_frame(&frame)) {
         }
 
-        data_reader.reset();
+        data_reader.reset(false);
 
         // read next packet (if any in the next loop)
         // the smallest packet (ALIVE) is 32ms wide,
@@ -2752,7 +2793,8 @@ void ToshibaAbClimate::loop() {
           // data_reader.frame.raw, data_reader.data_index_);
         }
         can_read_packet = true;
-        data_reader.reset();
+        const bool incomplete_frame = !data_reader.complete && data_reader.data_index_ > 0;
+        data_reader.reset(incomplete_frame);
         last_read_millis_ = 0;
       }
     }

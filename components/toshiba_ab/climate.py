@@ -39,6 +39,8 @@ CONF_CONNECTED = "connected"
 CONF_VENT = "vent"
 CONF_READ_ONLY_SWITCH = "read_only_switch"
 CONF_FAILED_CRCS = "failed_crcs"
+CONF_NOISE_RATE = "noise_rate"
+CONF_CRC_FAILURES_5MIN = "crc_failures_5min"
 
 CONF_ON_DATA_RECEIVED = "on_data_received"
 CONF_MASTER = "master"
@@ -277,6 +279,20 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
+        # Reader health entities are created for every component instance so
+        # users do not need to opt in from YAML.
+        cv.Optional(CONF_NOISE_RATE, default={"name": "Toshiba Noise Rate"}): sensor.sensor_schema(
+            unit_of_measurement="errors/min",
+            accuracy_decimals=2,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_CRC_FAILURES_5MIN, default={"name": "Toshiba CRC Failures (5 min)"}): sensor.sensor_schema(
+            unit_of_measurement="failures/5min",
+            accuracy_decimals=0,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
         cv.Optional(CONF_ON_DATA_RECEIVED): automation.validate_automation(
             {
                cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(ToshibaAbOnDataReceivedTrigger),
@@ -433,6 +449,11 @@ async def to_code(config):
     if CONF_FAILED_CRCS in config:
         sens = await sensor.new_sensor(config[CONF_FAILED_CRCS])
         cg.add(var.set_failed_crcs_sensor(sens))
+
+    noise_rate = await sensor.new_sensor(config[CONF_NOISE_RATE])
+    cg.add(var.set_noise_rate_sensor(noise_rate))
+    crc_rate = await sensor.new_sensor(config[CONF_CRC_FAILURES_5MIN])
+    cg.add(var.set_crc_failures_5min_sensor(crc_rate))
 
     if CONF_VENT in config:
         sw = await switch.new_switch(config[CONF_VENT], var)
