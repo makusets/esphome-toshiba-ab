@@ -703,9 +703,9 @@ void write_read_envelope(DataFrame *cmd, uint8_t remote_address, uint8_t master_
 
 
 // Sends room temp to AC unit with the sensor configured in yaml.
-// Uses a dedicated source address offset from the runtime remote id
-// (remote+1, capped at 0x49) to avoid colliding with normal remote traffic.
-// Example: if remote id is 0x41, this frame source becomes 0x42.
+// Address 0x42 is reserved by Toshiba for an external room-temperature sensor.
+// Keep it independent of the runtime wall-remote address so collision-driven
+// remote address changes cannot move temperature reports to another address.
 void ToshibaAbClimate::send_remote_temp(float temp_c) {
   // sanity
   if (!std::isfinite(temp_c) || temp_c < -40.0f || temp_c > 80.0f) {
@@ -717,11 +717,8 @@ void ToshibaAbClimate::send_remote_temp(float temp_c) {
   const uint8_t raw = static_cast<uint8_t>(
       std::lround((temp_c + TEMPERATURE_CONVERSION_OFFSET) * TEMPERATURE_CONVERSION_RATIO));
   const float rounded_temp_c = static_cast<float>(raw) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
-  const uint8_t temp_source = std::min<uint8_t>(this->remote_address_ + 1, TOSHIBA_REMOTE_MAX);
-
-
   DataFrame cmd{};
-  cmd.source      = temp_source;
+  cmd.source      = TOSHIBA_TEMP_SENSOR;
   cmd.dest        = this->master_address_;  // usually 0x00
   cmd.opcode1     = OPCODE_PARAMETER;       // 0x11
   cmd.data_length = 4;                       // payload: 08 89 <raw> 46
@@ -1746,12 +1743,17 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
     if (is_remote_source) {
       // In remote auto-address mode we start at 0x40 and avoid collisions with
       // existing remotes on the bus. If any remote frame arrives using our
-      // current address, shift to the next address up to 0x49.
+      // current address, shift to the next address up to 0x49, skipping 0x42
+      // because it is reserved for external room-temperature reports.
       if (this->remote_address_auto_ &&
           frame->source == this->remote_address_ &&
           this->remote_address_ < TOSHIBA_REMOTE_MAX) {
         const uint8_t old = this->remote_address_;
-        this->remote_address_++;
+        uint8_t next = this->remote_address_ + 1;
+        if (next == TOSHIBA_TEMP_SENSOR) {
+          next++;
+        }
+        this->remote_address_ = std::min(next, TOSHIBA_REMOTE_MAX);
         this->remote_address_confirmed_ = true;
         ESP_LOGI(TAG, "Remote auto-address collision detected at 0x%02X; switching to confirmed address 0x%02X",
                  old, this->remote_address_);
