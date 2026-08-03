@@ -744,7 +744,6 @@ private:
                  static_cast<unsigned>(candidate.marker_index + 1), candidate.header[0], candidate.header[1],
                  candidate.header[2]);
         const std::array<uint8_t, 4> restarted_header = candidate.follow;
-        count_reset();
         reset_frame_state_();
         frame.raw[0] = restarted_header[0];
         frame.raw[1] = restarted_header[1];
@@ -922,7 +921,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_antibacteria_switch(switch_::Switch *antibacteria_switch) { antibacteria_switch_ = antibacteria_switch; }
 
   void set_failed_crcs_sensor(sensor::Sensor *failed_crcs_sensor) { this->failed_crcs_sensor_ = failed_crcs_sensor; }
-  void set_reader_reset_rate_sensor(sensor::Sensor *sensor) { this->reader_reset_rate_sensor_ = sensor; }
+  void set_noise_rate_sensor(sensor::Sensor *sensor) { this->noise_rate_sensor_ = sensor; }
   void set_crc_failures_5min_sensor(sensor::Sensor *sensor) { this->crc_failures_5min_sensor_ = sensor; }
 
   void send_command(struct DataFrame command);
@@ -1043,7 +1042,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   switch_::Switch *dhw_boost_switch_{nullptr};
   switch_::Switch *antibacteria_switch_{nullptr};
   sensor::Sensor *failed_crcs_sensor_{nullptr};
-  sensor::Sensor *reader_reset_rate_sensor_{nullptr};
+  sensor::Sensor *noise_rate_sensor_{nullptr};
   sensor::Sensor *crc_failures_5min_sensor_{nullptr};
   uint32_t crc_failure_count_{0};
   uint32_t last_diagnostics_publish_ms_{0};

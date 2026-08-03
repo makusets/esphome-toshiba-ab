@@ -1276,7 +1276,7 @@ void ToshibaAbClimate::setup() {
     this->failed_crcs_sensor_->publish_state(0);
   }
   this->last_diagnostics_publish_ms_ = millis();
-  if (this->reader_reset_rate_sensor_ != nullptr) this->reader_reset_rate_sensor_->publish_state(0);
+  if (this->noise_rate_sensor_ != nullptr) this->noise_rate_sensor_->publish_state(0);
   if (this->crc_failures_5min_sensor_ != nullptr) this->crc_failures_5min_sensor_->publish_state(0);
   ESP_LOGD("toshiba", "Setting up ToshibaClimate...");
 
@@ -2484,10 +2484,10 @@ void ToshibaAbClimate::publish_reader_diagnostics_() {
   const uint32_t now = millis();
   const uint32_t elapsed_ms = now - this->last_diagnostics_publish_ms_;
   this->last_diagnostics_publish_ms_ = now;
-  const uint32_t resets = this->data_reader.consume_reset_count();
+  const uint32_t noise_errors = this->data_reader.consume_reset_count();
 
-  if (this->reader_reset_rate_sensor_ != nullptr) {
-    this->reader_reset_rate_sensor_->publish_state(elapsed_ms == 0 ? 0.0f : resets * 60000.0f / elapsed_ms);
+  if (this->noise_rate_sensor_ != nullptr) {
+    this->noise_rate_sensor_->publish_state(elapsed_ms == 0 ? 0.0f : noise_errors * 60000.0f / elapsed_ms);
   }
 
   this->crc_history_counts_[this->crc_history_next_] = this->crc_failure_count_;

@@ -39,7 +39,7 @@ CONF_CONNECTED = "connected"
 CONF_VENT = "vent"
 CONF_READ_ONLY_SWITCH = "read_only_switch"
 CONF_FAILED_CRCS = "failed_crcs"
-CONF_READER_RESET_RATE = "reader_reset_rate"
+CONF_NOISE_RATE = "noise_rate"
 CONF_CRC_FAILURES_5MIN = "crc_failures_5min"
 
 CONF_ON_DATA_RECEIVED = "on_data_received"
@@ -281,8 +281,8 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
         ),
         # Reader health entities are created for every component instance so
         # users do not need to opt in from YAML.
-        cv.Optional(CONF_READER_RESET_RATE, default={"name": "Toshiba Reader Reset Rate"}): sensor.sensor_schema(
-            unit_of_measurement="resets/min",
+        cv.Optional(CONF_NOISE_RATE, default={"name": "Toshiba Noise Rate"}): sensor.sensor_schema(
+            unit_of_measurement="errors/min",
             accuracy_decimals=2,
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             state_class=STATE_CLASS_MEASUREMENT,
@@ -450,8 +450,8 @@ async def to_code(config):
         sens = await sensor.new_sensor(config[CONF_FAILED_CRCS])
         cg.add(var.set_failed_crcs_sensor(sens))
 
-    reset_rate = await sensor.new_sensor(config[CONF_READER_RESET_RATE])
-    cg.add(var.set_reader_reset_rate_sensor(reset_rate))
+    noise_rate = await sensor.new_sensor(config[CONF_NOISE_RATE])
+    cg.add(var.set_noise_rate_sensor(noise_rate))
     crc_rate = await sensor.new_sensor(config[CONF_CRC_FAILURES_5MIN])
     cg.add(var.set_crc_failures_5min_sensor(crc_rate))
 
