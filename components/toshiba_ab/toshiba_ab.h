@@ -20,6 +20,7 @@ const uint32_t LAST_ALIVE_TIMEOUT_MILLIS = ALIVE_MESSAGE_PERIOD_MILLIS * 3 +1000
 const uint32_t PACKET_MIN_WAIT_MILLIS = 200;
 const uint32_t FRAME_SEND_MILLIS_FROM_LAST_RECEIVE = 500;
 const uint32_t FRAME_SEND_MILLIS_FROM_LAST_SEND = 500;
+const uint32_t INITIAL_FRAME_SEND_BLOCK_MILLIS = 30000;
 
 // const uint8_t TOSHIBA_MASTER = 0x00;  replaced by master_address_ which is set up in yaml
 const uint8_t TOSHIBA_MASTER_DEFAULT = 0x00;
@@ -1018,6 +1019,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void update_frame_validation_();
   void record_crc_failure_();
   void publish_reader_diagnostics_();
+  bool is_initial_frame_send_block_active_(uint32_t now) const;
   bool has_bus_quiet_time_elapsed_(uint32_t now) const;
   bool has_tu2c_quiet_time_elapsed_(uint32_t now) const;
   bool should_auto_detect_frame_format_() const { return frame_format_auto_ && !frame_format_confirmed_; }
@@ -1142,6 +1144,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
 
   uint32_t last_received_frame_millis_ = 0;
   uint32_t last_sent_frame_millis_ = 0;
+  uint32_t boot_millis_{0};
+  bool initial_frame_send_block_logged_{false};
   uint32_t last_tu2c_received_frame_millis_ = 0;
   uint32_t last_tu2c_sent_frame_millis_ = 0;
   std::queue<DataFrame> write_queue_;

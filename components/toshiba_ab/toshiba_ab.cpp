@@ -307,6 +307,10 @@ bool ToshibaAbClimate::has_bus_quiet_time_elapsed_(uint32_t now) const {
          (now - this->last_sent_frame_millis_) >= FRAME_SEND_MILLIS_FROM_LAST_SEND;
 }
 
+bool ToshibaAbClimate::is_initial_frame_send_block_active_(uint32_t now) const {
+  return (now - this->boot_millis_) < INITIAL_FRAME_SEND_BLOCK_MILLIS;
+}
+
 bool ToshibaAbClimate::has_tu2c_quiet_time_elapsed_(uint32_t now) const {
   return (now - this->last_tu2c_received_frame_millis_) >= TU2C_FRAME_SEND_MILLIS_FROM_LAST_RECEIVE &&
          (now - this->last_tu2c_sent_frame_millis_) >= TU2C_FRAME_SEND_MILLIS_FROM_LAST_SEND;
@@ -1271,6 +1275,7 @@ void ToshibaAbClimate::dump_config() {
 }
 
 void ToshibaAbClimate::setup() {
+  this->boot_millis_ = millis();
   if (this->failed_crcs_sensor_ != nullptr) {
     this->failed_crcs_sensor_->publish_state(0);
   }
@@ -2533,13 +2538,21 @@ void ToshibaAbClimate::loop() {
   // TODO: check if last_unconfirmed_command_ was not confirmed after a timeout
   // and log warning/error
 
+  const uint32_t now = millis();
+  const bool initial_send_block_active = this->is_initial_frame_send_block_active_(now);
+  if (initial_send_block_active && !this->initial_frame_send_block_logged_) {
+    ESP_LOGI(TAG, "Blocking outbound frames for the first %" PRIu32 "ms after boot", INITIAL_FRAME_SEND_BLOCK_MILLIS);
+    this->initial_frame_send_block_logged_ = true;
+  }
+
   // Drain the pending sensor-query queue at most one per loop iteration.
   // This must run BEFORE the TX dispatch below so an enqueued 0x17 has a
   // chance to be picked up in the same tick.
-  this->drain_sensor_query_queue_();
+  if (!initial_send_block_active) {
+    this->drain_sensor_query_queue_();
+  }
 
-  const uint32_t now = millis();
-  const bool bus_can_send = this->has_bus_quiet_time_elapsed_(now);
+  const bool bus_can_send = !initial_send_block_active && this->has_bus_quiet_time_elapsed_(now);
 
   if (bus_can_send) {
     optional<DataFrame> frame_to_send{};
@@ -2675,7 +2688,7 @@ void ToshibaAbClimate::loop() {
   }
 
   // Estia command ACK timeout and retry
-  if (!estia_pending_cmd_.empty() && (millis() - estia_cmd_sent_ms_) > ESTIA_CMD_ACK_TIMEOUT_MS) {
+  if (!initial_send_block_active && !estia_pending_cmd_.empty() && (millis() - estia_cmd_sent_ms_) > ESTIA_CMD_ACK_TIMEOUT_MS) {
     if (estia_cmd_attempts_ >= ESTIA_MAX_CMD_ATTEMPTS) {
       ESP_LOGW(TAG, "Command not acknowledged after %u attempts (dtype %02X:%02X)",
                estia_cmd_attempts_,
