@@ -768,6 +768,30 @@ void ToshibaAbClimate::send_read_block(uint8_t opcode2, uint16_t start, uint16_t
   this->send_command(cmd);  // enqueue; loop() will transmit when bus is idle
 }
 
+
+bool ToshibaAbClimate::is_announce_ack_frame_(const DataFrame *frame) const {
+  return frame->size() > 5 && frame->raw[5] == 0x0D;
+}
+
+bool ToshibaAbClimate::is_remote_announce_frame_(const DataFrame *frame) const {
+  return frame->opcode1 == OPCODE_ERROR_HISTORY && frame->dest == TOSHIBA_BROADCAST && frame->data_length == 2 &&
+         frame->data[1] == 0x0D;
+}
+
+void ToshibaAbClimate::handle_remote_address_collision_(uint8_t address, const char *reason) {
+  if (!this->remote_address_auto_ || address != this->remote_address_ || this->remote_address_ >= TOSHIBA_REMOTE_MAX) {
+    return;
+  }
+
+  const uint8_t old = this->remote_address_;
+  uint8_t next = this->remote_address_ + 1;
+  if (next == TOSHIBA_TEMP_SENSOR) {
+    next++;
+  }
+  this->remote_address_ = std::min(next, TOSHIBA_REMOTE_MAX);
+  ESP_LOGI(TAG, "%s at 0x%02X; switching to remote address 0x%02X", reason, old, this->remote_address_);
+}
+
 void ToshibaAbClimate::remote_announce() {
   // Build and enqueue a short announce/envelope frame from the remote.
   // Example format: 40:F0:15:02:00:0D:AA -> source=0x40, opcode=0x15, len=2, data={0x00,0x0D}
@@ -1639,8 +1663,11 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         // Check for an announce ACK addressed to this remote: 6th raw byte == 0x0D (index 5).
         // When this is received after boot, the remote can stop announcing itself.
         // The full raw frame may be longer; guard on size()
-        if (frame->size() > 5 && frame->raw[5] == 0x0D) {
-          if (frame->dest != this->remote_address_) {
+        if (this->is_announce_ack_frame_(frame)) {
+          if (millis() < INITIAL_FRAME_SEND_BLOCK_MILLIS) {
+            ESP_LOGI(TAG, "Ignoring announce ACK (0x0D) from 0x%02X during initial %us announce delay",
+                     frame->source, INITIAL_FRAME_SEND_BLOCK_MILLIS / 1000);
+          } else if (frame->dest != this->remote_address_) {
             ESP_LOGI(TAG, "Ignoring announce ACK (0x0D) from 0x%02X addressed to remote 0x%02X; this remote is "
                           "0x%02X",
                      frame->source, frame->dest, this->remote_address_);
@@ -1771,22 +1798,16 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
       // existing remotes on the bus. If any remote frame arrives using our
       // current address, shift to the next address up to 0x49, skipping 0x42
       // because it is reserved for external room-temperature reports.
-      if (this->remote_address_auto_ &&
-          frame->source == this->remote_address_ &&
-          this->remote_address_ < TOSHIBA_REMOTE_MAX) {
-        const uint8_t old = this->remote_address_;
-        uint8_t next = this->remote_address_ + 1;
-        if (next == TOSHIBA_TEMP_SENSOR) {
-          next++;
-        }
-        this->remote_address_ = std::min(next, TOSHIBA_REMOTE_MAX);
-        ESP_LOGI(TAG, "Remote auto-address collision detected at 0x%02X; switching to address 0x%02X",
-                 old, this->remote_address_);
-      }
+      this->handle_remote_address_collision_(frame->source, "Remote auto-address collision detected");
       ESP_LOGD(TAG, "Received data from remote:");
 
+      // Remote announce: 40 F0 15 02 00 0D ..
+      if (this->is_remote_announce_frame_(frame)) {
+        log_data_frame("Remote announce", frame);
+        this->handle_remote_address_collision_(frame->source, "Remote announce collision detected");
+
       // Remote temperature push: 40 00 55 05 08 81 01 6E 00 ..
-      if (frame->opcode1 == OPCODE_TEMPERATURE &&
+      } else if (frame->opcode1 == OPCODE_TEMPERATURE &&
           frame->data_length >= 4 &&
           frame->data[1] == 0x81) {
         uint8_t raw = frame->data[3] & TEMPERATURE_DATA_MASK;  // raw[7]
@@ -1878,9 +1899,14 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
       // First, check for announce ACK pattern from an unknown source: if the
       // raw frame contains 0x0D at byte index 5 and is addressed to this remote,
       // treat that source as the new master.
-      if (frame->size() > 5 && frame->raw[5] == 0x0D) {
-        // Only act on an addressed announce ACK if we haven't already seen one.
-        if (frame->dest != this->remote_address_) {
+      if (this->is_announce_ack_frame_(frame)) {
+        // Only act on an addressed announce ACK if we haven't already seen one
+        // and the initial announce delay has elapsed. ACKs received before the
+        // first announce is sent must be for another remote.
+        if (millis() < INITIAL_FRAME_SEND_BLOCK_MILLIS) {
+          ESP_LOGI(TAG, "Ignoring announce ACK (0x0D) from 0x%02X during initial %us announce delay",
+                   frame->source, INITIAL_FRAME_SEND_BLOCK_MILLIS / 1000);
+        } else if (frame->dest != this->remote_address_) {
           ESP_LOGI(TAG, "Ignoring announce ACK (0x0D) from 0x%02X addressed to remote 0x%02X; this remote is "
                         "0x%02X",
                    frame->source, frame->dest, this->remote_address_);
