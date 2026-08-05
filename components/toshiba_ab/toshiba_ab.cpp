@@ -1412,11 +1412,11 @@ void ToshibaAbClimate::setup() {
     }
   }
 
-  // Mimic the wall remote's periodic traffic in both operating modes. The
-  // single YAML ping option controls both periodic frames.
+  // Mimic the wall remote's periodic keep-alive traffic in both operating modes.
   if (this->ping_enabled_) {
     this->set_interval(this->ping_interval_ms_, [this]() {
-      if (this->data_reader.frame_format() != FrameFormat::NORMAL) {
+      const FrameFormat format = this->data_reader.frame_format();
+      if (format != FrameFormat::NORMAL && format != FrameFormat::HM) {
         return;
       }
       if (!this->autonomous_ && !this->remote_address_confirmed_) {
@@ -1429,18 +1429,6 @@ void ToshibaAbClimate::setup() {
       }
       this->send_ping();
       ESP_LOGV(TAG, "Enqueued remote PING (keep-alive)");
-    });
-
-    this->set_interval(this->read08_interval_ms, [this]() {
-      if (this->data_reader.frame_format() != FrameFormat::NORMAL) {
-        return;
-      }
-      if (!this->autonomous_ && (!this->remote_address_confirmed_ || !this->master_address_confirmed_)) {
-        ESP_LOGV(TAG, "E8 read skipped: remote or master address is not confirmed yet");
-        return;
-      }
-      ESP_LOGV(TAG, "Enqueuing read hourly counter block E8");
-      this->send_read_block(0xE8, 0x0001, 0x009E);
     });
   }
 
@@ -2701,7 +2689,7 @@ void ToshibaAbClimate::loop() {
                estia_cmd_attempts_, ESTIA_MAX_CMD_ATTEMPTS,
                (estia_pending_ack_dtype_ >> 8) & 0xFF, estia_pending_ack_dtype_ & 0xFF);
       estia_cmd_sent_ms_ = millis();
-      this->raw_write_queue_.push(estia_pending_cmd_);
+      this->enqueue_raw_frame_(estia_pending_cmd_);
     }
   }
 
@@ -3020,6 +3008,36 @@ void ToshibaAbClimate::control(const climate::ClimateCall &call) {
   send_new_state(&new_state);
 }
 
+bool ToshibaAbClimate::enqueue_command_(const DataFrame &command) {
+  std::queue<DataFrame> queued = this->write_queue_;
+  const size_t command_size = command.size();
+  while (!queued.empty()) {
+    const DataFrame &queued_command = queued.front();
+    if (queued_command.size() == command_size && std::memcmp(queued_command.raw, command.raw, command_size) == 0) {
+      ESP_LOGV(TAG, "Dropping duplicate queued command");
+      return false;
+    }
+    queued.pop();
+  }
+
+  this->write_queue_.push(command);
+  return true;
+}
+
+bool ToshibaAbClimate::enqueue_raw_frame_(const std::vector<uint8_t> &raw_frame) {
+  std::queue<std::vector<uint8_t>> queued = this->raw_write_queue_;
+  while (!queued.empty()) {
+    if (queued.front() == raw_frame) {
+      ESP_LOGV(TAG, "Dropping duplicate queued raw frame");
+      return false;
+    }
+    queued.pop();
+  }
+
+  this->raw_write_queue_.push(raw_frame);
+  return true;
+}
+
 void ToshibaAbClimate::send_command(const struct DataFrame command) {
   // Read-only mode: do not send any commands
   if (this->read_only_) {
@@ -3048,12 +3066,15 @@ void ToshibaAbClimate::send_command(const struct DataFrame command) {
     }
   }
 
+  if (!this->enqueue_command_(command)) {
+    return;
+  }
+
   if (command.is_tu2c()) {
     log_tu2c_data_frame("Enqueue command", &command);
   } else {
     log_data_frame("Enqueue command", &command);
   }
-  this->write_queue_.push(command);
 }
 
 bool ToshibaAbClimate::send_raw_frame_from_text(const std::string &frame_text) {
@@ -3110,8 +3131,9 @@ bool ToshibaAbClimate::send_raw_frame_from_text(const std::string &frame_text) {
     payload += buf;
   }
 
-  ESP_LOGI(TAG, "Queue raw frame from HA: %s", payload.c_str());
-  this->raw_write_queue_.push(std::move(raw_frame));
+  if (this->enqueue_raw_frame_(raw_frame)) {
+    ESP_LOGI(TAG, "Queue raw frame from HA: %s", payload.c_str());
+  }
   return true;
 }
 
@@ -3133,7 +3155,7 @@ static uint16_t estia_crc16(const uint8_t *data, size_t len) {
 
 void ToshibaAbClimate::send_estia_tracked_(const uint8_t *frame, size_t len, uint16_t ack_dtype) {
   std::vector<uint8_t> raw(frame, frame + len);
-  this->raw_write_queue_.push(raw);
+  this->enqueue_raw_frame_(raw);
   // Track for ACK/retry (only for commands, not heartbeats/requests)
   if (ack_dtype != 0) {
     estia_pending_cmd_ = std::move(raw);
@@ -3327,7 +3349,7 @@ void ToshibaAbClimate::send_estia_demand_heartbeat() {
   log_raw_data("Estia TX", frame, sizeof(frame));
 
   std::vector<uint8_t> raw(frame, frame + sizeof(frame));
-  this->raw_write_queue_.push(std::move(raw));
+  this->enqueue_raw_frame_(raw);
 }
 
 void ToshibaAbClimate::send_estia_data_request(uint8_t subtype) {
@@ -3357,7 +3379,7 @@ void ToshibaAbClimate::send_estia_data_request(uint8_t subtype) {
   log_raw_data("Estia TX", frame, sizeof(frame));
 
   std::vector<uint8_t> raw(frame, frame + sizeof(frame));
-  this->raw_write_queue_.push(std::move(raw));
+  this->enqueue_raw_frame_(raw);
 }
 
 bool ToshibaAbClimate::control_vent(bool state) {

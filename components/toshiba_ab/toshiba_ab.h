@@ -1148,6 +1148,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool initial_frame_send_block_logged_{false};
   uint32_t last_tu2c_received_frame_millis_ = 0;
   uint32_t last_tu2c_sent_frame_millis_ = 0;
+  bool enqueue_command_(const DataFrame &command);
+  bool enqueue_raw_frame_(const std::vector<uint8_t> &raw_frame);
   std::queue<DataFrame> write_queue_;
   std::queue<std::vector<uint8_t>> raw_write_queue_;
   optional<DataFrame> last_unconfirmed_command_;
