@@ -823,7 +823,6 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool master_address_confirmed_{false};
   uint8_t remote_address_{TOSHIBA_REMOTE_DEFAULT};
   bool remote_address_auto_{true};
-  bool remote_address_confirmed_{false};
   bool master_address_auto_{true};
   uint8_t tu2c_remote_address_{TOSHIBA_TU2C_REMOTE_DEFAULT};
   uint8_t tu2c_master_address_{TOSHIBA_TU2C_MASTER_DEFAULT};
@@ -832,7 +831,6 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_remote_address(uint8_t address) {
     remote_address_ = std::min(address, static_cast<uint8_t>(TOSHIBA_ESTIA_REMOTE_MAX));
     remote_address_auto_ = false;
-    remote_address_confirmed_ = true;
   }
   bool get_master_address_auto() const { return master_address_auto_; }
   void set_filter_frames(bool filter_frames) {
