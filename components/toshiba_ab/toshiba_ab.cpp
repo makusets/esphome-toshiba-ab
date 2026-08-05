@@ -1349,9 +1349,11 @@ void ToshibaAbClimate::setup() {
   }
 #endif
 
-  // Autonomous mode additionally needs registration and temperature reporting.
-  // Keep-alive and E8 polling are configured separately below because a wall
-  // remote also sends them when the component is not autonomous.
+  // Autonomous mode additionally needs TU2C registration.  Normal/HM
+  // autonomous temperature reporting is selected by using the default remote
+  // address (0x40), not by the autonomous option. Keep-alive and E8 polling are
+  // configured separately below because a wall remote also sends them when the
+  // component is not autonomous.
   if (this->autonomous_) {
     if (this->data_reader.frame_format() == FrameFormat::A0) {
       // Estia polling is handled in loop() so it respects runtime autonomous_ toggle
@@ -1373,54 +1375,68 @@ void ToshibaAbClimate::setup() {
           this->tu2c_send_ping();
         }
       });
-    } else {
-      this->set_interval(this->ping_interval_ms_, [this]() { //30s
-        float t = NAN;
-        if (this->ext_temp_sensor_ && this->ext_temp_sensor_->has_state()) {
-          t = this->ext_temp_sensor_->state;
-        } else if (!std::isnan(this->target_temperature)) {
-          t = this->target_temperature;
-        } else {
-          t = 20.0f;
-        }
-
-        if (std::isfinite(t)) {
-          const uint8_t raw = temp_celcius_to_payload(t);
-          ESP_LOGV(TAG, "Autonomous: enqueuing remote temperature %.1f°C (raw=0x%02X)", t, raw);
-          DataFrame cmd{};
-          cmd.source = this->remote_address_;
-          cmd.dest = this->master_address_;
-          cmd.opcode1 = OPCODE_TEMPERATURE;
-          cmd.data_length = 5;
-          cmd.data[0] = this->command_mode_read_;
-          cmd.data[1] = 0x81;
-          cmd.data[2] = 0x00;
-          cmd.data[3] = raw;
-          cmd.data[4] = 0x00;
-          cmd.data[cmd.data_length] = cmd.calculate_crc();
-          this->send_command(cmd);
-          ESP_LOGV(TAG, "Autonomous: remote temperature frame enqueued (dest=0x%02X)", this->master_address_);
-        }
-      });
-      this->announce_ack_received_ = false;
-      this->set_interval(2000, [this]() {
-        if (!this->announce_ack_received_) {
-          ESP_LOGV(TAG, "Autonomous announce: sending broadcast announce");
-          this->remote_announce();
-        }
-      });
     }
   }
+
+  this->set_interval(this->ping_interval_ms_, [this]() { //30s
+    const FrameFormat format = this->data_reader.frame_format();
+    if (format != FrameFormat::NORMAL && format != FrameFormat::HM) {
+      return;
+    }
+    if (this->remote_address_ != TOSHIBA_REMOTE_DEFAULT) {
+      ESP_LOGV(TAG, "Remote temperature report skipped: remote address 0x%02X is not autonomous address 0x%02X",
+               this->remote_address_, TOSHIBA_REMOTE_DEFAULT);
+      return;
+    }
+
+    float t = NAN;
+    if (this->ext_temp_sensor_ && this->ext_temp_sensor_->has_state()) {
+      t = this->ext_temp_sensor_->state;
+    } else if (!std::isnan(this->target_temperature)) {
+      t = this->target_temperature;
+    } else {
+      t = 20.0f;
+    }
+
+    if (std::isfinite(t)) {
+      const uint8_t raw = temp_celcius_to_payload(t);
+      ESP_LOGV(TAG, "Autonomous address: enqueuing remote temperature %.1f°C (raw=0x%02X)", t, raw);
+      DataFrame cmd{};
+      cmd.source = this->remote_address_;
+      cmd.dest = this->master_address_;
+      cmd.opcode1 = OPCODE_TEMPERATURE;
+      cmd.data_length = 5;
+      cmd.data[0] = this->command_mode_read_;
+      cmd.data[1] = 0x81;
+      cmd.data[2] = 0x00;
+      cmd.data[3] = raw;
+      cmd.data[4] = 0x00;
+      cmd.data[cmd.data_length] = cmd.calculate_crc();
+      this->send_command(cmd);
+      ESP_LOGV(TAG, "Autonomous address: remote temperature frame enqueued (dest=0x%02X)", this->master_address_);
+    }
+  });
+
+  this->announce_ack_received_ = false;
+  this->set_interval(2000, [this]() {
+    const FrameFormat format = this->data_reader.frame_format();
+    if (format != FrameFormat::NORMAL && format != FrameFormat::HM) {
+      return;
+    }
+    const uint32_t now = millis();
+    if (this->announce_ack_received_ || now < INITIAL_FRAME_SEND_BLOCK_MILLIS ||
+        now >= INITIAL_FRAME_SEND_BLOCK_MILLIS * 2) {
+      return;
+    }
+    ESP_LOGV(TAG, "Remote announce: sending broadcast announce");
+    this->remote_announce();
+  });
 
   // Mimic the wall remote's periodic keep-alive traffic in both operating modes.
   if (this->ping_enabled_) {
     this->set_interval(this->ping_interval_ms_, [this]() {
       const FrameFormat format = this->data_reader.frame_format();
       if (format != FrameFormat::NORMAL && format != FrameFormat::HM) {
-        return;
-      }
-      if (!this->autonomous_ && !this->remote_address_confirmed_) {
-        ESP_LOGV(TAG, "Ping skipped: remote address is not confirmed yet");
         return;
       }
       if (!this->autonomous_ && !this->master_address_confirmed_) {
@@ -1764,8 +1780,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           next++;
         }
         this->remote_address_ = std::min(next, TOSHIBA_REMOTE_MAX);
-        this->remote_address_confirmed_ = true;
-        ESP_LOGI(TAG, "Remote auto-address collision detected at 0x%02X; switching to confirmed address 0x%02X",
+        ESP_LOGI(TAG, "Remote auto-address collision detected at 0x%02X; switching to address 0x%02X",
                  old, this->remote_address_);
       }
       ESP_LOGD(TAG, "Received data from remote:");
@@ -3044,25 +3059,21 @@ void ToshibaAbClimate::send_command(const struct DataFrame command) {
     ESP_LOGW(TAG, "Read-only mode enabled: dropping command");
     return;
   }
-  if (this->autonomous_) {
-    if (this->data_reader.frame_format() == FrameFormat::TU2C || this->data_reader.frame_format() == FrameFormat::ESTIA) {
-      if (this->data_reader.frame_format() == FrameFormat::TU2C && !this->announce_ack_received_ &&
-          !this->is_tu2c_registration_query_(command)) {
-        ESP_LOGW(TAG, "Dropping TU2C command while awaiting registration ACK (autonomous mode)");
-        return;
-      }
-    } else if (!this->announce_ack_received_) {
-      bool is_announce = false;
-      if (command.source == this->remote_address_ && command.dest == TOSHIBA_BROADCAST &&
-          command.opcode1 == OPCODE_ERROR_HISTORY && command.data_length == 2 &&
-          command.data[1] == 0x0D) {
-        is_announce = true;
-      }
+  const FrameFormat format = this->data_reader.frame_format();
+  if (this->autonomous_ && format == FrameFormat::TU2C && !this->announce_ack_received_ &&
+      !this->is_tu2c_registration_query_(command)) {
+    ESP_LOGW(TAG, "Dropping TU2C command while awaiting registration ACK (autonomous mode)");
+    return;
+  }
 
-      if (!is_announce) {
-        ESP_LOGW(TAG, "Dropping command while awaiting announce ACK (autonomous mode)");
-        return;
-      }
+  if ((format == FrameFormat::NORMAL || format == FrameFormat::HM) && !this->announce_ack_received_ &&
+      millis() < INITIAL_FRAME_SEND_BLOCK_MILLIS * 2) {
+    const bool is_announce = command.source == this->remote_address_ && command.dest == TOSHIBA_BROADCAST &&
+                             command.opcode1 == OPCODE_ERROR_HISTORY && command.data_length == 2 &&
+                             command.data[1] == 0x0D;
+    if (!is_announce) {
+      ESP_LOGW(TAG, "Dropping Normal/HM command while awaiting announce ACK or 60s boot grace period");
+      return;
     }
   }
 
@@ -3581,10 +3592,9 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
       }
     }
   }
-  if (this->remote_address_auto_ && src == this->remote_address_ && has_remote_ping_signature &&
-      this->remote_address_ < TOSHIBA_ESTIA_REMOTE_MAX) {
+  if (this->remote_address_auto_ && src == this->remote_address_ && this->remote_address_ < TOSHIBA_ESTIA_REMOTE_MAX) {
     this->remote_address_++;
-    ESP_LOGI(TAG, "Estia remote-address collision from remote ping; switching to 0x%02X", this->remote_address_);
+    ESP_LOGI(TAG, "Estia remote-address collision from decoded remote frame; switching to 0x%02X", this->remote_address_);
   }
   if (src == this->master_address_) {
     this->last_master_alive_millis_ = millis();
