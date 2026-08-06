@@ -30,7 +30,7 @@ from esphome.const import (
 from esphome.core import CORE
 
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["climate", "binary_sensor", "sensor", "switch"]
+AUTO_LOAD = ["climate", "binary_sensor", "sensor", "switch", "text_sensor"]
 CODEOWNERS = ["@muxa"]
 
 toshiba_ab_ns = cg.esphome_ns.namespace("toshiba_ab")
@@ -41,6 +41,10 @@ CONF_READ_ONLY_SWITCH = "read_only_switch"
 CONF_FAILED_CRCS = "failed_crcs"
 CONF_NOISE_RATE = "noise_rate"
 CONF_CRC_FAILURES_5MIN = "crc_failures_5min"
+CONF_INDOOR_UNIT_COUNT = "indoor_unit_count"
+CONF_INDOOR_UNITS = "indoor_units"
+CONF_REMOTE_COUNT = "remote_count"
+CONF_REMOTE_ADDRESSES = "remote_addresses"
 
 CONF_ON_DATA_RECEIVED = "on_data_received"
 CONF_MASTER = "master"
@@ -293,6 +297,18 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
+        cv.Optional(CONF_INDOOR_UNIT_COUNT, default={"name": "Toshiba Indoor Unit Count"}): text_sensor.text_sensor_schema(
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
+        cv.Optional(CONF_INDOOR_UNITS, default={"name": "Toshiba Indoor Units"}): text_sensor.text_sensor_schema(
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
+        cv.Optional(CONF_REMOTE_COUNT, default={"name": "Toshiba Remote Count"}): text_sensor.text_sensor_schema(
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
+        cv.Optional(CONF_REMOTE_ADDRESSES, default={"name": "Toshiba Remote Addresses"}): text_sensor.text_sensor_schema(
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
         cv.Optional(CONF_ON_DATA_RECEIVED): automation.validate_automation(
             {
                cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(ToshibaAbOnDataReceivedTrigger),
@@ -454,6 +470,14 @@ async def to_code(config):
     cg.add(var.set_noise_rate_sensor(noise_rate))
     crc_rate = await sensor.new_sensor(config[CONF_CRC_FAILURES_5MIN])
     cg.add(var.set_crc_failures_5min_sensor(crc_rate))
+    indoor_count = await text_sensor.new_text_sensor(config[CONF_INDOOR_UNIT_COUNT])
+    cg.add(var.set_indoor_unit_count_text_sensor(indoor_count))
+    indoor_units = await text_sensor.new_text_sensor(config[CONF_INDOOR_UNITS])
+    cg.add(var.set_indoor_units_text_sensor(indoor_units))
+    remote_count = await text_sensor.new_text_sensor(config[CONF_REMOTE_COUNT])
+    cg.add(var.set_remote_count_text_sensor(remote_count))
+    remote_addresses = await text_sensor.new_text_sensor(config[CONF_REMOTE_ADDRESSES])
+    cg.add(var.set_remote_addresses_text_sensor(remote_addresses))
 
     if CONF_VENT in config:
         sw = await switch.new_switch(config[CONF_VENT], var)
