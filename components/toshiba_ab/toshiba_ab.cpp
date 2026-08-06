@@ -1473,6 +1473,7 @@ void ToshibaAbClimate::setup() {
   }
 
   this->update_frame_validation_();
+  this->publish_bus_inventory_();
 
     // next block manages the temp reporting to the central unit using the external sensor approach if configured,
     // this sends a different temp frame to the one sent with the ping above,
@@ -1652,6 +1653,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
       switch (frame->opcode1) {
         case OPCODE_PING: {
         log_data_frame("PING/ALIVE", frame);
+        this->record_discovered_address_(frame->source, false);
         this->confirm_frame_format_(FrameFormat::NORMAL, "valid keepalive from master");
         break;
         }
@@ -1840,6 +1842,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
                 frame->data[1] == OPCODE2_PING_PONG &&         // 0x0C
                 frame->data[2] == OPCODE2_READ_STATUS) {       // 0x81
         log_data_frame("Remote PING", frame);
+        this->record_discovered_address_(frame->source, true);
         
         // Auto-update master address if enabled and different from current
         if (this->master_address_auto_ &&
@@ -1953,6 +1956,7 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
   if (frame_length == 0x0A && has_tail_signature) {
     log_raw_data("Master keepalive", frame->raw, size);
     ESP_LOGD(TAG, "Master %02X keepalive", source);
+    this->record_discovered_address_(source, false);
     last_master_alive_millis_ = millis();
     if (this->connected_binary_sensor_) {
       this->connected_binary_sensor_->publish_state(true);
@@ -1984,6 +1988,7 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
       frame->raw[payload_offset + 1] == 0x5C) {
     log_raw_data("Remote keepalive frame", frame->raw, size);
     ESP_LOGD(TAG, "Remote %02X keepalive", source);
+    this->record_discovered_address_(source, true);
     return;
   }
 
@@ -2529,6 +2534,45 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
     process_received_data(frame);
   }
   return true;
+}
+
+void ToshibaAbClimate::record_discovered_address_(uint8_t address, bool remote) {
+  if (millis() > BUS_DISCOVERY_PERIOD_MILLIS) return;
+  std::bitset<256> &addresses = remote ? this->discovered_remotes_ : this->discovered_indoor_units_;
+  if (addresses.test(address)) return;
+
+  addresses.set(address);
+  ESP_LOGI(TAG, "Discovered %s keepalive address 0x%02X", remote ? "remote" : "indoor unit", address);
+  this->publish_bus_inventory_();
+}
+
+void ToshibaAbClimate::publish_bus_inventory_() {
+  if (this->indoor_unit_count_text_sensor_ != nullptr)
+    this->indoor_unit_count_text_sensor_->publish_state(std::to_string(this->discovered_indoor_units_.count()));
+  if (this->remote_count_text_sensor_ != nullptr)
+    this->remote_count_text_sensor_->publish_state(std::to_string(this->discovered_remotes_.count()));
+
+  std::string indoor_units;
+  std::string remote_addresses;
+  char address[8];
+  for (size_t i = 0; i < 256; i++) {
+    if (this->discovered_indoor_units_.test(i)) {
+      std::snprintf(address, sizeof(address), "0x%02X", static_cast<unsigned>(i));
+      if (!indoor_units.empty()) indoor_units += ", ";
+      indoor_units += address;
+      indoor_units += " (indoor unit)";
+    }
+    if (this->discovered_remotes_.test(i)) {
+      std::snprintf(address, sizeof(address), "0x%02X", static_cast<unsigned>(i));
+      if (!remote_addresses.empty()) remote_addresses += ", ";
+      remote_addresses += address;
+    }
+  }
+  if (indoor_units.empty()) indoor_units = "None detected";
+  if (remote_addresses.empty()) remote_addresses = "None detected";
+  if (this->indoor_units_text_sensor_ != nullptr) this->indoor_units_text_sensor_->publish_state(indoor_units);
+  if (this->remote_addresses_text_sensor_ != nullptr)
+    this->remote_addresses_text_sensor_->publish_state(remote_addresses);
 }
 
 
@@ -3592,6 +3636,9 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     ESP_LOGD(TAG, "Estia first-gen checksum fail for %s", label.c_str());
     return;
   }
+  if (has_master_keepalive_signature && is_possible_master_source)
+    this->record_discovered_address_(src, false);
+  if (has_remote_ping_signature && is_remote_source) this->record_discovered_address_(src, true);
   if (has_master_keepalive_signature && is_possible_master_source) {
     if (this->master_address_auto_ && !this->master_address_confirmed_ && src != this->master_address_) {
       ESP_LOGI(TAG, "Estia first-gen master keepalive from 0x%02X; switching master address from 0x%02X",

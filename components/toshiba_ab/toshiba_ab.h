@@ -4,6 +4,7 @@
 #include "esphome/components/climate/climate.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/switch/switch.h"
+#include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/uart/uart.h"
 #include <algorithm>
 #include <array>
@@ -21,6 +22,7 @@ const uint32_t PACKET_MIN_WAIT_MILLIS = 200;
 const uint32_t FRAME_SEND_MILLIS_FROM_LAST_RECEIVE = 500;
 const uint32_t FRAME_SEND_MILLIS_FROM_LAST_SEND = 500;
 const uint32_t INITIAL_FRAME_SEND_BLOCK_MILLIS = 30000;
+const uint32_t BUS_DISCOVERY_PERIOD_MILLIS = 180000;
 
 // const uint8_t TOSHIBA_MASTER = 0x00;  replaced by master_address_ which is set up in yaml
 const uint8_t TOSHIBA_MASTER_DEFAULT = 0x00;
@@ -922,6 +924,10 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_failed_crcs_sensor(sensor::Sensor *failed_crcs_sensor) { this->failed_crcs_sensor_ = failed_crcs_sensor; }
   void set_noise_rate_sensor(sensor::Sensor *sensor) { this->noise_rate_sensor_ = sensor; }
   void set_crc_failures_5min_sensor(sensor::Sensor *sensor) { this->crc_failures_5min_sensor_ = sensor; }
+  void set_indoor_unit_count_text_sensor(text_sensor::TextSensor *sensor) { this->indoor_unit_count_text_sensor_ = sensor; }
+  void set_indoor_units_text_sensor(text_sensor::TextSensor *sensor) { this->indoor_units_text_sensor_ = sensor; }
+  void set_remote_count_text_sensor(text_sensor::TextSensor *sensor) { this->remote_count_text_sensor_ = sensor; }
+  void set_remote_addresses_text_sensor(text_sensor::TextSensor *sensor) { this->remote_addresses_text_sensor_ = sensor; }
 
   void send_command(struct DataFrame command);
   bool send_raw_frame_from_text(const std::string &frame_text);
@@ -1020,6 +1026,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void update_frame_validation_();
   void record_crc_failure_();
   void publish_reader_diagnostics_();
+  void record_discovered_address_(uint8_t address, bool remote);
+  void publish_bus_inventory_();
   bool is_initial_frame_send_block_active_(uint32_t now) const;
   bool has_bus_quiet_time_elapsed_(uint32_t now) const;
   bool has_tu2c_quiet_time_elapsed_(uint32_t now) const;
@@ -1047,6 +1055,12 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   sensor::Sensor *failed_crcs_sensor_{nullptr};
   sensor::Sensor *noise_rate_sensor_{nullptr};
   sensor::Sensor *crc_failures_5min_sensor_{nullptr};
+  text_sensor::TextSensor *indoor_unit_count_text_sensor_{nullptr};
+  text_sensor::TextSensor *indoor_units_text_sensor_{nullptr};
+  text_sensor::TextSensor *remote_count_text_sensor_{nullptr};
+  text_sensor::TextSensor *remote_addresses_text_sensor_{nullptr};
+  std::bitset<256> discovered_indoor_units_{};
+  std::bitset<256> discovered_remotes_{};
   uint32_t crc_failure_count_{0};
   uint32_t last_diagnostics_publish_ms_{0};
   static const uint8_t CRC_HISTORY_SIZE = 10;
