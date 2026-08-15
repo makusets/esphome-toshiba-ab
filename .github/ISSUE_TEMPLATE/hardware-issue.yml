@@ -1,0 +1,69 @@
+name: Hardware issue
+description: Report a problem with the interface board or its installation.
+title: "[Hardware]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a hardware issue. Please provide the details below so we can help diagnose it.
+
+  - type: dropdown
+    id: board
+    attributes:
+      label: Board type
+      description: Which interface board are you using?
+      options:
+        - v3.2
+        - D1 mini
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: machine
+    attributes:
+      label: Machine type
+      description: What kind of system is the board connected to?
+      options:
+        - Air-to-air
+        - Hydronic
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model number
+      description: Enter the model number of the connected machine, if known.
+      placeholder: e.g. RAS-B10N4KVRG-E
+
+  - type: dropdown
+    id: protocol
+    attributes:
+      label: Protocol used
+      description: Select the configured or detected protocol.
+      options:
+        - TCC-Link
+        - HM
+        - TU2C
+        - Estia A0
+        - Estia first-generation
+        - Unknown
+    validations:
+      required: true
+
+  - type: textarea
+    id: installation-photos
+    attributes:
+      label: Installation photos
+      description: Drag and drop photos here showing the board, wiring, and its connection to the machine. Remove any sensitive information before uploading.
+      placeholder: Drag and drop installation photos here.
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Issue details
+      description: Describe the problem, what you expected, and any troubleshooting already attempted.
+    validations:
+      required: true
+
