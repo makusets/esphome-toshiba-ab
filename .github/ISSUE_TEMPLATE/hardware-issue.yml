@@ -56,10 +56,7 @@ body:
     id: details
     attributes:
       label: Issue details
-      description: Describe the problem, what you expected, and any troubleshooting already attempted. If possible, upload your yaml file, and a *.txt log file at DEBUG level obtained after running the ESPHome log window in HomeAssitant for 5 min.
-    validations:
-      required: true
-
+      description: Describe the problem
   - type: textarea
     id: installation-photos
     attributes:
