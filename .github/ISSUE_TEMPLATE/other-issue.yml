@@ -1,0 +1,54 @@
+name: Other
+description: Other issue
+title: "[Other]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please provide the details below that are relevant.
+
+  - type: dropdown
+    id: board
+    attributes:
+      label: Board type
+      description: Which interface board are you using?
+      options:
+        - v3.2
+        - D1 mini
+        - Other
+    validations:
+      required: true
+
+  - type: dropdown
+    id: machine
+    attributes:
+      label: Machine type
+      description: What kind of system is the board connected to?
+      options:
+        - Air-to-air
+        - Hydronic
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model number
+      description: Enter the model number of the connected machine, if known.
+      placeholder: e.g. RAS-B10N4KVRG-E
+
+
+  - type: textarea
+    id: details
+    attributes:
+      label: Details
+      description: Describe your issue, question, suggestion,...
+    validations:
+      required: true
+
+  - type: textarea
+    id: installation-photos
+    attributes:
+      label: Optional photos
+      description: Drag and drop relevant photos here if needed
+      placeholder: Drag and drop relevant photos here.
