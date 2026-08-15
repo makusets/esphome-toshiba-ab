@@ -53,17 +53,16 @@ body:
       required: true
 
   - type: textarea
-    id: installation-photos
-    attributes:
-      label: Installation photos
-      description: Drag and drop photos here showing the board, wiring, and its connection to the machine. Remove any sensitive information before uploading.
-      placeholder: Drag and drop installation photos here.
-
-  - type: textarea
     id: details
     attributes:
       label: Issue details
-      description: Describe the problem, what you expected, and any troubleshooting already attempted.
+      description: Describe the problem, what you expected, and any troubleshooting already attempted. If possible, upload your yaml file, and a txt log file at DEBUG level obtained after running the ESPHome log window in HomeAssitant for 5 min.
     validations:
       required: true
 
+  - type: textarea
+    id: installation-photos
+    attributes:
+      label: Optional installation photos
+      description: Drag and drop photos relevant photos here if needed
+      placeholder: Drag and drop installation photos here.
