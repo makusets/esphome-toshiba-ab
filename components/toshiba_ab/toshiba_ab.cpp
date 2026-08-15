@@ -510,6 +510,23 @@ void log_raw_data(const std::string& prefix, const uint8_t raw[], size_t size) {
   ESP_LOGV("RX", "%s: %s", prefix.c_str(), res.c_str());
 }
 
+void log_a0_data_frame(const std::string &msg, const struct DataFrame *frame) {
+  if (frame == nullptr)
+    return;
+
+  const size_t size = frame->estia_size();
+  std::string res;
+  res.reserve(size ? (size * 3 - 1) : 0);
+  char buf[3];
+  for (size_t i = 0; i < size; i++) {
+    if (i > 0)
+      res += ':';
+    std::snprintf(buf, sizeof(buf), "%02X", frame->raw[i]);
+    res += buf;
+  }
+  ESP_LOGD("RX", "%s: %s", msg.c_str(), res.c_str());
+}
+
 std::string frame_to_hex_string(const DataFrame *frame) {
   if (frame == nullptr) {
     return "";
@@ -2122,29 +2139,29 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
             type_name = "STATUS";
             break;
         }
-        uint16_t src = (fsz > 4) ? ((frame->raw[3] << 8) | frame->raw[4]) : 0;
-        uint16_t dst = (fsz > 6) ? ((frame->raw[5] << 8) | frame->raw[6]) : 0;
+        const uint8_t src = (fsz > 4) ? frame->raw[4] : 0;
+        const uint8_t dst = (fsz > 6) ? frame->raw[6] : 0;
         const char *src_name = "???";
-        if (src == 0x0800)
+        if (src == this->master_address_)
           src_name = "MASTER";
-        else if (src == 0x0040)
+        else if (src == 0x40)
           src_name = "REMOTE";
-        else if (src == 0x0041)
+        else if (src == 0x41)
           src_name = "0-10V";
-        else if (src == 0x0390)
+        else if (src == 0x90)
           src_name = "KNX-GW";
         const char *dst_name = "???";
-        if (dst == 0x0800)
+        if (dst == this->master_address_)
           dst_name = "MASTER";
-        else if (dst == 0x0040)
+        else if (dst == 0x40)
           dst_name = "REMOTE";
-        else if (dst == 0x0041)
+        else if (dst == 0x41)
           dst_name = "0-10V";
-        else if (dst == 0x00FE)
+        else if (dst == 0xFE)
           dst_name = "BROADCAST";
-        else if (dst == 0x0390)
+        else if (dst == 0x90)
           dst_name = "KNX-GW";
-        ESP_LOGD(TAG, "  type=0x%02X(%s) len=%u src=0x%04X(%s) dst=0x%04X(%s)", ft, type_name, fl, src, src_name, dst,
+        ESP_LOGD(TAG, "  type=0x%02X(%s) len=%u src=0x%02X(%s) dst=0x%02X(%s)", ft, type_name, fl, src, src_name, dst,
                  dst_name);
         if (fsz > 8) {
           ESP_LOGD(TAG, "  dtype=%02X:%02X", frame->raw[7], frame->raw[8]);
@@ -2157,8 +2174,8 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
     uint8_t frame_len = frame->raw[1];
     const uint8_t src = frame->raw[4];
     const uint8_t dst = frame->raw[6];
+    log_a0_data_frame("A0 frame", frame);
     ESP_LOGV(TAG, "A0 RX: %02X -> %02X type=0x%02X len=%u", src, dst, frame_type, frame_len);
-    log_raw_data("A0 frame", frame->raw, fsz);
 
     // A0 has the same logical one-byte node IDs as TCC-Link/HM. The bytes
     // preceding them are routing modes, not part of either address. Learn the
