@@ -8,11 +8,8 @@
 #include <HardwareSerial.h>
 #endif
 
-
 namespace esphome {
 namespace toshiba_ab {
-
-
 
 static const char *const TAG = "tcc_link.climate";
 
@@ -40,7 +37,6 @@ static uint8_t command_opcode_for_ack_log(const DataFrame &frame) {
 // enabled.
 static HardwareSerial s_bus_serial(UART0);
 #endif
-
 
 const LogString *opcode_to_string(uint8_t opcode) {
   switch (opcode) {
@@ -78,8 +74,10 @@ uint8_t temp_celcius_to_payload(float t) {
   }
   const float scaled = (t + TEMPERATURE_CONVERSION_OFFSET) * TEMPERATURE_CONVERSION_RATIO;
   int v = static_cast<int>(std::lround(scaled));
-  if (v < 0) v = 0;
-  if (v > 255) v = 255;
+  if (v < 0)
+    v = 0;
+  if (v > 255)
+    v = 255;
   return static_cast<uint8_t>(v);
 }
 
@@ -132,11 +130,18 @@ uint8_t calculate_tu2c_crc(const uint8_t *data, size_t size) {
   return static_cast<uint8_t>(sum & 0xFF);
 }
 
-bool ToshibaAbClimate::is_own_tx_echo_(const DataFrame *f) const { // used to filter out echo from our last command sent
-  if (!this->last_tx_frame_for_echo_.has_value() || f == nullptr) return false;
-  if ((millis() - this->last_tx_frame_millis_) > ECHO_MATCH_WINDOW_MS) return false;
+bool ToshibaAbClimate::is_own_tx_echo_(
+    const DataFrame *f) const {  // used to filter out echo from our last command sent
+  if (!this->last_tx_frame_for_echo_.has_value() || f == nullptr)
+    return false;
+  if ((millis() - this->last_tx_frame_millis_) > ECHO_MATCH_WINDOW_MS)
+    return false;
   const auto &tx = this->last_tx_frame_for_echo_.value();  // last frame we wrote
-  if (f->size() == tx.size() && std::memcmp(f->raw, tx.raw, f->size()) == 0) return true;
+  if (f->is_estia() && tx.is_estia() && f->estia_size() == tx.estia_size() &&
+      std::memcmp(f->raw, tx.raw, f->estia_size()) == 0)
+    return true;
+  if (f->size() == tx.size() && std::memcmp(f->raw, tx.raw, f->size()) == 0)
+    return true;
 
   // First-generation Estia uses the TU2C reader path. On some adapters the
   // local TX can be echoed back with slightly different wrapper/timing state,
@@ -144,8 +149,8 @@ bool ToshibaAbClimate::is_own_tx_echo_(const DataFrame *f) const { // used to fi
   // current master destination and known local command/query markers.
   // Maybe not needed????
   if (this->data_reader.frame_format() == FrameFormat::ESTIA && f->is_tu2c() && f->size() >= 6 &&
-      f->raw[1] == this->remote_address_ && f->raw[2] == this->master_address_ &&
-      f->raw[3] == 0xE0 && (f->raw[4] == 0x01 || f->raw[4] == 0x41)) {
+      f->raw[1] == this->remote_address_ && f->raw[2] == this->master_address_ && f->raw[3] == 0xE0 &&
+      (f->raw[4] == 0x01 || f->raw[4] == 0x41)) {
     return true;
   }
 
@@ -160,6 +165,18 @@ void ToshibaAbClimate::remember_tx_frame_for_echo_(const uint8_t *bytes, size_t 
   const uint8_t *payload = bytes;
   size_t payload_size = size;
   bool payload_tu2c = tu2c;
+
+  if (size >= 4 && bytes[0] == 0xA0 && bytes[1] == 0x00) {
+    payload = bytes + 2;
+    payload_size = size - 2;
+    DataFrame tx{};
+    std::memcpy(tx.raw, payload, payload_size);
+    tx.set_estia(true);
+    tx.set_estia_len(tx.raw[1]);
+    this->last_tx_frame_for_echo_ = tx;
+    this->last_tx_frame_millis_ = millis();
+    return;
+  }
 
   if (size >= 4 && bytes[0] == 0xF0 && bytes[1] == 0xF0 && bytes[size - 1] == 0xA0) {
     payload = bytes + 2;
@@ -196,11 +213,21 @@ void ToshibaAbClimate::confirm_frame_format_(FrameFormat format, const char *rea
   this->apply_default_master_address_for_frame_format_();
   const char *fmt = "normal";
   switch (format) {
-    case FrameFormat::TU2C: fmt = "tu2c"; break;
-    case FrameFormat::A0: fmt = "a0"; break;
-    case FrameFormat::HM: fmt = "hm"; break;
-    case FrameFormat::ESTIA: fmt = "estia"; break;
-    default: fmt = "n"; break;
+    case FrameFormat::TU2C:
+      fmt = "tu2c";
+      break;
+    case FrameFormat::A0:
+      fmt = "a0";
+      break;
+    case FrameFormat::HM:
+      fmt = "hm";
+      break;
+    case FrameFormat::ESTIA:
+      fmt = "estia";
+      break;
+    default:
+      fmt = "n";
+      break;
   }
   ESP_LOGI(TAG, "Auto-detected frame_format=%s (%s)", fmt, reason != nullptr ? reason : "confirmed frame");
 }
@@ -316,7 +343,6 @@ bool ToshibaAbClimate::has_tu2c_quiet_time_elapsed_(uint32_t now) const {
          (now - this->last_tu2c_sent_frame_millis_) >= TU2C_FRAME_SEND_MILLIS_FROM_LAST_SEND;
 }
 
-
 bool ToshibaAbClimate::is_ack_for_pending_command_(const DataFrame *frame) const {
   if (frame == nullptr || !this->last_unconfirmed_command_.has_value()) {
     return false;
@@ -364,7 +390,8 @@ bool ToshibaAbClimate::should_track_tu2c_command_ack_(const DataFrame &frame) co
     return false;
   }
 
-  const bool matches_tu2c_addresses = frame.raw[1] == this->tu2c_remote_address_ && frame.raw[2] == this->tu2c_master_address_;
+  const bool matches_tu2c_addresses =
+      frame.raw[1] == this->tu2c_remote_address_ && frame.raw[2] == this->tu2c_master_address_;
   const bool matches_estia_addresses = this->data_reader.frame_format() == FrameFormat::ESTIA &&
                                       frame.raw[1] == this->remote_address_ && frame.raw[2] == this->master_address_;
   if (!matches_tu2c_addresses && !matches_estia_addresses) {
@@ -376,8 +403,8 @@ bool ToshibaAbClimate::should_track_tu2c_command_ack_(const DataFrame &frame) co
   }
 
   // Track ACKs for TU2C/first-gen Estia write commands.
-  return frame.raw[5] == 0x21 || frame.raw[5] == 0x22 || frame.raw[5] == 0x23 ||
-         frame.raw[5] == 0x24 || frame.raw[5] == 0x2C;
+  return frame.raw[5] == 0x21 || frame.raw[5] == 0x22 || frame.raw[5] == 0x23 || frame.raw[5] == 0x24 ||
+         frame.raw[5] == 0x2C;
 }
 
 bool ToshibaAbClimate::should_track_command_ack_(const DataFrame &frame) const {
@@ -441,27 +468,20 @@ void log_data_frame(const std::string &msg, const struct DataFrame *frame, size_
     }
   }
 
-  ESP_LOGD(
-    "RX",
-    "%s: \033[31m%02X\033[0m:\033[31m%02X\033[0m:\033[32m%02X\033[0m:%02X:%s:%02X",
-    msg.c_str(),
-    frame->source,
-    frame->dest,
-    frame->opcode1,
-    frame->data_length,
-    res.c_str(),
-    frame->crc()
-  );
+  ESP_LOGD("RX", "%s: \033[31m%02X\033[0m:\033[31m%02X\033[0m:\033[32m%02X\033[0m:%02X:%s:%02X", msg.c_str(),
+           frame->source, frame->dest, frame->opcode1, frame->data_length, res.c_str(), frame->crc());
 }
 
 void log_tu2c_data_frame(const std::string &msg, const struct DataFrame *frame) {
-  if (frame == nullptr) return;
+  if (frame == nullptr)
+    return;
   const size_t size = frame->size();
   std::string res;
   res.reserve(size ? (size * 12) : 0);
   char buf[4];
   for (size_t i = 0; i < size; i++) {
-    if (i > 0) res += ':';
+    if (i > 0)
+      res += ':';
     std::snprintf(buf, sizeof(buf), "%02X", frame->raw[i]);
     const bool highlight = i == 1 || i == 2 || i == 3 || i == 4 || i == 5;
     if (highlight) {
@@ -482,11 +502,29 @@ void log_raw_data(const std::string& prefix, const uint8_t raw[], size_t size) {
   res.reserve(size ? (size * 3 - 1) : 0);  // pre-size: "AA:" per byte minus last colon
   char buf[3];
   for (size_t i = 0; i < size; i++) {
-    if (i > 0) res += ':';
+    if (i > 0)
+      res += ':';
     std::snprintf(buf, sizeof(buf), "%02X", raw[i]);
     res += buf;
   }
   ESP_LOGV("RX", "%s: %s", prefix.c_str(), res.c_str());
+}
+
+void log_a0_data_frame(const std::string &msg, const struct DataFrame *frame) {
+  if (frame == nullptr)
+    return;
+
+  const size_t size = frame->estia_size();
+  std::string res;
+  res.reserve(size ? (size * 3 - 1) : 0);
+  char buf[3];
+  for (size_t i = 0; i < size; i++) {
+    if (i > 0)
+      res += ':';
+    std::snprintf(buf, sizeof(buf), "%02X", frame->raw[i]);
+    res += buf;
+  }
+  ESP_LOGD("RX", "%s: %s", msg.c_str(), res.c_str());
 }
 
 std::string frame_to_hex_string(const DataFrame *frame) {
@@ -510,9 +548,8 @@ std::string frame_to_hex_string(const DataFrame *frame) {
   return payload;
 }
 
-
-void write_set_parameter(struct DataFrame *command, uint8_t remote_address, uint8_t master_address, uint8_t command_mode_read, uint8_t opcode2,
-                         uint8_t payload[], size_t payload_size) {
+void write_set_parameter(struct DataFrame *command, uint8_t remote_address, uint8_t master_address,
+                         uint8_t command_mode_read, uint8_t opcode2, uint8_t payload[], size_t payload_size) {
   command->source = remote_address;
   command->dest = master_address;
   command->opcode1 = OPCODE_PARAMETER;
@@ -527,8 +564,8 @@ void write_set_parameter(struct DataFrame *command, uint8_t remote_address, uint
   command->data[SET_PARAMETER_PAYLOAD_HEADER_SIZE + payload_size] = command->calculate_crc();
 }
 
-void write_set_temperature(struct DataFrame *command, uint8_t remote_address, uint8_t master_address, uint8_t command_mode_read, uint8_t opcode2,
-                           uint8_t payload[], size_t payload_size) {
+void write_set_temperature(struct DataFrame *command, uint8_t remote_address, uint8_t master_address,
+                           uint8_t command_mode_read, uint8_t opcode2, uint8_t payload[], size_t payload_size) {
   command->source = remote_address;
   command->dest = master_address;
   command->opcode1 = OPCODE_TEMPERATURE;
@@ -543,15 +580,15 @@ void write_set_temperature(struct DataFrame *command, uint8_t remote_address, ui
   command->data[SET_PARAMETER_PAYLOAD_HEADER_SIZE + payload_size] = command->calculate_crc();
 }
 
-
-void write_set_parameter(struct DataFrame *command, uint8_t remote_address, uint8_t master_address, uint8_t command_mode_read, uint8_t opcode2,
-                         uint8_t single_type_payload) {
+void write_set_parameter(struct DataFrame *command, uint8_t remote_address, uint8_t master_address,
+                         uint8_t command_mode_read, uint8_t opcode2, uint8_t single_type_payload) {
   uint8_t payload[1] = {single_type_payload};
   write_set_parameter(command, remote_address, master_address, command_mode_read, opcode2, payload, 1);
 }
 
-void write_set_parameter_flags(struct DataFrame *command, uint8_t remote_address, uint8_t master_address, uint8_t command_mode_read,
-                               const struct TccState *state, uint8_t set_flags, bool hm_variant) {
+void write_set_parameter_flags(struct DataFrame *command, uint8_t remote_address, uint8_t master_address,
+                               uint8_t command_mode_read, const struct TccState *state, uint8_t set_flags,
+                               bool hm_variant) {
   // The first six payload bytes are identical in both variants. The HM
   // variant appends three trailing zero bytes that the RBC-ASCU11-E wired
   // remote sends; without them, the AC controller silently rejects the
@@ -569,7 +606,8 @@ void write_set_parameter_flags(struct DataFrame *command, uint8_t remote_address
         EMPTY_DATA,
         EMPTY_DATA,
     };
-    write_set_parameter(command, remote_address, master_address, command_mode_read, OPCODE2_SET_TEMP_WITH_FAN, payload, sizeof(payload));
+    write_set_parameter(command, remote_address, master_address, command_mode_read, OPCODE2_SET_TEMP_WITH_FAN, payload,
+                        sizeof(payload));
   } else {
     uint8_t payload[6] = {
         static_cast<uint8_t>(state->mode | set_flags),
@@ -579,7 +617,8 @@ void write_set_parameter_flags(struct DataFrame *command, uint8_t remote_address
         get_heat_cool_bits(state->mode),
         get_heat_cool_bits(state->mode),
     };
-    write_set_parameter(command, remote_address, master_address, command_mode_read, OPCODE2_SET_TEMP_WITH_FAN, payload, sizeof(payload));
+    write_set_parameter(command, remote_address, master_address, command_mode_read, OPCODE2_SET_TEMP_WITH_FAN, payload,
+                        sizeof(payload));
   }
 }
 void write_set_parameter_flags_tu2c(struct DataFrame *command, uint8_t remote_address, uint8_t master_address,
@@ -658,23 +697,24 @@ void write_set_mode_tu2c(struct DataFrame *command, uint8_t remote_address, uint
   command->raw[7] = calculate_tu2c_crc(command->raw, 7);
 }
 
-void write_set_parameter_mode(struct DataFrame *command, uint8_t remote_address, uint8_t master_address, uint8_t command_mode_read,
-                              const struct TccState *state) {
+void write_set_parameter_mode(struct DataFrame *command, uint8_t remote_address, uint8_t master_address,
+                              uint8_t command_mode_read, const struct TccState *state) {
   write_set_parameter(command, remote_address, master_address, command_mode_read, OPCODE2_SET_MODE, state->mode);
 }
 
-void write_set_parameter_power(struct DataFrame *command, uint8_t remote_address, uint8_t master_address, uint8_t command_mode_read,
-                               const struct TccState *state) {
-  write_set_parameter(command, remote_address, master_address, command_mode_read, OPCODE2_SET_POWER, state->power | 0b0010);
+void write_set_parameter_power(struct DataFrame *command, uint8_t remote_address, uint8_t master_address,
+                               uint8_t command_mode_read, const struct TccState *state) {
+  write_set_parameter(command, remote_address, master_address, command_mode_read, OPCODE2_SET_POWER,
+                      state->power | 0b0010);
 }
 
-void write_set_parameter_vent(struct DataFrame *command, uint8_t remote_address, uint8_t master_address, uint8_t command_mode_read,
-                              const struct TccState *state) {
+void write_set_parameter_vent(struct DataFrame *command, uint8_t remote_address, uint8_t master_address,
+                              uint8_t command_mode_read, const struct TccState *state) {
   write_set_parameter(command, remote_address, master_address, command_mode_read, OPCODE2_SET_VENT, state->vent);
 }
 
-void write_set_parameter_room_temp(struct DataFrame *command, uint8_t remote_address, uint8_t master_address, uint8_t command_mode_read,
-                                   float temperature) {
+void write_set_parameter_room_temp(struct DataFrame *command, uint8_t remote_address, uint8_t master_address,
+                                   uint8_t command_mode_read, float temperature) {
   // Clamp temperature to a safe range (adjust if needed by protocol)
   float clamped = std::max(0.0f, std::min(temperature, 40.0f));
 
@@ -705,7 +745,6 @@ void write_read_envelope(DataFrame *cmd, uint8_t remote_address, uint8_t master_
   cmd->data[SET_PARAMETER_PAYLOAD_HEADER_SIZE + payload_size] = cmd->calculate_crc();
 }
 
-
 // Sends room temp to AC unit with the sensor configured in yaml.
 // Address 0x42 is reserved by Toshiba for an external room-temperature sensor.
 // Keep it independent of the runtime wall-remote address so collision-driven
@@ -718,8 +757,8 @@ void ToshibaAbClimate::send_remote_temp(float temp_c) {
   }
 
   // Encode raw = (C + OFFSET) * RATIO, mask per protocol
-  const uint8_t raw = static_cast<uint8_t>(
-      std::lround((temp_c + TEMPERATURE_CONVERSION_OFFSET) * TEMPERATURE_CONVERSION_RATIO));
+  const uint8_t raw =
+      static_cast<uint8_t>(std::lround((temp_c + TEMPERATURE_CONVERSION_OFFSET) * TEMPERATURE_CONVERSION_RATIO));
   const float rounded_temp_c = static_cast<float>(raw) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
   DataFrame cmd{};
   cmd.source      = TOSHIBA_TEMP_SENSOR;
@@ -764,10 +803,10 @@ void ToshibaAbClimate::send_read_block(uint8_t opcode2, uint16_t start, uint16_t
     static_cast<uint8_t>( length       & 0xFF),
   };
 
-  write_read_envelope(&cmd, this->remote_address_, this->master_address_, this->command_mode_read_, opcode2, tail, sizeof(tail));
+  write_read_envelope(&cmd, this->remote_address_, this->master_address_, this->command_mode_read_, opcode2, tail,
+                      sizeof(tail));
   this->send_command(cmd);  // enqueue; loop() will transmit when bus is idle
 }
-
 
 bool ToshibaAbClimate::is_announce_ack_frame_(const DataFrame *frame) const {
   return frame->size() > 5 && frame->raw[5] == 0x0D;
@@ -860,8 +899,8 @@ bool ToshibaAbClimate::is_tu2c_registration_query_(const DataFrame &frame) const
   if (!frame.is_tu2c() || frame.size() < 7) {
     return false;
   }
-  return frame.raw[0] == 0x0A && frame.raw[1] == this->tu2c_remote_address_ && frame.raw[2] == this->tu2c_master_address_ &&
-         frame.raw[4] == 0x49 && frame.raw[5] == 0x0D;
+  return frame.raw[0] == 0x0A && frame.raw[1] == this->tu2c_remote_address_ &&
+         frame.raw[2] == this->tu2c_master_address_ && frame.raw[4] == 0x49 && frame.raw[5] == 0x0D;
 }
 
 void ToshibaAbClimate::add_polled_sensor(uint8_t id, float scale, uint32_t interval_ms, sensor::Sensor *sensor) {
@@ -900,7 +939,8 @@ bool ToshibaAbClimate::enqueue_sensor_query_(uint8_t id) {
   // Skip if this sensor is already pending — the next interval will retry.
   constexpr uint8_t mask = MAX_PENDING_SENSOR_QUERIES - 1;
   for (uint8_t i = 0; i < this->pending_count_; i++) {
-    if (this->pending_sensor_queries_[(this->pending_head_ + i) & mask] == id) return false;
+    if (this->pending_sensor_queries_[(this->pending_head_ + i) & mask] == id)
+      return false;
   }
   const uint8_t tail = (this->pending_head_ + this->pending_count_) & mask;
   this->pending_sensor_queries_[tail] = id;
@@ -939,25 +979,25 @@ void ToshibaAbClimate::send_sensor_query(uint8_t sensor_id) {
   this->sensor_query_outstanding_ = true;
   this->last_sensor_query_ms_     = millis();  // timestamp for timeout handling
 
-
   this->send_command(cmd);  // enqueue; loop() will transmit when idle
 }
-
 
 void ToshibaAbClimate::drain_sensor_query_queue_() {
   // sensor_query_outstanding_ is cleared by process_sensor_value_() on a
   // matching reply, or by the sensor-query timeout watchdog if a reply never
   // arrives — so a stuck query never deadlocks the queue.
-  if (this->sensor_query_outstanding_) return;
-  if (this->pending_count_ == 0) return;
-  if (this->write_queue_.size() >= WRITE_QUEUE_THROTTLE) return;
+  if (this->sensor_query_outstanding_)
+    return;
+  if (this->pending_count_ == 0)
+    return;
+  if (this->write_queue_.size() >= WRITE_QUEUE_THROTTLE)
+    return;
 
   const uint8_t next = this->pending_sensor_queries_[this->pending_head_];
   this->pending_head_ = (this->pending_head_ + 1) & (MAX_PENDING_SENSOR_QUERIES - 1);
   this->pending_count_--;
   this->send_sensor_query(next);
 }
-
 
 void ToshibaAbClimate::process_sensor_value_(const DataFrame *frame) {
   if (frame == nullptr) {
@@ -971,8 +1011,8 @@ void ToshibaAbClimate::process_sensor_value_(const DataFrame *frame) {
 
   // Only accept replies from the indoor/master unit
   if (frame->source != this->master_address_) {
-    ESP_LOGW(TAG, "0x1A from 0x%02X ignored (expected master=0x%02X), last_id=0x%02X",
-             frame->source, this->master_address_, prev_id);
+    ESP_LOGW(TAG, "0x1A from 0x%02X ignored (expected master=0x%02X), last_id=0x%02X", frame->source,
+             this->master_address_, prev_id);
     this->sensor_query_outstanding_ = false;
     this->last_sensor_query_id_     = 0xFF;
     return;
@@ -980,8 +1020,8 @@ void ToshibaAbClimate::process_sensor_value_(const DataFrame *frame) {
 
   // All observed 0x1A replies start with: 80 EF ...
   if (frame->data_length < 5 || frame->data[0] != this->command_mode_write_ || frame->data[1] != 0xEF) {
-    ESP_LOGW(TAG, "0x1A unrecognized header (len=%u), last_id=0x%02X",
-             static_cast<unsigned>(frame->data_length), prev_id);
+    ESP_LOGW(TAG, "0x1A unrecognized header (len=%u), last_id=0x%02X", static_cast<unsigned>(frame->data_length),
+             prev_id);
     log_raw_data("0x1A unrecognized (bad header)", frame->raw, frame->size());
     this->sensor_query_outstanding_ = false;
     this->last_sensor_query_id_     = 0xFF;
@@ -992,9 +1032,8 @@ void ToshibaAbClimate::process_sensor_value_(const DataFrame *frame) {
   // A2 tag (undefined / no value):
   // payload = 80 EF 80 00 A2                     (len == 5)
   // -------------------------
-  if (frame->data_length == 5 &&
-      frame->data[2] == this->command_mode_write_ && frame->data[3] == 0x00 && frame->data[4] == 0xA2) {
-
+  if (frame->data_length == 5 && frame->data[2] == this->command_mode_write_ && frame->data[3] == 0x00 &&
+      frame->data[4] == 0xA2) {
     ESP_LOGW(TAG, "0x1A: sensor id=0x%02X returned A2 (undefined/not supported).", prev_id);
     // Treat as a completed (but empty) reply so the next poll can proceed
     this->sensor_query_outstanding_ = false;
@@ -1006,9 +1045,8 @@ void ToshibaAbClimate::process_sensor_value_(const DataFrame *frame) {
   // Short reply (no ID):
   // payload = 80 EF 80 00 2C  <hi> <lo>         (len == 7)
   // -------------------------
-  if (frame->data_length == 7 &&
-      frame->data[2] == this->command_mode_write_ && frame->data[3] == 0x00 && frame->data[4] == 0x2C) {
-
+  if (frame->data_length == 7 && frame->data[2] == this->command_mode_write_ && frame->data[3] == 0x00 &&
+      frame->data[4] == 0x2C) {
     const uint16_t raw = (static_cast<uint16_t>(frame->data[5]) << 8) | frame->data[6];
 
     if (prev_id != 0xFF) {
@@ -1036,10 +1074,8 @@ void ToshibaAbClimate::process_sensor_value_(const DataFrame *frame) {
   // Long reply (with ID):
   // payload = 80 EF 00 2C 08 00  <id>  <hi> <lo>   (len >= 9)
   // -------------------------
-  if (frame->data_length >= 9 &&
-      frame->data[2] == 0x00 && frame->data[3] == 0x2C &&
+  if (frame->data_length >= 9 && frame->data[2] == 0x00 && frame->data[3] == 0x2C &&
       frame->data[4] == this->command_mode_read_ && frame->data[5] == 0x00) {
-
     const uint8_t  id  = frame->data[6];
     const uint16_t raw = (static_cast<uint16_t>(frame->data[7]) << 8) | frame->data[8];
 
@@ -1068,7 +1104,6 @@ void ToshibaAbClimate::process_sensor_value_(const DataFrame *frame) {
   this->sensor_query_outstanding_ = false;
   this->last_sensor_query_id_     = 0xFF;
 }
-
 
 void ToshibaAbClimate::publish_dhw_current_temperature_(float temperature) {
   if (temperature < 0 || temperature > 95) {
@@ -1146,8 +1181,10 @@ climate::ClimateAction to_climate_action(const TccState* s) {
 
     case MODE_AUTO:
       // Fall back to flags if available; otherwise idle
-      if (s->cooling) return climate::CLIMATE_ACTION_COOLING;
-      if (s->heating) return climate::CLIMATE_ACTION_HEATING;
+      if (s->cooling)
+        return climate::CLIMATE_ACTION_COOLING;
+      if (s->heating)
+        return climate::CLIMATE_ACTION_HEATING;
       return climate::CLIMATE_ACTION_IDLE;
 
     case MODE_FAN_ONLY:
@@ -1251,11 +1288,21 @@ void ToshibaAbClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "  Command mode write: 0x%02X", this->command_mode_write_);
   const char *fmt_label;
   switch (this->data_reader.frame_format()) {
-    case FrameFormat::TU2C: fmt_label = "TU2C (U series)"; break;
-    case FrameFormat::A0: fmt_label = "A0-protocol"; break;
-    case FrameFormat::HM: fmt_label = "HM (RAV-RM/HM range)"; break;
-    case FrameFormat::ESTIA: fmt_label = "Estia first generation (R410A)"; break;
-    default: fmt_label = "TCC-Link"; break;
+    case FrameFormat::TU2C:
+      fmt_label = "TU2C (U series)";
+      break;
+    case FrameFormat::A0:
+      fmt_label = "A0-protocol";
+      break;
+    case FrameFormat::HM:
+      fmt_label = "HM (RAV-RM/HM range)";
+      break;
+    case FrameFormat::ESTIA:
+      fmt_label = "Estia first generation (R410A)";
+      break;
+    default:
+      fmt_label = "TCC-Link";
+      break;
   }
   ESP_LOGCONFIG(TAG, "  Frame format: %s%s%s", fmt_label, this->frame_format_auto_ ? " (auto" : "",
                 this->frame_format_auto_ ? (this->frame_format_confirmed_ ? ", confirmed)" : ", pending)") : "");
@@ -1304,8 +1351,10 @@ void ToshibaAbClimate::setup() {
     this->failed_crcs_sensor_->publish_state(0);
   }
   this->last_diagnostics_publish_ms_ = millis();
-  if (this->noise_rate_sensor_ != nullptr) this->noise_rate_sensor_->publish_state(0);
-  if (this->crc_failures_5min_sensor_ != nullptr) this->crc_failures_5min_sensor_->publish_state(0);
+  if (this->noise_rate_sensor_ != nullptr)
+    this->noise_rate_sensor_->publish_state(0);
+  if (this->crc_failures_5min_sensor_ != nullptr)
+    this->crc_failures_5min_sensor_->publish_state(0);
   ESP_LOGD("toshiba", "Setting up ToshibaClimate...");
 
   // Restore last-known mode/target_temp/fan_mode from preferences so we never
@@ -1326,7 +1375,8 @@ void ToshibaAbClimate::setup() {
     if (this->data_reader.frame_format() == FrameFormat::ESTIA) {
       this->traits_.set_supported_modes({climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT});
     } else {
-      this->traits_.set_supported_modes({climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_COOL});
+      this->traits_.set_supported_modes(
+          {climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_COOL});
     }
     this->traits_.set_supported_fan_modes({});
     this->traits_.set_supported_swing_modes({});
@@ -1339,8 +1389,6 @@ void ToshibaAbClimate::setup() {
     }
     this->traits_.set_visual_temperature_step(0.5);
   }
-  
-
 
   pinMode(16, OUTPUT); // Set GPIO16 low, only needed for my old board, to be removed soon
   digitalWrite(16, LOW);
@@ -1472,6 +1520,15 @@ void ToshibaAbClimate::setup() {
     });
   }
 
+  // A0 wall remotes always emit their keepalive. Unlike command traffic this
+  // is not an autonomous-only feature and is deliberately not gated by the
+  // legacy ping_enabled option.
+  this->set_interval(this->ping_interval_ms_, [this]() {
+    if (this->data_reader.frame_format() == FrameFormat::A0) {
+      this->send_estia_ping();
+    }
+  });
+
   this->update_frame_validation_();
   this->publish_bus_inventory_();
 
@@ -1537,8 +1594,7 @@ void ToshibaAbClimate::sync_from_received_state() {
     changes++;
   }
 
-  if (target_temperature != tcc_state.target_temp && tcc_state.target_temp >= 16 &&
-      tcc_state.target_temp <= 29) {
+  if (target_temperature != tcc_state.target_temp && tcc_state.target_temp >= 16 && tcc_state.target_temp <= 29) {
     // only update target temperature if it's within the supported range
     // (16-29°C)
     //this filters out misreadings from the remote
@@ -1546,8 +1602,7 @@ void ToshibaAbClimate::sync_from_received_state() {
     changes++;
   }
 
-  if (current_temperature != tcc_state.room_temp && tcc_state.room_temp >= 5 &&
-      tcc_state.room_temp <= 35) {
+  if (current_temperature != tcc_state.room_temp && tcc_state.room_temp >= 5 && tcc_state.room_temp <= 35) {
     // only update current temperature if it's within normal range
     //this filters out misreadings from the remote
     current_temperature = tcc_state.room_temp;
@@ -1587,7 +1642,8 @@ bool ToshibaAbClimate::begin_remote_error_autoreset_() {
 }
 
 void ToshibaAbClimate::autoreset_remote_error_() {
-  if (!this->begin_remote_error_autoreset_()) return;
+  if (!this->begin_remote_error_autoreset_())
+    return;
   auto command = DataFrame{};
   if (this->data_reader.frame_format() == FrameFormat::TU2C) {
     ESP_LOGI(TAG, "Autoreset errors: resending current mode/fan/target temperature");
@@ -1605,32 +1661,38 @@ void ToshibaAbClimate::autoreset_remote_error_() {
 
   ESP_LOGI(TAG, "Autoreset errors: power cycling and restoring mode/fan/target temperature/vent");
   power_state.power = POWER_OFF;
-  write_set_parameter_power(&command, this->remote_address_, this->master_address_, this->command_mode_read_, &power_state);
+  write_set_parameter_power(&command, this->remote_address_, this->master_address_, this->command_mode_read_,
+                            &power_state);
   this->send_command(command);
 
   power_state.power = POWER_ON;
   command = DataFrame{};
-  write_set_parameter_power(&command, this->remote_address_, this->master_address_, this->command_mode_read_, &power_state);
+  write_set_parameter_power(&command, this->remote_address_, this->master_address_, this->command_mode_read_,
+                            &power_state);
   this->send_command(command);
 
   command = DataFrame{};
-  write_set_parameter_mode(&command, this->remote_address_, this->master_address_, this->command_mode_read_, &last_state);
+  write_set_parameter_mode(&command, this->remote_address_, this->master_address_, this->command_mode_read_,
+                           &last_state);
   this->send_command(command);
 
   command = DataFrame{};
-  write_set_parameter_flags(&command, this->remote_address_, this->master_address_, this->command_mode_read_, &last_state,
-                            COMMAND_SET_TEMP | COMMAND_SET_FAN, this->is_hm_variant());
+  write_set_parameter_flags(&command, this->remote_address_, this->master_address_, this->command_mode_read_,
+                            &last_state, COMMAND_SET_TEMP | COMMAND_SET_FAN, this->is_hm_variant());
   this->send_command(command);
 
   command = DataFrame{};
-  write_set_parameter_vent(&command, this->remote_address_, this->master_address_, this->command_mode_read_, &last_state);
+  write_set_parameter_vent(&command, this->remote_address_, this->master_address_, this->command_mode_read_,
+                           &last_state);
   this->send_command(command);
 }
 
 void ToshibaAbClimate::update_remote_error_(bool active) {
-  if (this->remote_error_active_ == active) return;
+  if (this->remote_error_active_ == active)
+    return;
   this->remote_error_active_ = active;
-  if (this->remote_error_binary_sensor_) this->remote_error_binary_sensor_->publish_state(active);
+  if (this->remote_error_binary_sensor_)
+    this->remote_error_binary_sensor_->publish_state(active);
   if (!active) {
     this->remote_error_autoreset_attempts_ = 0;
     this->remote_error_autoreset_give_up_logged_ = false;
@@ -1667,11 +1729,12 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         // The full raw frame may be longer; guard on size()
         if (this->is_announce_ack_frame_(frame)) {
           if (millis() < INITIAL_FRAME_SEND_BLOCK_MILLIS) {
-            ESP_LOGI(TAG, "Ignoring announce ACK (0x0D) from 0x%02X during initial %us announce delay",
-                     frame->source, INITIAL_FRAME_SEND_BLOCK_MILLIS / 1000);
+            ESP_LOGI(TAG, "Ignoring announce ACK (0x0D) from 0x%02X during initial %us announce delay", frame->source,
+                     INITIAL_FRAME_SEND_BLOCK_MILLIS / 1000);
           } else if (frame->dest != this->remote_address_) {
-            ESP_LOGI(TAG, "Ignoring announce ACK (0x0D) from 0x%02X addressed to remote 0x%02X; this remote is "
-                          "0x%02X",
+            ESP_LOGI(TAG,
+                     "Ignoring announce ACK (0x0D) from 0x%02X addressed to remote 0x%02X; this remote is "
+                     "0x%02X",
                      frame->source, frame->dest, this->remote_address_);
           } else {
             this->announce_ack_received_ = true;
@@ -1728,13 +1791,11 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           tcc_state.vent =
               (frame->data[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_VENT_MASK) >> STATUS_DATA_VENT_SHIFT_BITS;
           tcc_state.target_temp =
-              static_cast<float>(frame->data[STATUS_DATA_TARGET_TEMP_BYTE]) /
-                  TEMPERATURE_CONVERSION_RATIO -
+              static_cast<float>(frame->data[STATUS_DATA_TARGET_TEMP_BYTE]) / TEMPERATURE_CONVERSION_RATIO -
               TEMPERATURE_CONVERSION_OFFSET;
 
-          ESP_LOGD(TAG, "Power: %d, Mode: %02X, Fan: %02X, Vent: %02X, Target Temp: %.1f",
-                   tcc_state.power, tcc_state.mode, tcc_state.fan, tcc_state.vent, tcc_state.target_temp);
-
+          ESP_LOGD(TAG, "Power: %d, Mode: %02X, Fan: %02X, Vent: %02X, Target Temp: %.1f", tcc_state.power,
+                   tcc_state.mode, tcc_state.fan, tcc_state.vent, tcc_state.target_temp);
 
           sync_from_received_state();
 
@@ -1763,19 +1824,19 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
               (frame->data[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_VENT_MASK) >> STATUS_DATA_VENT_SHIFT_BITS;
 
           tcc_state.target_temp =
-              static_cast<float>(frame->data[STATUS_DATA_TARGET_TEMP_BYTE]) /
-                  TEMPERATURE_CONVERSION_RATIO -
+              static_cast<float>(frame->data[STATUS_DATA_TARGET_TEMP_BYTE]) / TEMPERATURE_CONVERSION_RATIO -
               TEMPERATURE_CONVERSION_OFFSET;
 
           if (frame->data_length > rt_off && frame->data[rt_off] > 1) {
             tcc_state.room_temp =
-                static_cast<float>(frame->data[rt_off]) / TEMPERATURE_CONVERSION_RATIO -
-                TEMPERATURE_CONVERSION_OFFSET;
+                static_cast<float>(frame->data[rt_off]) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
           }
 
           tcc_state.preheating  = (frame->data[STATUS_DATA_FLAGS_BYTE] & 0b00000010) >> 1;
           tcc_state.filter_alert = (frame->data[STATUS_DATA_FLAGS_BYTE] & 0b10000000) >> 7;
-          ESP_LOGD(TAG, "Power: %d, Mode: %02X, Fan: %02X, Vent: %02X, Target Temp: %.1f, Room Temp: %.1f, Preheating: %d, Filter Alert: %d",
+          ESP_LOGD(TAG,
+                   "Power: %d, Mode: %02X, Fan: %02X, Vent: %02X, Target Temp: %.1f, Room Temp: %.1f, Preheating: %d, "
+                   "Filter Alert: %d",
                    tcc_state.power, tcc_state.mode, tcc_state.fan, tcc_state.vent, tcc_state.target_temp,
                    tcc_state.room_temp, tcc_state.preheating, tcc_state.filter_alert);
 
@@ -1809,9 +1870,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         this->handle_remote_address_collision_(frame->source, "Remote announce collision detected");
 
       // Remote temperature push: 40 00 55 05 08 81 01 6E 00 ..
-      } else if (frame->opcode1 == OPCODE_TEMPERATURE &&
-          frame->data_length >= 4 &&
-          frame->data[1] == 0x81) {
+      } else if (frame->opcode1 == OPCODE_TEMPERATURE && frame->data_length >= 4 && frame->data[1] == 0x81) {
         uint8_t raw = frame->data[3] & TEMPERATURE_DATA_MASK;  // raw[7]
         float rmt = static_cast<float>(raw) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
 
@@ -1821,12 +1880,9 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         this->update_remote_error_(false);
         // sync_from_received_state(); we don't update the state, we wait for the next status update from master
         // remote temperature is sent regardless of DN32 setting, ac decides wether to use it or ignore it
-        
 
       // Remote error report: 40 FE 55 02 0E 49 AE
-      } else if (frame->opcode1 == OPCODE_TEMPERATURE &&
-                 frame->data_length == 2 &&
-                 frame->data[1] == 0x49) {
+      } else if (frame->opcode1 == OPCODE_TEMPERATURE && frame->data_length == 2 && frame->data[1] == 0x49) {
         log_data_frame("Remote error report", frame);
         this->update_remote_error_(true);
         if (this->autoreset_errors_) {
@@ -1836,34 +1892,28 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         }
 
       // Remote PING sent every 30s: 40 00 15 07 08 0C 81 00 00 48 00 ..
-      } else if (frame->opcode1 == OPCODE_ERROR_HISTORY &&      // 0x15 envelope
-                frame->data_length >= 3 &&
-                frame->data[0] == this->command_mode_read_ &&
-                frame->data[1] == OPCODE2_PING_PONG &&         // 0x0C
-                frame->data[2] == OPCODE2_READ_STATUS) {       // 0x81
+      } else if (frame->opcode1 == OPCODE_ERROR_HISTORY &&  // 0x15 envelope
+                 frame->data_length >= 3 && frame->data[0] == this->command_mode_read_ &&
+                 frame->data[1] == OPCODE2_PING_PONG &&    // 0x0C
+                 frame->data[2] == OPCODE2_READ_STATUS) {  // 0x81
         log_data_frame("Remote PING", frame);
         this->record_discovered_address_(frame->source, true);
         
         // Auto-update master address if enabled and different from current
-        if (this->master_address_auto_ &&
-        frame->dest != this->master_address_) {
+        if (this->master_address_auto_ && frame->dest != this->master_address_) {
           ESP_LOGI(TAG, "Remote ping addressed to new master: 0x%02X, updating master address", frame->dest);
           this->master_address_ = frame->dest;
           this->master_address_confirmed_ = false;
         }
-      
-      // Remote 40:00:15:06:08:E8:00:01:00:9E:2C that is sent every minute, the master responds with an hourly counter (time on?)
-      } else if (frame->opcode1 == OPCODE_ERROR_HISTORY &&      // 0x15 envelope
-                frame->data_length >= 6 &&
-                frame->data[0] == this->command_mode_read_ &&
-                frame->data[1] == 0xE8 &&
-                frame->data[3] == 0x01 &&                 
-                frame->data[5] == 0x9E) {                       
-                
+
+        // Remote 40:00:15:06:08:E8:00:01:00:9E:2C that is sent every minute, the master responds with an hourly counter
+        // (time on?)
+      } else if (frame->opcode1 == OPCODE_ERROR_HISTORY &&  // 0x15 envelope
+                 frame->data_length >= 6 && frame->data[0] == this->command_mode_read_ && frame->data[1] == 0xE8 &&
+                 frame->data[3] == 0x01 && frame->data[5] == 0x9E) {
         log_data_frame("Remote Timer Read", frame);
 
-      } else if (frame->opcode1 == OPCODE_PARAMETER &&
-                 frame->data_length >= 3) {
+      } else if (frame->opcode1 == OPCODE_PARAMETER && frame->data_length >= 3) {
         // Remote command frames (opcode1 0x11)
         if (frame->data[1] == 0x4C) {
           log_data_frame("Remote command: fan/mode/temp change", frame);
@@ -1878,26 +1928,22 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         // unknown remote message
         log_data_frame("Unknown remote data", frame);
       }
-    
-    } else if (frame->opcode1 == OPCODE_PARAMETER &&
-               frame->data_length == 4 &&
-               frame->data[1] == 0x89) {
+
+    } else if (frame->opcode1 == OPCODE_PARAMETER && frame->data_length == 4 && frame->data[1] == 0x89) {
       // External room-temperature report frame. Do not key this on a fixed
       // source address (e.g. 0x42), because runtime remote id can vary.
 
-        std::string label = this->ext_temp_sensor_name_.empty()
-                    ? "Yaml temp sensor"
-                    : this->ext_temp_sensor_name_;
-        log_data_frame(label, frame);
-        uint8_t raw = frame->data[2] & TEMPERATURE_DATA_MASK;  // raw[7]
-        float sensor_temp = static_cast<float>(raw) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
-        ESP_LOGD(TAG, "%s: %.1f °C", label.c_str(), sensor_temp);
+      std::string label = this->ext_temp_sensor_name_.empty() ? "Yaml temp sensor" : this->ext_temp_sensor_name_;
+      log_data_frame(label, frame);
+      uint8_t raw = frame->data[2] & TEMPERATURE_DATA_MASK;  // raw[7]
+      float sensor_temp = static_cast<float>(raw) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
+      ESP_LOGD(TAG, "%s: %.1f °C", label.c_str(), sensor_temp);
     } else {
-    // Unknown source handling
-    ESP_LOGD(TAG, "Received data from unknown source: %02X", frame->source);
-    log_data_frame("Unknown source", frame);
+      // Unknown source handling
+      ESP_LOGD(TAG, "Received data from unknown source: %02X", frame->source);
+      log_data_frame("Unknown source", frame);
 
-    // Auto-detect master address from master parameters frame
+      // Auto-detect master address from master parameters frame
       if (this->master_address_auto_) {
       // First, check for announce ACK pattern from an unknown source: if the
       // raw frame contains 0x0D at byte index 5 and is addressed to this remote,
@@ -1907,14 +1953,16 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         // and the initial announce delay has elapsed. ACKs received before the
         // first announce is sent must be for another remote.
         if (millis() < INITIAL_FRAME_SEND_BLOCK_MILLIS) {
-          ESP_LOGI(TAG, "Ignoring announce ACK (0x0D) from 0x%02X during initial %us announce delay",
-                   frame->source, INITIAL_FRAME_SEND_BLOCK_MILLIS / 1000);
+          ESP_LOGI(TAG, "Ignoring announce ACK (0x0D) from 0x%02X during initial %us announce delay", frame->source,
+                   INITIAL_FRAME_SEND_BLOCK_MILLIS / 1000);
         } else if (frame->dest != this->remote_address_) {
-          ESP_LOGI(TAG, "Ignoring announce ACK (0x0D) from 0x%02X addressed to remote 0x%02X; this remote is "
-                        "0x%02X",
+          ESP_LOGI(TAG,
+                   "Ignoring announce ACK (0x0D) from 0x%02X addressed to remote 0x%02X; this remote is "
+                   "0x%02X",
                    frame->source, frame->dest, this->remote_address_);
         } else if (!this->announce_ack_received_) {
-          ESP_LOGI(TAG, "Auto-detected master address from announce ACK: 0x%02X, updating master address", frame->source);
+          ESP_LOGI(TAG, "Auto-detected master address from announce ACK: 0x%02X, updating master address",
+                   frame->source);
           this->master_address_ = frame->source;
           // Mark that we've received the announce ACK so we don't repeatedly auto-update
           this->announce_ack_received_ = true;
@@ -1950,8 +1998,7 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
   const uint8_t dest = frame->raw[2];
   const size_t payload_offset = 4;
   const size_t payload_available = size > payload_offset ? size - payload_offset : 0;
-  const bool has_tail_signature =
-      size >= 3 && frame->raw[size - 3] == 0x00 && frame->raw[size - 2] == 0x3A;
+  const bool has_tail_signature = size >= 3 && frame->raw[size - 3] == 0x00 && frame->raw[size - 2] == 0x3A;
 
   if (frame_length == 0x0A && has_tail_signature) {
     log_raw_data("Master keepalive", frame->raw, size);
@@ -1996,8 +2043,7 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
       frame->raw[payload_offset + 1] == 0x38 && size > 7) {
     log_raw_data("Remote room temp frame", frame->raw, size);
     const uint8_t raw_temp = frame->raw[7];
-    const float room_temp =
-        static_cast<float>(raw_temp) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
+    const float room_temp = static_cast<float>(raw_temp) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
     tcc_state.room_temp = room_temp;
     ESP_LOGD(TAG, "Remote %02X room temp: %.1f", source, room_temp);
     return;
@@ -2017,13 +2063,10 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
     tcc_state.power = (payload[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_POWER_MASK);
     tcc_state.mode = decode_status_mode(payload[STATUS_DATA_MODEPOWER_BYTE], true);
     tcc_state.fan = (payload[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_FAN_MASK) >> STATUS_DATA_FAN_SHIFT_BITS;
-    tcc_state.vent =
-        (payload[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_VENT_MASK) >> STATUS_DATA_VENT_SHIFT_BITS;
-    tcc_state.target_temp =
-        static_cast<float>(payload[STATUS_DATA_TARGET_TEMP_BYTE]) / TEMPERATURE_CONVERSION_RATIO -
-        TEMPERATURE_CONVERSION_OFFSET;
-    if (payload_available >= STATUS_DATA_TARGET_TEMP_BYTE + 2 &&
-        payload[STATUS_DATA_TARGET_TEMP_BYTE + 1] > 1) {
+    tcc_state.vent = (payload[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_VENT_MASK) >> STATUS_DATA_VENT_SHIFT_BITS;
+    tcc_state.target_temp = static_cast<float>(payload[STATUS_DATA_TARGET_TEMP_BYTE]) / TEMPERATURE_CONVERSION_RATIO -
+                            TEMPERATURE_CONVERSION_OFFSET;
+    if (payload_available >= STATUS_DATA_TARGET_TEMP_BYTE + 2 && payload[STATUS_DATA_TARGET_TEMP_BYTE + 1] > 1) {
       tcc_state.room_temp =
           static_cast<float>(payload[STATUS_DATA_TARGET_TEMP_BYTE + 1]) / TEMPERATURE_CONVERSION_RATIO -
           TEMPERATURE_CONVERSION_OFFSET;
@@ -2031,11 +2074,9 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
     tcc_state.preheating = (payload[STATUS_DATA_FLAGS_BYTE] & 0b00000010) >> 1;
     tcc_state.filter_alert = (payload[STATUS_DATA_FLAGS_BYTE] & 0b10000000) >> 7;
 
-    ESP_LOGD(TAG,
-             "TU2C %sstatus: power=%d mode=%02X fan=%02X vent=%02X target=%.1f room=%.1f preheat=%d filter=%d",
-             is_extended_status_frame ? "extended " : "",
-             tcc_state.power, tcc_state.mode, tcc_state.fan, tcc_state.vent, tcc_state.target_temp,
-             tcc_state.room_temp, tcc_state.preheating, tcc_state.filter_alert);
+    ESP_LOGD(TAG, "TU2C %sstatus: power=%d mode=%02X fan=%02X vent=%02X target=%.1f room=%.1f preheat=%d filter=%d",
+             is_extended_status_frame ? "extended " : "", tcc_state.power, tcc_state.mode, tcc_state.fan,
+             tcc_state.vent, tcc_state.target_temp, tcc_state.room_temp, tcc_state.preheating, tcc_state.filter_alert);
     sync_from_received_state();
     return;
   }
@@ -2058,16 +2099,15 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
     // Estia A0-protocol: CRC-16/MCRF4XX
     size_t fsz = frame->estia_size();
     if (!frame->validate_estia_crc()) {
-      ESP_LOGD(TAG, "CRC FAIL (recv=0x%04X calc=0x%04X size=%d)",
-               frame->estia_crc_received(), frame->calculate_estia_crc(), fsz);
+      ESP_LOGD(TAG, "CRC FAIL (recv=0x%04X calc=0x%04X size=%d)", frame->estia_crc_received(),
+               frame->calculate_estia_crc(), fsz);
       // Dump full frame with decode attempt
       {
         std::string hex;
         char hbuf[4];
-        // Reconstruct full frame with A0:00 prefix
-        hex += "A0:00:";
         for (size_t i = 0; i < fsz; i++) {
-          if (i > 0) hex += ':';
+          if (i > 0)
+            hex += ':';
           snprintf(hbuf, sizeof(hbuf), "%02X", frame->raw[i]);
           hex += hbuf;
         }
@@ -2077,29 +2117,52 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
         uint8_t fl = frame->raw[1];
         const char *type_name = "???";
         switch (ft) {
-          case 0x10: type_name = "HEARTBEAT"; break;
-          case 0x11: type_name = "COMMAND"; break;
-          case 0x15: type_name = "DATA_REQ"; break;
-          case 0x18: type_name = "ACK/RESP"; break;
-          case 0x1C: type_name = "STATE_CHG"; break;
-          case 0x55: type_name = "STATUS_SHORT"; break;
-          case 0x58: type_name = "STATUS"; break;
+          case 0x10:
+            type_name = "HEARTBEAT";
+            break;
+          case 0x11:
+            type_name = "COMMAND";
+            break;
+          case 0x15:
+            type_name = "DATA_REQ";
+            break;
+          case 0x18:
+            type_name = "ACK/RESP";
+            break;
+          case 0x1C:
+            type_name = "STATE_CHG";
+            break;
+          case 0x55:
+            type_name = "STATUS_SHORT";
+            break;
+          case 0x58:
+            type_name = "STATUS";
+            break;
         }
-        uint16_t src = (fsz > 4) ? ((frame->raw[3] << 8) | frame->raw[4]) : 0;
-        uint16_t dst = (fsz > 6) ? ((frame->raw[5] << 8) | frame->raw[6]) : 0;
+        const uint8_t src = (fsz > 4) ? frame->raw[4] : 0;
+        const uint8_t dst = (fsz > 6) ? frame->raw[6] : 0;
         const char *src_name = "???";
-        if (src == 0x0800) src_name = "MASTER";
-        else if (src == 0x0040) src_name = "REMOTE";
-        else if (src == 0x0041) src_name = "0-10V";
-        else if (src == 0x0390) src_name = "KNX-GW";
+        if (src == this->master_address_)
+          src_name = "MASTER";
+        else if (src == 0x40)
+          src_name = "REMOTE";
+        else if (src == 0x41)
+          src_name = "0-10V";
+        else if (src == 0x90)
+          src_name = "KNX-GW";
         const char *dst_name = "???";
-        if (dst == 0x0800) dst_name = "MASTER";
-        else if (dst == 0x0040) dst_name = "REMOTE";
-        else if (dst == 0x0041) dst_name = "0-10V";
-        else if (dst == 0x00FE) dst_name = "BROADCAST";
-        else if (dst == 0x0390) dst_name = "KNX-GW";
-        ESP_LOGD(TAG, "  type=0x%02X(%s) len=%u src=0x%04X(%s) dst=0x%04X(%s)",
-                 ft, type_name, fl, src, src_name, dst, dst_name);
+        if (dst == this->master_address_)
+          dst_name = "MASTER";
+        else if (dst == 0x40)
+          dst_name = "REMOTE";
+        else if (dst == 0x41)
+          dst_name = "0-10V";
+        else if (dst == 0xFE)
+          dst_name = "BROADCAST";
+        else if (dst == 0x90)
+          dst_name = "KNX-GW";
+        ESP_LOGD(TAG, "  type=0x%02X(%s) len=%u src=0x%02X(%s) dst=0x%02X(%s)", ft, type_name, fl, src, src_name, dst,
+                 dst_name);
         if (fsz > 8) {
           ESP_LOGD(TAG, "  dtype=%02X:%02X", frame->raw[7], frame->raw[8]);
         }
@@ -2109,45 +2172,89 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
     }
     uint8_t frame_type = frame->raw[0];
     uint8_t frame_len = frame->raw[1];
-    ESP_LOGV(TAG, "RX frame: type=0x%02X len=%d src=0x%02X%02X dst=0x%02X%02X",
-             frame_type, frame_len,
-             frame->raw[3], frame->raw[4],
-             frame->raw[5], frame->raw[6]);
-    log_raw_data("Estia", frame->raw, fsz);
+    const uint8_t src = frame->raw[4];
+    const uint8_t dst = frame->raw[6];
+    log_a0_data_frame("A0 frame", frame);
+    ESP_LOGV(TAG, "A0 RX: %02X -> %02X type=0x%02X len=%u", src, dst, frame_type, frame_len);
+
+    // A0 has the same logical one-byte node IDs as TCC-Link/HM. The bytes
+    // preceding them are routing modes, not part of either address. Learn the
+    // master only from its keepalive, just as the other protocols do.
+    if (frame_type == OPCODE_PING && src != this->remote_address_) {
+      if (!this->master_address_confirmed_ || this->master_address_ != src) {
+        ESP_LOGI(TAG, "A0 master keepalive from 0x%02X; using it as master address", src);
+      }
+      this->master_address_ = src;
+      this->master_address_confirmed_ = true;
+      this->record_discovered_address_(src, false);
+      this->confirm_frame_format_(FrameFormat::A0, "valid keepalive from master");
+    }
+    // Run A0 frames through the common receive pipeline hooks too. This makes
+    // raw-frame automations and echo suppression behave consistently.
+    if (this->is_own_tx_echo_(frame)) {
+      ESP_LOGV(TAG, "A0 echo detected and ignored");
+      return true;
+    }
+    if (src == this->remote_address_ && this->remote_address_auto_) {
+      this->handle_remote_address_collision_(src, "A0 remote-address collision");
+    }
+    this->set_data_received_callback_.call(frame);
 
     // Verbose decode of all Estia frames
     {
-      uint16_t src_addr = (frame->raw[3] << 8) | frame->raw[4];
-      uint16_t dst_addr = (frame->raw[5] << 8) | frame->raw[6];
+      uint8_t src_addr = frame->raw[4];
+      uint8_t dst_addr = frame->raw[6];
       uint16_t dtype = (frame_len >= 7) ? ((frame->raw[7] << 8) | frame->raw[8]) : 0;
 
       const char *src_name = "???";
-      if (src_addr == 0x0800) src_name = "MASTER";
-      else if (src_addr == 0x0040) src_name = "REMOTE";
-      else if (src_addr == 0x0041) src_name = "0-10V";
-      else if (src_addr == 0x0390) src_name = "KNX-GW";
+      if (src_addr == this->master_address_)
+        src_name = "MASTER";
+      else if (src_addr == 0x40)
+        src_name = "REMOTE";
+      else if (src_addr == 0x41)
+        src_name = "0-10V";
+      else if (src_addr == 0x90)
+        src_name = "KNX-GW";
 
       const char *dst_name = "???";
-      if (dst_addr == 0x0800) dst_name = "MASTER";
-      else if (dst_addr == 0x0040) dst_name = "REMOTE";
-      else if (dst_addr == 0x0041) dst_name = "0-10V";
-      else if (dst_addr == 0x00FE) dst_name = "BROADCAST";
-      else if (dst_addr == 0x0390) dst_name = "KNX-GW";
+      if (dst_addr == this->master_address_)
+        dst_name = "MASTER";
+      else if (dst_addr == 0x40)
+        dst_name = "REMOTE";
+      else if (dst_addr == 0x41)
+        dst_name = "0-10V";
+      else if (dst_addr == 0xFE)
+        dst_name = "BROADCAST";
+      else if (dst_addr == 0x90)
+        dst_name = "KNX-GW";
 
       const char *type_name = "???";
       switch (frame_type) {
-        case 0x10: type_name = "HEARTBEAT"; break;
-        case 0x11: type_name = "COMMAND"; break;
-        case 0x15: type_name = "DATA_REQ"; break;
-        case 0x18: type_name = "ACK/DATA_RESP"; break;
-        case 0x1C: type_name = "STATE_CHANGE"; break;
-        case 0x55: type_name = "STATUS_SHORT"; break;
-        case 0x58: type_name = "STATUS"; break;
+        case 0x10:
+          type_name = "HEARTBEAT";
+          break;
+        case 0x11:
+          type_name = "COMMAND";
+          break;
+        case 0x15:
+          type_name = "DATA_REQ";
+          break;
+        case 0x18:
+          type_name = "ACK/DATA_RESP";
+          break;
+        case 0x1C:
+          type_name = "STATE_CHANGE";
+          break;
+        case 0x55:
+          type_name = "STATUS_SHORT";
+          break;
+        case 0x58:
+          type_name = "STATUS";
+          break;
       }
 
-      ESP_LOGV(TAG, "  %s(0x%02X) %s(0x%04X)->%s(0x%04X) dtype=%02X:%02X",
-               type_name, frame_type, src_name, src_addr, dst_name, dst_addr,
-               frame->raw[7], frame->raw[8]);
+      ESP_LOGV(TAG, "  %s(0x%02X) %s(0x%02X)->%s(0x%02X) dtype=%02X:%02X", type_name, frame_type, src_name, src_addr,
+               dst_name, dst_addr, frame->raw[7], frame->raw[8]);
 
       // Decode known dtype payloads
       if (dtype == 0x03C6 && frame_len >= 15) {
@@ -2156,28 +2263,23 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
         float current = frame->raw[12] / 2.0f - 16.0f;
         float setpoint = frame->raw[13] / 2.0f - 16.0f;
         float outdoor = frame->raw[14] / 2.0f - 16.0f;
-        ESP_LOGV(TAG, "    flags=0x%02X [%s%s%s] mode=0x%02X unknown=0x%02X",
-                 flags,
-                 (flags & 0x01) ? "POWER " : "",
-                 (flags & 0x20) ? "COOL " : "",
-                 (flags & 0x40) ? "HEAT " : "",
-                 frame->raw[10], frame->raw[11]);
-        ESP_LOGV(TAG, "    current=%.1f°C(0x%02X) setpoint=%.1f°C(0x%02X) outdoor=%.1f°C(0x%02X)",
-                 current, frame->raw[12], setpoint, frame->raw[13], outdoor, frame->raw[14]);
+        ESP_LOGV(TAG, "    flags=0x%02X [%s%s%s] mode=0x%02X unknown=0x%02X", flags, (flags & 0x01) ? "POWER " : "",
+                 (flags & 0x20) ? "COOL " : "", (flags & 0x40) ? "HEAT " : "", frame->raw[10], frame->raw[11]);
+        ESP_LOGV(TAG, "    current=%.1f°C(0x%02X) setpoint=%.1f°C(0x%02X) outdoor=%.1f°C(0x%02X)", current,
+                 frame->raw[12], setpoint, frame->raw[13], outdoor, frame->raw[14]);
         if (frame_len >= 18) {
           float r15 = frame->raw[15] / 2.0f - 16.0f;
           float r16 = frame->raw[16] / 2.0f - 16.0f;
           float r17 = frame->raw[17] / 2.0f - 16.0f;
-          ESP_LOGV(TAG, "    repeat: [15]=%.1f°C(0x%02X) [16]=%.1f°C(0x%02X) [17]=%.1f°C(0x%02X)",
-                   r15, frame->raw[15], r16, frame->raw[16], r17, frame->raw[17]);
+          ESP_LOGV(TAG, "    repeat: [15]=%.1f°C(0x%02X) [16]=%.1f°C(0x%02X) [17]=%.1f°C(0x%02X)", r15, frame->raw[15],
+                   r16, frame->raw[16], r17, frame->raw[17]);
         }
       } else if (dtype == 0x03C1 && frame_len >= 10) {
         // Setpoint command
         uint8_t subcmd = frame->raw[9];
         uint8_t temp_enc = frame->raw[10];
         float temp = temp_enc / 2.0f - 16.0f;
-        ESP_LOGV(TAG, "    SETPOINT %s temp=%.1f°C(0x%02X)",
-                 subcmd == 0x01 ? "COOL" : "HEAT", temp, temp_enc);
+        ESP_LOGV(TAG, "    SETPOINT %s temp=%.1f°C(0x%02X)", subcmd == 0x01 ? "COOL" : "HEAT", temp, temp_enc);
       } else if (dtype == 0x03C0) {
         // Mode command
         uint8_t cmd = frame->raw[9];
@@ -2191,10 +2293,14 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
         uint8_t ack_d1 = frame->raw[9];
         uint8_t ack_d2 = frame->raw[10];
         const char *ack_what = "???";
-        if (ack_d1 == 0x03 && ack_d2 == 0xC0) ack_what = "MODE";
-        else if (ack_d1 == 0x03 && ack_d2 == 0xC1) ack_what = "SETPOINT";
-        else if (ack_d1 == 0x00 && ack_d2 == 0x41) ack_what = "POWER";
-        else if (ack_d1 == 0x00 && ack_d2 == 0x5F) ack_what = "DEMAND";
+        if (ack_d1 == 0x03 && ack_d2 == 0xC0)
+          ack_what = "MODE";
+        else if (ack_d1 == 0x03 && ack_d2 == 0xC1)
+          ack_what = "SETPOINT";
+        else if (ack_d1 == 0x00 && ack_d2 == 0x41)
+          ack_what = "POWER";
+        else if (ack_d1 == 0x00 && ack_d2 == 0x5F)
+          ack_what = "DEMAND";
         ESP_LOGV(TAG, "    ACK for %s(%02X:%02X)", ack_what, ack_d1, ack_d2);
       } else if (dtype == 0x005F) {
         // 0-10V demand command
@@ -2204,8 +2310,8 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
         // 0-10V status
         uint8_t demand = frame->raw[10];
         uint8_t min_temp = frame->raw[11];
-        ESP_LOGV(TAG, "    DEMAND status=%u/15 min_temp=%u°C -> setpoint=%d°C",
-                 demand, min_temp, demand > 0 ? 10 + demand * 3 : 20);
+        ESP_LOGV(TAG, "    DEMAND status=%u/15 min_temp=%u°C -> setpoint=%d°C", demand, min_temp,
+                 demand > 0 ? 10 + demand * 3 : 20);
       } else if (dtype == 0x00E8 && frame_len >= 10) {
         uint8_t subtype = frame->raw[9];
         if (frame_type == 0x15) {
@@ -2284,9 +2390,8 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       bool is_heating = (flags & 0x40) != 0;
 
       ESP_LOGV(TAG, "Status: power=%s flags=0x%02X %s current=%.1f°C setpoint=%.1f°C outdoor=%.1f°C",
-               power_on ? "ON" : "OFF", flags,
-               is_cooling ? "COOL" : (is_heating ? "HEAT" : "???"),
-               current_temp, setpoint, outdoor_temp);
+               power_on ? "ON" : "OFF", flags, is_cooling ? "COOL" : (is_heating ? "HEAT" : "???"), current_temp,
+               setpoint, outdoor_temp);
 
       // Initial status on first 0x58 after network is ready
       if (!estia_was_connected_ && network::is_connected()) {
@@ -2308,8 +2413,9 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
         new_mode = climate::CLIMATE_MODE_HEAT;
       }
       if (this->mode != new_mode) {
-        const char *mode_str = (new_mode == climate::CLIMATE_MODE_OFF) ? "OFF" :
-                               (new_mode == climate::CLIMATE_MODE_COOL) ? "COOL" : "HEAT";
+        const char *mode_str = (new_mode == climate::CLIMATE_MODE_OFF)    ? "OFF"
+                               : (new_mode == climate::CLIMATE_MODE_COOL) ? "COOL"
+                                                                          : "HEAT";
         ESP_LOGI(TAG, "Status: mode=%s", mode_str);
         this->mode = new_mode;
         changes++;
@@ -2366,14 +2472,14 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
         new_mode = climate::CLIMATE_MODE_HEAT;
       }
 
-      ESP_LOGV(TAG, "State change: flags=0x%02X power=%s %s setpoint=%.1f°C",
-               flags, power_on ? "ON" : "OFF",
+      ESP_LOGV(TAG, "State change: flags=0x%02X power=%s %s setpoint=%.1f°C", flags, power_on ? "ON" : "OFF",
                is_cooling ? "COOL" : (is_heating ? "HEAT" : "???"), setpoint);
 
       int changes = 0;
       if (this->mode != new_mode) {
-        const char *mode_str = (new_mode == climate::CLIMATE_MODE_OFF) ? "OFF" :
-                               (new_mode == climate::CLIMATE_MODE_COOL) ? "COOL" : "HEAT";
+        const char *mode_str = (new_mode == climate::CLIMATE_MODE_OFF)    ? "OFF"
+                               : (new_mode == climate::CLIMATE_MODE_COOL) ? "COOL"
+                                                                          : "HEAT";
         ESP_LOGI(TAG, "Status: mode=%s", mode_str);
         this->mode = new_mode;
         changes++;
@@ -2416,8 +2522,7 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
     //   [6-7] = Heating_Compressor_Hours
     //   [8-9] = WaterPump_Hours
     //   [14-15] = BackupHeater_Hours
-    if (frame_type == 0x18 && frame_len >= 26 &&
-        frame->raw[7] == 0x00 && frame->raw[8] == 0xE8 &&
+    if (frame_type == 0x18 && frame_len >= 26 && frame->raw[7] == 0x00 && frame->raw[8] == 0xE8 &&
         frame->raw[9] == 0xC1) {
       // raw[]: 18:26:00:src:src:dst:dst:00:E8:C1:01:00:data...
       // Confirmed offsets (raw[]): [18:19]=compressor, [20:21]=waterpump, [26:27]=backup
@@ -2425,8 +2530,7 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       uint16_t waterpump_h  = (frame->raw[20] << 8) | frame->raw[21];
       uint16_t backup_h     = (frame->raw[26] << 8) | frame->raw[27];
 
-      ESP_LOGD(TAG, "E8:C1: compressor=%uh waterpump=%uh backup_heater=%uh",
-               compressor_h, waterpump_h, backup_h);
+      ESP_LOGD(TAG, "E8:C1: compressor=%uh waterpump=%uh backup_heater=%uh", compressor_h, waterpump_h, backup_h);
 
       if (this->compressor_hours_sensor_ != nullptr) {
         this->compressor_hours_sensor_->publish_state(compressor_h);
@@ -2441,8 +2545,8 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
 
     // 0-10V interface status (0x55 from 0x0041, dtype 00:9F)
     // Frame: 55:0C:00:00:41:08:00:00:9F:00:DD:14:00:00  (DD=demand, 0x14=min temp config)
-    if (frame_type == 0x55 && frame->raw[3] == 0x00 && frame->raw[4] == 0x41 &&
-        frame->raw[7] == 0x00 && frame->raw[8] == 0x9F) {
+    if (frame_type == 0x55 && frame->raw[3] == 0x00 && frame->raw[4] == 0x41 && frame->raw[7] == 0x00 &&
+        frame->raw[8] == 0x9F) {
       uint8_t demand = frame->raw[10];
       ESP_LOGV(TAG, "0-10V status: demand=%u/15", demand);
       if (demand != estia_demand_value_) {
@@ -2456,8 +2560,8 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
 
     // 0-10V interface command (0x11 from 0x0041, dtype 00:5F) — immediate demand update
     // Frame: 11:0A:00:00:41:08:00:00:5F:DD:00:00
-    if (frame_type == 0x11 && frame->raw[3] == 0x00 && frame->raw[4] == 0x41 &&
-        frame->raw[7] == 0x00 && frame->raw[8] == 0x5F) {
+    if (frame_type == 0x11 && frame->raw[3] == 0x00 && frame->raw[4] == 0x41 && frame->raw[7] == 0x00 &&
+        frame->raw[8] == 0x5F) {
       uint8_t demand = frame->raw[9];
       ESP_LOGV(TAG, "0-10V command: demand=%u/15", demand);
       if (demand != estia_demand_value_) {
@@ -2473,12 +2577,18 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
     if (frame_len >= 8 && (frame->raw[8] == 0x49 || frame->raw[7] == 0x49)) {
       uint8_t error_byte = (frame_len > 9) ? frame->raw[9] : 0;
       const char *error_desc = "unknown";
-      if (error_byte >= 0x01 && error_byte <= 0x0D) error_desc = "hydro unit (A-series)";
-      else if (error_byte >= 0x41 && error_byte <= 0x52) error_desc = "communication (E-series)";
-      else if (error_byte >= 0x63 && error_byte <= 0x7F) error_desc = "sensor (F-series)";
-      else if (error_byte >= 0x81 && error_byte <= 0x84) error_desc = "compressor (H-series)";
-      else if (error_byte >= 0xC2 && error_byte <= 0xDD) error_desc = "configuration (L-series)";
-      else if (error_byte >= 0xE3 && error_byte <= 0xFF) error_desc = "protection (P-series)";
+      if (error_byte >= 0x01 && error_byte <= 0x0D)
+        error_desc = "hydro unit (A-series)";
+      else if (error_byte >= 0x41 && error_byte <= 0x52)
+        error_desc = "communication (E-series)";
+      else if (error_byte >= 0x63 && error_byte <= 0x7F)
+        error_desc = "sensor (F-series)";
+      else if (error_byte >= 0x81 && error_byte <= 0x84)
+        error_desc = "compressor (H-series)";
+      else if (error_byte >= 0xC2 && error_byte <= 0xDD)
+        error_desc = "configuration (L-series)";
+      else if (error_byte >= 0xE3 && error_byte <= 0xFF)
+        error_desc = "protection (P-series)";
       ESP_LOGW(TAG, "ALARM: error=0x%02X (%s)", error_byte, error_desc);
     }
 
@@ -2537,9 +2647,11 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
 }
 
 void ToshibaAbClimate::record_discovered_address_(uint8_t address, bool remote) {
-  if (millis() > BUS_DISCOVERY_PERIOD_MILLIS) return;
+  if (millis() > BUS_DISCOVERY_PERIOD_MILLIS)
+    return;
   std::bitset<256> &addresses = remote ? this->discovered_remotes_ : this->discovered_indoor_units_;
-  if (addresses.test(address)) return;
+  if (addresses.test(address))
+    return;
 
   addresses.set(address);
   ESP_LOGI(TAG, "Discovered %s keepalive address 0x%02X", remote ? "remote" : "indoor unit", address);
@@ -2558,23 +2670,27 @@ void ToshibaAbClimate::publish_bus_inventory_() {
   for (size_t i = 0; i < 256; i++) {
     if (this->discovered_indoor_units_.test(i)) {
       std::snprintf(address, sizeof(address), "0x%02X", static_cast<unsigned>(i));
-      if (!indoor_units.empty()) indoor_units += ", ";
+      if (!indoor_units.empty())
+        indoor_units += ", ";
       indoor_units += address;
       indoor_units += " (indoor unit)";
     }
     if (this->discovered_remotes_.test(i)) {
       std::snprintf(address, sizeof(address), "0x%02X", static_cast<unsigned>(i));
-      if (!remote_addresses.empty()) remote_addresses += ", ";
+      if (!remote_addresses.empty())
+        remote_addresses += ", ";
       remote_addresses += address;
     }
   }
-  if (indoor_units.empty()) indoor_units = "None detected";
-  if (remote_addresses.empty()) remote_addresses = "None detected";
-  if (this->indoor_units_text_sensor_ != nullptr) this->indoor_units_text_sensor_->publish_state(indoor_units);
+  if (indoor_units.empty())
+    indoor_units = "None detected";
+  if (remote_addresses.empty())
+    remote_addresses = "None detected";
+  if (this->indoor_units_text_sensor_ != nullptr)
+    this->indoor_units_text_sensor_->publish_state(indoor_units);
   if (this->remote_addresses_text_sensor_ != nullptr)
     this->remote_addresses_text_sensor_->publish_state(remote_addresses);
 }
-
 
 void ToshibaAbClimate::record_crc_failure_() {
   this->crc_failure_count_++;
@@ -2607,7 +2723,8 @@ void ToshibaAbClimate::publish_reader_diagnostics_() {
 }
 
 void ToshibaAbClimate::loop() {
-  if (millis() - this->last_diagnostics_publish_ms_ >= 30000) this->publish_reader_diagnostics_();
+  if (millis() - this->last_diagnostics_publish_ms_ >= 30000)
+    this->publish_reader_diagnostics_();
   // TODO: check if last_unconfirmed_command_ was not confirmed after a timeout
   // and log warning/error
 
@@ -2655,8 +2772,7 @@ void ToshibaAbClimate::loop() {
                      static_cast<unsigned>(this->last_unconfirmed_command_attempts_),
                      static_cast<unsigned>(max_attempts));
           } else {
-            ESP_LOGD(TAG, "Resending command opcode 0x%02X (attempt %u/%u)",
-                     command_opcode_for_ack_log(*frame_to_send),
+            ESP_LOGD(TAG, "Resending command opcode 0x%02X (attempt %u/%u)", command_opcode_for_ack_log(*frame_to_send),
                      static_cast<unsigned>(this->last_unconfirmed_command_attempts_),
                      static_cast<unsigned>(max_attempts));
           }
@@ -2672,15 +2788,16 @@ void ToshibaAbClimate::loop() {
       std::string payload;
       payload.reserve(raw_frame.empty() ? 0 : raw_frame.size() * 3 - 1);
       char buf[3];
-      for (size_t i = 0; i < raw_frame.size(); i++) {
-        if (i > 0) {
+      const size_t log_start = raw_frame.size() >= 2 && raw_frame[0] == 0xA0 && raw_frame[1] == 0x00 ? 2 : 0;
+      for (size_t i = log_start; i < raw_frame.size(); i++) {
+        if (i > log_start) {
           payload += ':';
         }
         std::snprintf(buf, sizeof(buf), "%02X", raw_frame[i]);
         payload += buf;
       }
 
-      ESP_LOGD(TAG, "Write raw frame: %s", payload.c_str());
+      ESP_LOGD(TAG, "Write %sframe: %s", log_start == 2 ? "A0 " : "raw ", payload.c_str());
       this->remember_tx_frame_for_echo_(raw_frame.data(), raw_frame.size(), false);
       this->write_array(raw_frame.data(), raw_frame.size());
 
@@ -2761,17 +2878,16 @@ void ToshibaAbClimate::loop() {
   }
 
   // Estia command ACK timeout and retry
-  if (!initial_send_block_active && !estia_pending_cmd_.empty() && (millis() - estia_cmd_sent_ms_) > ESTIA_CMD_ACK_TIMEOUT_MS) {
+  if (!initial_send_block_active && !estia_pending_cmd_.empty() &&
+      (millis() - estia_cmd_sent_ms_) > ESTIA_CMD_ACK_TIMEOUT_MS) {
     if (estia_cmd_attempts_ >= ESTIA_MAX_CMD_ATTEMPTS) {
-      ESP_LOGW(TAG, "Command not acknowledged after %u attempts (dtype %02X:%02X)",
-               estia_cmd_attempts_,
+      ESP_LOGW(TAG, "Command not acknowledged after %u attempts (dtype %02X:%02X)", estia_cmd_attempts_,
                (estia_pending_ack_dtype_ >> 8) & 0xFF, estia_pending_ack_dtype_ & 0xFF);
       estia_pending_cmd_.clear();
       estia_cmd_attempts_ = 0;
     } else {
       estia_cmd_attempts_++;
-      ESP_LOGD(TAG, "Command retry %u/%u (dtype %02X:%02X)",
-               estia_cmd_attempts_, ESTIA_MAX_CMD_ATTEMPTS,
+      ESP_LOGD(TAG, "Command retry %u/%u (dtype %02X:%02X)", estia_cmd_attempts_, ESTIA_MAX_CMD_ATTEMPTS,
                (estia_pending_ack_dtype_ >> 8) & 0xFF, estia_pending_ack_dtype_ & 0xFF);
       estia_cmd_sent_ms_ = millis();
       this->enqueue_raw_frame_(estia_pending_cmd_);
@@ -2779,7 +2895,7 @@ void ToshibaAbClimate::loop() {
   }
 
   // Estia autonomous polling (runtime-toggleable)
-  if (this->autonomous_ && this->data_reader.frame_format() == FrameFormat::A0) {
+  if (this->remote_address_ == TOSHIBA_REMOTE_DEFAULT && this->data_reader.frame_format() == FrameFormat::A0) {
     uint32_t now = millis();
     if (now - estia_last_e8c0_ms_ >= ESTIA_E8C0_INTERVAL_MS) {
       estia_last_e8c0_ms_ = now;
@@ -2810,8 +2926,6 @@ void ToshibaAbClimate::loop() {
       last_temp_log_time_ = millis();
     }
   }
-
-
 
   uint8_t bytes_read = 0;
 
@@ -2948,7 +3062,8 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
       if (use_tu2c) {
         write_power_on_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_);
       } else {
-        write_set_parameter_power(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
+        write_set_parameter_power(&command, this->remote_address_, this->master_address_, this->command_mode_read_,
+                                  new_state);
       }
       commands.push_back(command);
     } else {
@@ -2958,7 +3073,8 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
       if (use_tu2c) {
         write_power_off_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_);
       } else {
-        write_set_parameter_power(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
+        write_set_parameter_power(&command, this->remote_address_, this->master_address_, this->command_mode_read_,
+                                  new_state);
       }
       commands.push_back(command);
       // don't process other changes when turning off
@@ -2972,7 +3088,8 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
     if (use_tu2c) {
       write_set_mode_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_, new_state);
     } else {
-      write_set_parameter_mode(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
+      write_set_parameter_mode(&command, this->remote_address_, this->master_address_, this->command_mode_read_,
+                               new_state);
     }
     commands.push_back(command);
   }
@@ -2984,7 +3101,8 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
       write_set_parameter_flags_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_, new_state,
                                         COMMAND_SET_FAN);
     } else {
-      write_set_parameter_flags(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state, COMMAND_SET_FAN, this->is_hm_variant());
+      write_set_parameter_flags(&command, this->remote_address_, this->master_address_, this->command_mode_read_,
+                                new_state, COMMAND_SET_FAN, this->is_hm_variant());
     }
     commands.push_back(command);
   }
@@ -2996,7 +3114,8 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
       write_set_parameter_flags_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_, new_state,
                                         COMMAND_SET_TEMP);
     } else {
-      write_set_parameter_flags(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state, COMMAND_SET_TEMP, this->is_hm_variant());
+      write_set_parameter_flags(&command, this->remote_address_, this->master_address_, this->command_mode_read_,
+                                new_state, COMMAND_SET_TEMP, this->is_hm_variant());
     }
     commands.push_back(command);
   }
@@ -3004,7 +3123,8 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
   if (new_state->vent != tcc_state.vent) {
     ESP_LOGD(TAG, "Changing vent");
     auto command = DataFrame{};
-    write_set_parameter_vent(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
+    write_set_parameter_vent(&command, this->remote_address_, this->master_address_, this->command_mode_read_,
+                             new_state);
     commands.push_back(command);
   }
 
@@ -3048,9 +3168,7 @@ void ToshibaAbClimate::control(const climate::ClimateCall &call) {
           estia_power_on_pending_ = true;
           estia_mode_retries_ = 0;
           this->send_estia_mode(estia_pending_mode_cmd_);
-          this->set_timeout("estia_poweron", 3000, [this]() {
-            this->estia_mode_retry_timeout_();
-          });
+          this->set_timeout("estia_poweron", 3000, [this]() { this->estia_mode_retry_timeout_(); });
         } else {
           // Same mode: just power on
           this->send_estia_power(true);
@@ -3246,6 +3364,19 @@ void ToshibaAbClimate::send_estia_tracked_(const uint8_t *frame, size_t len, uin
   }
 }
 
+void ToshibaAbClimate::send_estia_ping() {
+  // Logical IDs stay one byte. SRC_MODE/DST_MODE are inserted only here at
+  // the wire boundary and are not folded into either node address.
+  uint8_t frame[] = {0xA0, 0x00, OPCODE_PING, 0x05, 0x00, 0x00, this->remote_address_,
+                     0x08, this->master_address_, 0x00, 0x00};
+  const size_t crc_len = sizeof(frame) - 2;
+  const uint16_t crc = estia_crc16(frame, crc_len);
+  frame[crc_len] = static_cast<uint8_t>(crc >> 8);
+  frame[crc_len + 1] = static_cast<uint8_t>(crc);
+  ESP_LOGV(TAG, "A0 keepalive: %02X -> %02X", this->remote_address_, this->master_address_);
+  this->send_estia_tracked_(frame, sizeof(frame), 0);
+}
+
 void ToshibaAbClimate::send_estia_setpoint(float target_temp) {
   if (this->read_only_) {
     ESP_LOGW(TAG, "Read-only mode: not sending Estia setpoint");
@@ -3254,24 +3385,25 @@ void ToshibaAbClimate::send_estia_setpoint(float target_temp) {
 
   // Encode temperature: val = (°C + 16) * 2
   uint8_t encoded = static_cast<uint8_t>((target_temp + 16.0f) * 2.0f);
-  uint16_t src = this->estia_source_address_;
+  const uint8_t src = this->remote_address_;
 
   // Sub-command: 0x02 = heating setpoint, 0x01 = cooling setpoint
   uint8_t subcmd = (this->mode == climate::CLIMATE_MODE_COOL) ? 0x01 : 0x02;
 
   // Command frame: A0:00:11:0C:00:SRC_H:SRC_L:08:00:03:C1:SUBCMD:TEMP:00:00:00
   uint8_t frame[] = {
-    0xA0, 0x00,                         // prefix
-    0x11,                               // type: command
-    0x0C,                               // length: 12
-    0x00,                               // fixed
-    (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),  // source
-    0x08, 0x00,                         // dest: master
-    0x03, 0xC1,                         // command type: setpoint
-    subcmd,                             // 0x02=heat, 0x01=cool
-    encoded,                            // target temperature
-    0x00, 0x00, 0x00,                   // padding
-    0x00, 0x00                          // CRC placeholder
+      0xA0,    0x00,                   // prefix
+      0x11,                            // type: command
+      0x0C,                            // length: 12
+      0x00,                            // fixed
+      0x00,    src,                    // SRC_MODE + one-byte source ID
+      0x08,    this->master_address_,  // DST_MODE + one-byte master ID
+      0x03,    0xC1,                   // command type: setpoint
+      subcmd,                          // 0x02=heat, 0x01=cool
+      encoded,                         // target temperature
+      0x00,    0x00,
+      0x00,          // padding
+      0x00,    0x00  // CRC placeholder
   };
 
   size_t crc_len = sizeof(frame) - 2;
@@ -3280,7 +3412,7 @@ void ToshibaAbClimate::send_estia_setpoint(float target_temp) {
   frame[crc_len + 1] = crc & 0xFF;
 
   ESP_LOGD(TAG, "TX: setpoint=%.1f°C (0x%02X) subcmd=0x%02X", target_temp, encoded, subcmd);
-  log_raw_data("Estia TX", frame, sizeof(frame));
+  log_raw_data("A0 TX", frame + 2, sizeof(frame) - 2);
 
   this->send_estia_tracked_(frame, sizeof(frame), 0x03C1);  // ACK: 00:A1:03:C1
 }
@@ -3291,21 +3423,21 @@ void ToshibaAbClimate::send_estia_power(bool on) {
     return;
   }
 
-  uint16_t src = this->estia_source_address_;
+  const uint8_t src = this->remote_address_;
   uint8_t power_cmd = on ? 0x23 : 0x22;
 
   // Power command: A0:00:11:08:00:SRC:08:00:00:41:CMD:CRC
   // Captured: 11:08:00:00:40:08:00:00:41:22 (power off from remote)
   uint8_t frame[] = {
-    0xA0, 0x00,                         // prefix
-    0x11,                               // type: command
-    0x08,                               // length: 8
-    0x00,                               // fixed
-    (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),  // source
-    0x08, 0x00,                         // dest: master
-    0x00, 0x41,                         // dtype: power control
-    power_cmd,                          // 0x23=ON, 0x22=OFF
-    0x00, 0x00                          // CRC placeholder
+      0xA0,      0x00,                   // prefix
+      0x11,                              // type: command
+      0x08,                              // length: 8
+      0x00,                              // fixed
+      0x00,      src,                    // SRC_MODE + one-byte source ID
+      0x08,      this->master_address_,  // DST_MODE + one-byte master ID
+      0x00,      0x41,                   // dtype: power control
+      power_cmd,                         // 0x23=ON, 0x22=OFF
+      0x00,      0x00                    // CRC placeholder
   };
 
   size_t crc_len = sizeof(frame) - 2;
@@ -3314,7 +3446,7 @@ void ToshibaAbClimate::send_estia_power(bool on) {
   frame[crc_len + 1] = crc & 0xFF;
 
   ESP_LOGD(TAG, "TX: power %s (cmd=0x%02X)", on ? "ON" : "OFF", power_cmd);
-  log_raw_data("Estia TX", frame, sizeof(frame));
+  log_raw_data("A0 TX", frame + 2, sizeof(frame) - 2);
 
   this->send_estia_tracked_(frame, sizeof(frame), 0x0041);  // ACK: 00:A1:00:41
 }
@@ -3325,20 +3457,20 @@ void ToshibaAbClimate::send_estia_mode(uint8_t mode_cmd) {
     return;
   }
 
-  uint16_t src = this->estia_source_address_;
+  const uint8_t src = this->remote_address_;
 
   // Mode command: A0:00:11:08:00:SRC:08:00:03:C0:CMD:CRC
   // 0x02=heating, 0x01=cooling
   uint8_t frame[] = {
-    0xA0, 0x00,                         // prefix
-    0x11,                               // type: command
-    0x08,                               // length: 8
-    0x00,                               // fixed
-    (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),  // source
-    0x08, 0x00,                         // dest: master
-    0x03, 0xC0,                         // dtype: mode control
-    mode_cmd,                           // 0x02=heat, 0x01=cool
-    0x00, 0x00                          // CRC placeholder
+      0xA0,     0x00,                   // prefix
+      0x11,                             // type: command
+      0x08,                             // length: 8
+      0x00,                             // fixed
+      0x00,     src,                    // SRC_MODE + one-byte source ID
+      0x08,     this->master_address_,  // DST_MODE + one-byte master ID
+      0x03,     0xC0,                   // dtype: mode control
+      mode_cmd,                         // 0x02=heat, 0x01=cool
+      0x00,     0x00                    // CRC placeholder
   };
 
   size_t crc_len = sizeof(frame) - 2;
@@ -3347,21 +3479,20 @@ void ToshibaAbClimate::send_estia_mode(uint8_t mode_cmd) {
   frame[crc_len + 1] = crc & 0xFF;
 
   ESP_LOGD(TAG, "TX: mode=%s (cmd=0x%02X)", mode_cmd == 0x01 ? "COOL" : "HEAT", mode_cmd);
-  log_raw_data("Estia TX", frame, sizeof(frame));
+  log_raw_data("A0 TX", frame + 2, sizeof(frame) - 2);
 
   this->send_estia_tracked_(frame, sizeof(frame), 0x03C0);  // ACK: 00:A1:03:C0
 }
 
 void ToshibaAbClimate::estia_mode_retry_timeout_() {
-  if (!this->estia_power_on_pending_) return;
+  if (!this->estia_power_on_pending_)
+    return;
 
   estia_mode_retries_++;
   if (estia_mode_retries_ < 3) {
     ESP_LOGW(TAG, "No mode ACK, retry %d/3", estia_mode_retries_);
     this->send_estia_mode(estia_pending_mode_cmd_);
-    this->set_timeout("estia_poweron", 3000, [this]() {
-      this->estia_mode_retry_timeout_();
-    });
+    this->set_timeout("estia_poweron", 3000, [this]() { this->estia_mode_retry_timeout_(); });
   } else {
     ESP_LOGW(TAG, "No mode ACK after 3 retries, sending power on anyway");
     this->estia_power_on_pending_ = false;
@@ -3374,22 +3505,23 @@ void ToshibaAbClimate::send_estia_demand(uint8_t demand) {
     ESP_LOGW(TAG, "Read-only mode: not sending Estia demand command");
     return;
   }
-  if (demand > 15) demand = 15;
+  if (demand > 15)
+    demand = 15;
   estia_demand_value_ = demand;
 
   // 0-10V demand command: A0:00:11:0A:00:00:41:08:00:00:5F:DD:00:00:CRC
   // Uses source address 0x0041 (0-10V interface address)
   uint8_t frame[] = {
-    0xA0, 0x00,                         // prefix
-    0x11,                               // type: command
-    0x0A,                               // length: 10
-    0x00,                               // fixed
-    0x00, 0x41,                         // source: 0-10V interface address
-    0x08, 0x00,                         // dest: master
-    0x00, 0x5F,                         // dtype: demand control
-    demand,                             // demand value (0..15)
-    0x00, 0x00,                         // padding
-    0x00, 0x00                          // CRC placeholder
+      0xA0,   0x00,                   // prefix
+      0x11,                           // type: command
+      0x0A,                           // length: 10
+      0x00,                           // fixed
+      0x00,   0x41,                   // source: 0-10V interface address
+      0x08,   this->master_address_,  // DST_MODE + one-byte master ID
+      0x00,   0x5F,                   // dtype: demand control
+      demand,                         // demand value (0..15)
+      0x00,   0x00,                   // padding
+      0x00,   0x00                    // CRC placeholder
   };
 
   size_t crc_len = sizeof(frame) - 2;
@@ -3398,7 +3530,7 @@ void ToshibaAbClimate::send_estia_demand(uint8_t demand) {
   frame[crc_len + 1] = crc & 0xFF;
 
   ESP_LOGV(TAG, "TX: demand=%u/15", demand);
-  log_raw_data("Estia TX", frame, sizeof(frame));
+  log_raw_data("A0 TX", frame + 2, sizeof(frame) - 2);
 
   this->send_estia_tracked_(frame, sizeof(frame), 0x005F);  // ACK: 00:A1:00:5F
 }
@@ -3408,17 +3540,17 @@ void ToshibaAbClimate::send_estia_demand_heartbeat() {
   // Captured: 55:0C:00:00:41:08:00:00:9F:00:DD:14:00:00:CRC
   // raw[10]=demand, raw[11]=0x14 (min temp config = 20°C)
   uint8_t frame[] = {
-    0xA0, 0x00,                         // prefix
-    0x55,                               // type: remote status
-    0x0C,                               // length: 12
-    0x00,                               // fixed
-    0x00, 0x41,                         // source: 0-10V interface address
-    0x08, 0x00,                         // dest: master
-    0x00, 0x9F,                         // dtype: 0-10V status
-    0x00, estia_demand_value_,          // 0x00 + demand value
-    0x14,                               // min temp config (20°C)
-    0x00, 0x00,                         // padding
-    0x00, 0x00                          // CRC placeholder
+      0xA0, 0x00,                   // prefix
+      0x55,                         // type: remote status
+      0x0C,                         // length: 12
+      0x00,                         // fixed
+      0x00, 0x41,                   // source: 0-10V interface address
+      0x08, this->master_address_,  // DST_MODE + one-byte master ID
+      0x00, 0x9F,                   // dtype: 0-10V status
+      0x00, estia_demand_value_,    // 0x00 + demand value
+      0x14,                         // min temp config (20°C)
+      0x00, 0x00,                   // padding
+      0x00, 0x00                    // CRC placeholder
   };
 
   size_t crc_len = sizeof(frame) - 2;
@@ -3427,28 +3559,28 @@ void ToshibaAbClimate::send_estia_demand_heartbeat() {
   frame[crc_len + 1] = crc & 0xFF;
 
   ESP_LOGV(TAG, "TX: demand heartbeat (demand=%u/15)", estia_demand_value_);
-  log_raw_data("Estia TX", frame, sizeof(frame));
+  log_raw_data("A0 TX", frame + 2, sizeof(frame) - 2);
 
   std::vector<uint8_t> raw(frame, frame + sizeof(frame));
   this->enqueue_raw_frame_(raw);
 }
 
 void ToshibaAbClimate::send_estia_data_request(uint8_t subtype) {
-  uint16_t src = this->estia_source_address_;
+  const uint8_t src = this->remote_address_;
 
   // Data request frame: A0:00:15:0A:00:SRC:DST:00:E8:Cx:01:00:CRC
   // Mirrors what KNX gateway sends as 0x15 request
   uint8_t frame[] = {
-    0xA0, 0x00,                         // prefix
-    0x15,                               // type: data request
-    0x0A,                               // length: 10
-    0x00,                               // fixed
-    (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),  // source
-    0x08, 0x00,                         // dest: master
-    0x00, 0xE8,                         // data type
-    subtype,                            // C0=temperatures, C1=counters
-    0x01, 0x00,                         // request params
-    0x00, 0x00                          // CRC placeholder
+      0xA0,    0x00,                   // prefix
+      0x15,                            // type: data request
+      0x0A,                            // length: 10
+      0x00,                            // fixed
+      0x00,    src,                    // SRC_MODE + one-byte source ID
+      0x08,    this->master_address_,  // DST_MODE + one-byte master ID
+      0x00,    0xE8,                   // data type
+      subtype,                         // C0=temperatures, C1=counters
+      0x01,    0x00,                   // request params
+      0x00,    0x00                    // CRC placeholder
   };
 
   size_t crc_len = sizeof(frame) - 2;
@@ -3457,7 +3589,7 @@ void ToshibaAbClimate::send_estia_data_request(uint8_t subtype) {
   frame[crc_len + 1] = crc & 0xFF;
 
   ESP_LOGV(TAG, "TX: data request E8:%02X", subtype);
-  log_raw_data("Estia TX", frame, sizeof(frame));
+  log_raw_data("A0 TX", frame + 2, sizeof(frame) - 2);
 
   std::vector<uint8_t> raw(frame, frame + sizeof(frame));
   this->enqueue_raw_frame_(raw);
@@ -3476,8 +3608,10 @@ bool ToshibaAbClimate::control_vent(bool state) {
 
 static uint8_t estia_first_gen_raw_checksum(const uint8_t *raw, size_t raw_len) {
   uint16_t sum = 0;
-  if (raw_len < 2) return 0;
-  for (size_t i = 0; i < raw_len - 1; i++) sum += raw[i];
+  if (raw_len < 2)
+    return 0;
+  for (size_t i = 0; i < raw_len - 1; i++)
+    sum += raw[i];
   return static_cast<uint8_t>(sum & 0xFF);
 }
 
@@ -3487,7 +3621,8 @@ static DataFrame make_estia_first_gen_frame(uint8_t src, uint8_t dst, const uint
   frame.raw[0] = static_cast<uint8_t>(payload_len + 7);
   frame.raw[1] = src;
   frame.raw[2] = dst;
-  for (size_t i = 0; i < payload_len; i++) frame.raw[3 + i] = payload[i];
+  for (size_t i = 0; i < payload_len; i++)
+    frame.raw[3 + i] = payload[i];
   frame.raw[inner_size - 1] = estia_first_gen_raw_checksum(frame.raw, inner_size);
   // Do not assign frame.data_length here: it aliases raw[3], which is the
   // first-generation Estia payload marker (typically 0xE0). DataFrame::size()
@@ -3497,56 +3632,73 @@ static DataFrame make_estia_first_gen_frame(uint8_t src, uint8_t dst, const uint
 }
 
 void ToshibaAbClimate::send_estia_first_gen_zone1(bool on) {
-  if (this->read_only_) return;
+  if (this->read_only_)
+    return;
   const uint8_t payload[] = {0xE0, 0x01, 0x21, static_cast<uint8_t>(on ? 0x03 : 0x02)};
-  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+  this->send_command(
+      make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
 void ToshibaAbClimate::send_estia_first_gen_dhw_on() {
-  if (this->read_only_) return;
+  if (this->read_only_)
+    return;
   const uint8_t payload[] = {0xE0, 0x01, 0x21, 0x0C};
-  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+  this->send_command(
+      make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
 void ToshibaAbClimate::send_estia_first_gen_dhw_off() {
-  if (this->read_only_) return;
+  if (this->read_only_)
+    return;
   const uint8_t payload[] = {0xE0, 0x01, 0x21, 0x08};
-  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+  this->send_command(
+      make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
 void ToshibaAbClimate::send_estia_first_gen_dhw_boost(bool on) {
-  if (this->read_only_) return;
+  if (this->read_only_)
+    return;
   const uint8_t payload[] = {0xE0, 0x01, 0x24, 0x10, static_cast<uint8_t>(on ? 0x10 : 0x00)};
-  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+  this->send_command(
+      make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
 void ToshibaAbClimate::send_estia_first_gen_antibacteria(bool on) {
-  if (this->read_only_) return;
+  if (this->read_only_)
+    return;
   const uint8_t payload[] = {0xE0, 0x01, 0x24, 0x60, static_cast<uint8_t>(on ? 0x20 : 0x00)};
-  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+  this->send_command(
+      make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
 void ToshibaAbClimate::send_estia_first_gen_auto_mode(bool on) {
-  if (this->read_only_) return;
+  if (this->read_only_)
+    return;
   const uint8_t payload[] = {0xE0, 0x01, 0x24, 0x01, static_cast<uint8_t>(on ? 0x01 : 0x00)};
-  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+  this->send_command(
+      make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
 void ToshibaAbClimate::send_estia_first_gen_dhw_setpoint(float target_temp) {
-  if (this->read_only_) return;
+  if (this->read_only_)
+    return;
   uint8_t encoded = static_cast<uint8_t>(std::round((target_temp + 16.0f) * 2.0f));
   const uint8_t payload[] = {0xE0, 0x01, 0x23, 0x08, 0x00, 0x00, encoded, 0x00};
-  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+  this->send_command(
+      make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
 void ToshibaAbClimate::send_estia_first_gen_request_data(uint8_t request_code) {
-  if (this->read_only_) return;
+  if (this->read_only_)
+    return;
   const uint8_t payload[] = {0xE0, 0x41, 0x5C, 0x70, request_code};
-  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+  this->send_command(
+      make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
 void ToshibaAbClimate::estia_first_gen_reset_remote_error_() {
-  if (!this->begin_remote_error_autoreset_()) return;
+  if (!this->begin_remote_error_autoreset_())
+    return;
   ESP_LOGI(TAG, "Estia first-gen remote error reset: resending last known DHW state (%s)",
            this->estia_first_gen_dhw_active_ ? "on" : "off");
   if (this->estia_first_gen_dhw_active_) {
@@ -3557,10 +3709,12 @@ void ToshibaAbClimate::estia_first_gen_reset_remote_error_() {
 }
 
 void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *frame) {
-  if (frame == nullptr) return;
+  if (frame == nullptr)
+    return;
   const uint8_t len = frame->raw[0];
   const uint8_t raw_len = len > 3 ? len - 3 : 0;
-  if (len < 7 || raw_len > DATA_FRAME_MAX_SIZE) return;
+  if (len < 7 || raw_len > DATA_FRAME_MAX_SIZE)
+    return;
 
   const uint8_t src = frame->raw[1];
   const bool has_master_status_signature = frame->raw[3] == 0xE0 && frame->raw[5] == 0x31;
@@ -3568,9 +3722,9 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
   const bool has_remote_ping_signature = frame->raw[3] == 0xE0 && frame->raw[4] == 0x41 && frame->raw[5] == 0x0C;
   const bool is_remote_source = src == this->remote_address_ || (src >= 0x60 && src <= TOSHIBA_ESTIA_REMOTE_MAX);
   const bool is_possible_master_source = !is_remote_source;
-  const bool is_master_source = src == this->master_address_ ||
-                                (this->master_address_auto_ && !this->master_address_confirmed_ &&
-                                 is_possible_master_source && has_master_keepalive_signature);
+  const bool is_master_source =
+      src == this->master_address_ || (this->master_address_auto_ && !this->master_address_confirmed_ &&
+                                       is_possible_master_source && has_master_keepalive_signature);
   auto unknown_label = [&]() -> std::string {
     char buf[40];
     if (is_master_source) {
@@ -3638,11 +3792,12 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
   }
   if (has_master_keepalive_signature && is_possible_master_source)
     this->record_discovered_address_(src, false);
-  if (has_remote_ping_signature && is_remote_source) this->record_discovered_address_(src, true);
+  if (has_remote_ping_signature && is_remote_source)
+    this->record_discovered_address_(src, true);
   if (has_master_keepalive_signature && is_possible_master_source) {
     if (this->master_address_auto_ && !this->master_address_confirmed_ && src != this->master_address_) {
-      ESP_LOGI(TAG, "Estia first-gen master keepalive from 0x%02X; switching master address from 0x%02X",
-               src, this->master_address_);
+      ESP_LOGI(TAG, "Estia first-gen master keepalive from 0x%02X; switching master address from 0x%02X", src,
+               this->master_address_);
       this->master_address_ = src;
     }
     if (src == this->master_address_ && !this->master_address_confirmed_) {
@@ -3667,11 +3822,13 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
   }
   if (this->remote_address_auto_ && src == this->remote_address_ && this->remote_address_ < TOSHIBA_ESTIA_REMOTE_MAX) {
     this->remote_address_++;
-    ESP_LOGI(TAG, "Estia remote-address collision from decoded remote frame; switching to 0x%02X", this->remote_address_);
+    ESP_LOGI(TAG, "Estia remote-address collision from decoded remote frame; switching to 0x%02X",
+             this->remote_address_);
   }
   if (src == this->master_address_) {
     this->last_master_alive_millis_ = millis();
-    if (this->connected_binary_sensor_) this->connected_binary_sensor_->publish_state(true);
+    if (this->connected_binary_sensor_)
+      this->connected_binary_sensor_->publish_state(true);
   }
   if (src == this->master_address_ && frame->raw[3] == 0xE0 && frame->raw[5] == 0x31 && len > 11) {
     this->estia_first_gen_zone1_active_ = frame->raw[6] & 0x01;
@@ -3688,14 +3845,18 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
                      : climate::CLIMATE_MODE_OFF;
     this->target_temperature = static_cast<float>(frame->raw[9]) / 2.0f - 16.0f;
     this->publish_state();
-    if (this->zone1_switch_) this->zone1_switch_->publish_state(this->estia_first_gen_zone1_active_);
-    if (this->dhw_boost_switch_) this->dhw_boost_switch_->publish_state(this->estia_first_gen_dhw_boost_);
-    if (this->antibacteria_switch_) this->antibacteria_switch_->publish_state(this->estia_first_gen_antibacteria_);
+    if (this->zone1_switch_)
+      this->zone1_switch_->publish_state(this->estia_first_gen_zone1_active_);
+    if (this->dhw_boost_switch_)
+      this->dhw_boost_switch_->publish_state(this->estia_first_gen_dhw_boost_);
+    if (this->antibacteria_switch_)
+      this->antibacteria_switch_->publish_state(this->estia_first_gen_antibacteria_);
     if (this->hotwater_pump_heating_binary_sensor_)
       this->hotwater_pump_heating_binary_sensor_->publish_state(this->estia_first_gen_hotwater_pump_heating_);
     if (this->hotwater_resistor_heating_binary_sensor_)
       this->hotwater_resistor_heating_binary_sensor_->publish_state(this->estia_first_gen_hotwater_resistor_heating_);
-    if (this->zone1_target_temperature_sensor_) this->zone1_target_temperature_sensor_->publish_state(static_cast<float>(frame->raw[10]) / 2.0f - 16.0f);
+    if (this->zone1_target_temperature_sensor_)
+      this->zone1_target_temperature_sensor_->publish_state(static_cast<float>(frame->raw[10]) / 2.0f - 16.0f);
     const bool has_status_temperatures = frame->raw[0] == 0x15 && len > 18;
     if (has_status_temperatures)
       this->publish_dhw_current_temperature_(static_cast<float>(frame->raw[12]) / 2.0f - 16.0f);
@@ -3723,7 +3884,8 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
       this->sensor_query_outstanding_ = false;
       this->last_sensor_query_id_ = 0xFF;
     }
-    if (!published_polled_sensor && this->outdoor_temp_sensor_) this->outdoor_temp_sensor_->publish_state(value);
+    if (!published_polled_sensor && this->outdoor_temp_sensor_)
+      this->outdoor_temp_sensor_->publish_state(value);
   } else if (src == this->master_address_ && frame->raw[4] == 0x80 && frame->raw[5] == 0xA2) {
     if (this->sensor_query_outstanding_ || this->last_sensor_query_id_ != 0xFF) {
       ESP_LOGD(TAG, "Estia first-gen sensor not available: id=0x%02X", this->last_sensor_query_id_);
@@ -3735,13 +3897,9 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
   }
 }
 
-void ToshibaAbEstiaZone1Switch::write_state(bool state) {
-  this->climate_->send_estia_first_gen_zone1(state);
-}
+void ToshibaAbEstiaZone1Switch::write_state(bool state) { this->climate_->send_estia_first_gen_zone1(state); }
 
-void ToshibaAbEstiaDhwBoostSwitch::write_state(bool state) {
-  this->climate_->send_estia_first_gen_dhw_boost(state);
-}
+void ToshibaAbEstiaDhwBoostSwitch::write_state(bool state) { this->climate_->send_estia_first_gen_dhw_boost(state); }
 
 void ToshibaAbEstiaAntibacteriaSwitch::write_state(bool state) {
   this->climate_->send_estia_first_gen_antibacteria(state);

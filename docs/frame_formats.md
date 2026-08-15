@@ -183,7 +183,12 @@ A full frame looks like:
 A0:00:TYPE:LEN:00:SRC_MODE:SRC:DST_MODE:DST:DTYPE_H:DTYPE_L:DATA...:CRC_H:CRC_L
 ```
 
-`SRC_MODE:SRC` and `DST_MODE:DST` are also referred as `SRC_H:SRC_L` and `DST_H:DST_L` 
+`SRC_MODE` and `DST_MODE` are routing bytes and are not part of the addresses.
+`SRC` and `DST` are one-byte node IDs, consistent with the other protocols.
+For example, `08:00` is routing mode `0x08` followed by master address
+`0x00`; it is not the two-byte address `0x0800`. The component strips `A0:00`
+before logging and general processing, and inserts the mode bytes only when
+constructing a wire frame.
 
 The component processes bytes after the `A0:00` prefix. `LEN` is the
 number of bytes between `LEN` and the two-byte CRC. The CRC is CRC-16/MCRF4XX
@@ -199,15 +204,17 @@ Example frames:
 A0:00:11:08:00:00:40:08:00:00:41:22:<CRC_H>:<CRC_L>  # power-off command
 A0:00:11:08:00:00:40:08:00:03:C0:02:<CRC_H>:<CRC_L>  # mode command (heat)
 A0:00:15:0A:00:00:40:08:00:00:E8:C0:01:00:<CRC_H>:<CRC_L>  # data request
-A0:00:18:26:00:SRC_H:SRC_L:DST_H:DST_L:00:E8:C1:01:00:DATA...:CRC_H:CRC_L
+A0:00:18:26:00:SRC_MODE:SRC:DST_MODE:DST:00:E8:C1:01:00:DATA...:CRC_H:CRC_L
 ```
 
 ### Auto-detection
 
 Yes. In `auto` mode, the component watches the byte stream for a complete
-`A0:00` frame with a valid CRC-16 and master source address `0x0800`; it then
+`A0:00` frame with a valid CRC-16 and master source pair `08:00`; it then
 confirms `frame_format: a0`. Because Estia installs often need Estia-specific
 options too, the Estia example forces `a0`.
+
+The default remote ID is `0x40`. If that ID is observed on the bus, automatic addressing moves to the next free remote ID. A master ID is accepted only from a valid master keepalive. Remote ID `0x40` enables the autonomous temperature and operating-hours queries, while the A0 remote keepalive is always sent.
 
 ### YAML
 
@@ -224,7 +231,7 @@ climate:
     name: "Toshiba Estia"
     frame_format: a0
     filter_frames: false
-    autonomous: true       # optional: poll E8:C0/E8:C1 without another gateway
+    autonomous: true       # deprecated for A0 polling; remote ID 0x40 selects this behavior
     demand_enabled: false  # optional: 0-10 V demand emulation
 ```
 
