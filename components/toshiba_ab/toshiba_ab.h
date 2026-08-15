@@ -136,7 +136,6 @@ struct PolledSensor {
   sensor::Sensor *sensor;         // target sensor to publish into
 };
 
-
 struct DataFrame {
   union {
     uint8_t raw[DATA_FRAME_MAX_SIZE];
@@ -209,19 +208,22 @@ struct DataFrame {
   // raw[0]=Type, raw[1]=Len(LL), raw[2]=0x00, raw[3:4]=Src, raw[5:6]=Dst, raw[7:8]=DataType, ..., CRC16
   // Bytes in raw[] = LL + 4 (type + len + 0x00 + src/dst/dtype header + payload + CRC)
   size_t estia_size() const {
-    if (!estia_ || estia_len_ < 4) return 0;
+    if (!estia_ || estia_len_ < 4)
+      return 0;
     return estia_len_ + 4;  // TT + LL + LL_payload + CRC(2)
   }
 
   uint16_t estia_crc_received() const {
     size_t s = estia_size();
-    if (s < 6) return 0;
+    if (s < 6)
+      return 0;
     return (raw[s - 2] << 8) | raw[s - 1];
   }
 
   uint16_t calculate_estia_crc() const {
     size_t s = estia_size();
-    if (s < 6) return 0;
+    if (s < 6)
+      return 0;
 
     // CRC-16/MCRF4XX: poly 0x8408 (reflected 0x1021), init 0xFFFF
     auto crc_byte = [](uint16_t crc, uint8_t b) -> uint16_t {
@@ -247,9 +249,7 @@ struct DataFrame {
     return crc;
   }
 
-  bool validate_estia_crc() const {
-    return estia_crc_received() == calculate_estia_crc();
-  }
+  bool validate_estia_crc() const { return estia_crc_received() == calculate_estia_crc(); }
 
   /**
    * Calculates CRC on the current data by creating an XOR sum
@@ -333,7 +333,8 @@ struct DataFrameReader {
   // Clear reader state. Successful frame completion and configuration changes
   // pass false so only recovery/error resets contribute to the diagnostic rate.
   void reset(bool count_as_error) {
-    if (count_as_error) count_reset();
+    if (count_as_error)
+      count_reset();
     reset_frame_state_();
     tu2c_      = false;
     prefix_match_ = 0;
@@ -489,8 +490,8 @@ struct DataFrameReader {
 
       if (tu2c_expected_total_ > 0 && tu2c_bytes_seen_ == tu2c_expected_total_) {
         if (current_byte != 0xA0) {
-          ESP_LOGV("READER", "TU2C frame ended without 0xA0 (seen=%u expected=%u); resetting",
-                   tu2c_bytes_seen_, tu2c_expected_total_);
+          ESP_LOGV("READER", "TU2C frame ended without 0xA0 (seen=%u expected=%u); resetting", tu2c_bytes_seen_,
+                   tu2c_expected_total_);
           reset(true);
           return false;
         }
@@ -599,9 +600,8 @@ struct DataFrameReader {
         // exactly the same data[] offsets as classic TCC-Link
         // (STATUS_DATA_*_BYTE constants). Net change to the frame size
         // is therefore −5 bytes (strip 6 wrapper + insert 1 padding).
-        if (frame_format_ == FrameFormat::HM
-            && frame.raw[0] == 0xA0 && frame.raw[1] == 0x00
-            && frame.data_length >= 7) {
+        if (frame_format_ == FrameFormat::HM && frame.raw[0] == 0xA0 && frame.raw[1] == 0x00 &&
+            frame.data_length >= 7) {
           DataFrameReader::canonicalize_hm_frame(&frame, expected_total_);
           // CRC algorithm for HM hasn't been derived yet — accept the
           // frame but flag the CRC as unvalidated so callers can decide.
@@ -627,7 +627,6 @@ struct DataFrameReader {
 
     return false;
   }
-
 
   static bool canonicalize_hm_frame(DataFrame *hm_frame, uint16_t total) {
     if (hm_frame == nullptr || total < 12 || hm_frame->raw[0] != 0xA0 || hm_frame->raw[1] != 0x00 ||
@@ -852,14 +851,19 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_zone1_water_temp_sensor(sensor::Sensor *sensor) { zone1_water_temp_sensor_ = sensor; }
   void set_zone1_target_temperature_sensor(sensor::Sensor *sensor) { zone1_target_temperature_sensor_ = sensor; }
   void set_dhw_current_temp_sensor(sensor::Sensor *sensor) { dhw_current_temp_sensor_ = sensor; }
-  void set_hotwater_pump_heating_binary_sensor(binary_sensor::BinarySensor *sensor) { hotwater_pump_heating_binary_sensor_ = sensor; }
-  void set_hotwater_resistor_heating_binary_sensor(binary_sensor::BinarySensor *sensor) { hotwater_resistor_heating_binary_sensor_ = sensor; }
+  void set_hotwater_pump_heating_binary_sensor(binary_sensor::BinarySensor *sensor) {
+    hotwater_pump_heating_binary_sensor_ = sensor;
+  }
+  void set_hotwater_resistor_heating_binary_sensor(binary_sensor::BinarySensor *sensor) {
+    hotwater_resistor_heating_binary_sensor_ = sensor;
+  }
   void set_frame_format(FrameFormat format) {
     data_reader.set_frame_format(format);
     frame_format_auto_ = false;
     frame_format_confirmed_ = true;
     if (format == FrameFormat::ESTIA) {
-      if (remote_address_auto_) remote_address_ = TOSHIBA_ESTIA_REMOTE_DEFAULT;
+      if (remote_address_auto_)
+        remote_address_ = TOSHIBA_ESTIA_REMOTE_DEFAULT;
     }
     this->apply_default_master_address_for_frame_format_();
   }
@@ -868,6 +872,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
     frame_format_auto_ = true;
     frame_format_confirmed_ = false;
   }
+
  private:
   void apply_default_master_address_for_frame_format_() {
     if (!this->master_address_auto_ || this->master_address_confirmed_) {
@@ -924,10 +929,14 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_failed_crcs_sensor(sensor::Sensor *failed_crcs_sensor) { this->failed_crcs_sensor_ = failed_crcs_sensor; }
   void set_noise_rate_sensor(sensor::Sensor *sensor) { this->noise_rate_sensor_ = sensor; }
   void set_crc_failures_5min_sensor(sensor::Sensor *sensor) { this->crc_failures_5min_sensor_ = sensor; }
-  void set_indoor_unit_count_text_sensor(text_sensor::TextSensor *sensor) { this->indoor_unit_count_text_sensor_ = sensor; }
+  void set_indoor_unit_count_text_sensor(text_sensor::TextSensor *sensor) {
+    this->indoor_unit_count_text_sensor_ = sensor;
+  }
   void set_indoor_units_text_sensor(text_sensor::TextSensor *sensor) { this->indoor_units_text_sensor_ = sensor; }
   void set_remote_count_text_sensor(text_sensor::TextSensor *sensor) { this->remote_count_text_sensor_ = sensor; }
-  void set_remote_addresses_text_sensor(text_sensor::TextSensor *sensor) { this->remote_addresses_text_sensor_ = sensor; }
+  void set_remote_addresses_text_sensor(text_sensor::TextSensor *sensor) {
+    this->remote_addresses_text_sensor_ = sensor;
+  }
 
   void send_command(struct DataFrame command);
   bool send_raw_frame_from_text(const std::string &frame_text);
@@ -949,7 +958,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_ping_enabled(bool en) { ping_enabled_ = en; }
   void set_autoreset_errors(bool en) { autoreset_errors_ = en; }
   void set_remote_error_binary_sensor(binary_sensor::BinarySensor *sensor) { remote_error_binary_sensor_ = sensor; }
-  void set_estia_source_address(uint16_t addr) { estia_source_address_ = addr; }
+  // Kept for source compatibility with older YAML/code. A0 addresses are now
+  // one byte; the former high byte was the wire-level SRC_MODE.
+  void set_estia_source_address(uint16_t addr) { set_remote_address(static_cast<uint8_t>(addr)); }
   void send_estia_setpoint(float target_temp);
   void send_estia_power(bool on);
   void send_estia_mode(uint8_t mode_cmd);  // 0x02=heat, 0x01=cool
@@ -957,6 +968,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void send_estia_demand_heartbeat();      // periodic 0x55 as 0x0041
   void set_demand_enabled(bool en) { demand_enabled_ = en; }
   void send_estia_data_request(uint8_t subtype);
+  void send_estia_ping();
   void send_estia_first_gen_dhw_setpoint(float target_temp);
   void send_estia_first_gen_zone1(bool on);
   void send_estia_first_gen_dhw_on();
@@ -1037,7 +1049,6 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool maybe_auto_detect_hm_frame_(DataFrame *frame);
   bool is_hm_wire_frame_from_master_(const DataFrame *frame) const;
 
-
   std::vector<DataFrame> create_commands(const struct TccState *new_state);
 
   // callbacks
@@ -1090,8 +1101,6 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void publish_dhw_current_temperature_(float temperature);
   std::vector<PolledSensor> polled_sensors_;
 
-
-
   // Tracks the last sensor ID we queried via 0x17 (for short 0x1A replies)
   uint8_t last_sensor_query_id_{0xFF};     // 0xFF = invalid / none
   bool    sensor_query_outstanding_{false}; // true after send, cleared on reply
@@ -1135,7 +1144,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   //autonomous mode **********************************
   bool autonomous_ = false;
   uint32_t ping_interval_ms_ = 30000;  // default ping interval
-  uint32_t read08_interval_ms = 60000;  // interval to send 40:00:15:06:08:E8:00:01:00:9E:2C, not sure what it does, but it is sent every minute by remote in the logs
+  uint32_t read08_interval_ms = 60000;  // interval to send 40:00:15:06:08:E8:00:01:00:9E:2C, not sure what it does, but
+                                        // it is sent every minute by remote in the logs
   uint8_t command_mode_read_{COMMAND_MODE_READ};
   uint8_t command_mode_write_{COMMAND_MODE_WRITE};
 
@@ -1191,7 +1201,6 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
 
   uint32_t last_master_alive_millis_ = 0;
   bool estia_was_connected_{false};
-  uint16_t estia_source_address_{0x0040};  // default: mimic remote controller
   climate::ClimateMode estia_last_active_mode_{climate::CLIMATE_MODE_HEAT};  // last known mode while powered on
   bool estia_power_on_pending_{false};  // waiting for mode ACK before sending power on
   uint8_t estia_pending_mode_cmd_{0};   // mode command to retry (0x01=cool, 0x02=heat)
@@ -1217,9 +1226,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   uint8_t estia_first_gen_dhw_encoded_{0};
   uint8_t estia_first_gen_zone1_encoded_{0};
   uint32_t last_temp_log_time_ = 0;  // Counter for BME280 temperature logging
-  float last_sent_temp_ = 1; // Last sent room temperature to the unit
-
-
+  float last_sent_temp_ = 1;         // Last sent room temperature to the unit
 };
 
 class ToshibaAbVentSwitch : public switch_::Switch, public Component {
@@ -1244,6 +1251,7 @@ class ToshibaAbVentSwitch : public switch_::Switch, public Component {
 class ToshibaAbEstiaZone1Switch : public switch_::Switch, public Component {
  public:
   ToshibaAbEstiaZone1Switch(ToshibaAbClimate *climate) { climate_ = climate; }
+
  protected:
   void write_state(bool state) override;
   ToshibaAbClimate *climate_;
@@ -1252,6 +1260,7 @@ class ToshibaAbEstiaZone1Switch : public switch_::Switch, public Component {
 class ToshibaAbEstiaDhwBoostSwitch : public switch_::Switch, public Component {
  public:
   ToshibaAbEstiaDhwBoostSwitch(ToshibaAbClimate *climate) { climate_ = climate; }
+
  protected:
   void write_state(bool state) override;
   ToshibaAbClimate *climate_;
@@ -1260,6 +1269,7 @@ class ToshibaAbEstiaDhwBoostSwitch : public switch_::Switch, public Component {
 class ToshibaAbEstiaAntibacteriaSwitch : public switch_::Switch, public Component {
  public:
   ToshibaAbEstiaAntibacteriaSwitch(ToshibaAbClimate *climate) { climate_ = climate; }
+
  protected:
   void write_state(bool state) override;
   ToshibaAbClimate *climate_;
@@ -1268,12 +1278,12 @@ class ToshibaAbEstiaAntibacteriaSwitch : public switch_::Switch, public Componen
 class ToshibaAbReadOnlySwitch : public switch_::Switch, public Component {
  public:
   ToshibaAbReadOnlySwitch(ToshibaAbClimate *climate) { climate_ = climate; }
+
  protected:
   void write_state(bool state) override;
   ToshibaAbClimate *climate_;
 };
 
 }  // namespace toshiba_ab
-
 
 }  // namespace esphome
