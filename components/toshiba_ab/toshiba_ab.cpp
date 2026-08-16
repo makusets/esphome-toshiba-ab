@@ -10,6 +10,7 @@ namespace esphome {
 namespace toshiba_ab {
 
 static const char *const TAG = "toshiba_ab";
+constexpr ProtocolOpcodes ToshibaAbClimate::KEEPALIVE_OPCODE1;
 
 #ifdef USE_ESP8266
 static HardwareSerial bus_serial(UART0);
@@ -20,8 +21,10 @@ void ToshibaAbClimate::setup() {
   master_address_ = master_setting_;
   this->mode = climate::CLIMATE_MODE_OFF;
   this->target_temperature = 22.0f;
-  set_runtime_parity_(uart::UART_CONFIG_PARITY_EVEN);
-  diagnostic_("Listening for a master keepalive");
+  select_scan_protocol_(protocol_setting_ == Protocol::AUTO ? Protocol::TCC : protocol_setting_);
+  diagnostic_(protocol_setting_ == Protocol::AUTO
+                  ? "Discovery started: scanning TCC keepalives (0-20s)"
+                  : std::string("Listening for a ") + protocol_name_(protocol_setting_) + " keepalive");
 
 #ifdef USE_ESP8266
   if (hardware_uart_rx_pin_ == 13)
@@ -30,13 +33,9 @@ void ToshibaAbClimate::setup() {
 }
 
 void ToshibaAbClimate::loop() {
-  const uint32_t elapsed = millis() - boot_ms_;
-  if (!using_none_parity_ && elapsed >= LISTEN_ONLY_MS && !protocol_confirmed_) {
-    using_none_parity_ = true;
-    tcc_size_ = a0_size_ = tu2c_size_ = 0;
-    set_runtime_parity_(uart::UART_CONFIG_PARITY_NONE);
-    ESP_LOGI(TAG, "No matching even-parity keepalive; scanning TU2C with no parity");
-  }
+  const uint32_t now = millis();
+  update_discovery_(now);
+  check_reader_timeout_(now);
 
   uint8_t byte;
 #ifdef USE_ESP8266
@@ -52,57 +51,83 @@ void ToshibaAbClimate::loop() {
 
 void ToshibaAbClimate::read_byte_(uint8_t byte) {
   ESP_LOGVV(TAG, "Reader accepted byte 0x%02X", byte);
-  if (using_none_parity_)
+  last_byte_ms_ = millis();
+  if (scan_protocol_ == Protocol::TU2C)
     read_tu2c_byte_(byte);
-  else
+  else if (scan_protocol_ == Protocol::TCC)
+    read_even_byte_(byte);
+  else if (scan_protocol_ == Protocol::A0)
     read_even_byte_(byte);
 }
 
 void ToshibaAbClimate::read_even_byte_(uint8_t byte) {
-  // A0 has an unambiguous two-byte wrapper, so collect it independently.
-  if (a0_size_ == 0) {
-    if (a0_sync_ == 0 && byte == 0xA0)
-      a0_sync_ = 1;
-    else if (a0_sync_ == 1 && byte == 0x00) {
-      a0_[0] = 0xA0;
-      a0_[1] = 0x00;
-      a0_size_ = 2;
-      a0_sync_ = 0;
-    } else
-      a0_sync_ = byte == 0xA0 ? 1 : 0;
-  } else {
-    if (a0_size_ < a0_.size())
-      a0_[a0_size_++] = byte;
-    if (a0_size_ == 4) {
-      a0_expected_ = static_cast<size_t>(a0_[3]) + 6;  // wrapper, type, length, body, CRC16
-      if (a0_expected_ < 8 || a0_expected_ > a0_.size())
+  if (scan_protocol_ == Protocol::A0) {
+    // A0 has an unambiguous two-byte wrapper.
+    if (a0_size_ == 0) {
+      if (a0_sync_ == 0 && byte == 0xA0)
+        a0_sync_ = 1;
+      else if (a0_sync_ == 1 && byte == 0x00) {
+        a0_[0] = 0xA0;
+        a0_[1] = 0x00;
+        a0_size_ = 2;
+        a0_sync_ = 0;
+      } else
+        a0_sync_ = byte == 0xA0 ? 1 : 0;
+    } else {
+      if (a0_size_ < a0_.size())
+        a0_[a0_size_++] = byte;
+      if (a0_size_ == 4) {
+        a0_expected_ = static_cast<size_t>(a0_[3]) + 6;  // wrapper, type, length, body, CRC16
+        if (a0_expected_ < 8 || a0_expected_ > a0_.size())
+          a0_size_ = a0_expected_ = 0;
+      }
+      if (a0_expected_ && a0_size_ == a0_expected_) {
+        const uint16_t received = (static_cast<uint16_t>(a0_[a0_size_ - 2]) << 8) | a0_[a0_size_ - 1];
+        process_frame_(Protocol::A0, a0_.data(), a0_size_, received == crc16_mcrf4xx_(a0_.data(), a0_size_ - 2));
         a0_size_ = a0_expected_ = 0;
+      }
     }
-    if (a0_expected_ && a0_size_ == a0_expected_) {
-      const uint16_t received = (static_cast<uint16_t>(a0_[a0_size_ - 2]) << 8) | a0_[a0_size_ - 1];
-      process_frame_(Protocol::A0, a0_.data(), a0_size_, received == crc16_mcrf4xx_(a0_.data(), a0_size_ - 2));
-      a0_size_ = a0_expected_ = 0;
-    }
+    return;
   }
 
-  // TCC frames have no wrapper: a length byte at offset 3 determines the end.
+  // TCC has no sync marker. Keep a sliding candidate so a bad length or CRC
+  // cannot leave the reader permanently aligned to noise/a truncated frame.
   if (tcc_size_ < tcc_.size())
     tcc_[tcc_size_++] = byte;
-  if (tcc_size_ == 4) {
-    tcc_expected_ = static_cast<size_t>(tcc_[3]) + 5;
+  else {
+    reset_readers_();
+    tcc_[tcc_size_++] = byte;
+  }
+  while (tcc_size_ >= 4) {
+    if (tcc_expected_ == 0)
+      tcc_expected_ = static_cast<size_t>(tcc_[3]) + 5;
     if (tcc_[3] < 2 || tcc_expected_ > tcc_.size()) {
       for (size_t i = 1; i < tcc_size_; i++)
         tcc_[i - 1] = tcc_[i];
       tcc_size_--;
       tcc_expected_ = 0;
+      reader_reset_count_++;
+      continue;
     }
-  }
-  if (tcc_expected_ && tcc_size_ == tcc_expected_) {
+    if (tcc_size_ < tcc_expected_)
+      break;
     uint8_t crc = 0;
-    for (size_t i = 0; i + 1 < tcc_size_; i++)
+    for (size_t i = 0; i + 1 < tcc_expected_; i++)
       crc ^= tcc_[i];
-    process_frame_(Protocol::TCC, tcc_.data(), tcc_size_, crc == tcc_[tcc_size_ - 1]);
-    tcc_size_ = tcc_expected_ = 0;
+    const bool valid = crc == tcc_[tcc_expected_ - 1];
+    process_frame_(Protocol::TCC, tcc_.data(), tcc_expected_, valid);
+    if (valid) {
+      const size_t consumed = tcc_expected_;
+      for (size_t i = consumed; i < tcc_size_; i++)
+        tcc_[i - consumed] = tcc_[i];
+      tcc_size_ -= consumed;
+    } else {
+      for (size_t i = 1; i < tcc_size_; i++)
+        tcc_[i - 1] = tcc_[i];
+      tcc_size_--;
+      reader_reset_count_++;
+    }
+    tcc_expected_ = 0;
   }
 }
 
@@ -135,11 +160,62 @@ void ToshibaAbClimate::read_tu2c_byte_(uint8_t byte) {
   }
 }
 
+void ToshibaAbClimate::update_discovery_(uint32_t now) {
+  if (protocol_setting_ != Protocol::AUTO || protocol_confirmed_ || discovery_finished_)
+    return;
+
+  const uint32_t elapsed = now - boot_ms_;
+  Protocol wanted =
+      elapsed < PROTOCOL_SCAN_MS ? Protocol::TCC : (elapsed < 2 * PROTOCOL_SCAN_MS ? Protocol::A0 : Protocol::TU2C);
+  if (elapsed >= DISCOVERY_MS) {
+    discovery_finished_ = true;
+    char message[128];
+    std::snprintf(message, sizeof(message), "Discovery finished: no keepalive found in 60s (%u reader resyncs)",
+                  static_cast<unsigned>(reader_reset_count_));
+    diagnostic_(message);
+    return;
+  }
+  if (wanted != scan_protocol_) {
+    select_scan_protocol_(wanted);
+    char message[96];
+    std::snprintf(message, sizeof(message), "Discovery: scanning %s keepalives (%us-%us)", protocol_name_(wanted),
+                  static_cast<unsigned>(elapsed / 20000 * 20), static_cast<unsigned>(elapsed / 20000 * 20 + 20));
+    diagnostic_(message);
+  }
+}
+
+void ToshibaAbClimate::select_scan_protocol_(Protocol protocol) {
+  scan_protocol_ = protocol;
+  reset_readers_();
+  set_runtime_parity_(protocol == Protocol::TU2C ? uart::UART_CONFIG_PARITY_NONE : uart::UART_CONFIG_PARITY_EVEN);
+}
+
+void ToshibaAbClimate::reset_readers_(bool timeout) {
+  if (timeout)
+    reader_reset_count_++;
+  tcc_size_ = tcc_expected_ = 0;
+  a0_size_ = a0_expected_ = 0;
+  a0_sync_ = 0;
+  tu2c_size_ = tu2c_expected_ = 0;
+  tu2c_sync_ = 0;
+  last_byte_ms_ = 0;
+}
+
+void ToshibaAbClimate::check_reader_timeout_(uint32_t now) {
+  const bool partial = tcc_size_ != 0 || a0_size_ != 0 || a0_sync_ != 0 || tu2c_size_ != 0 || tu2c_sync_ != 0;
+  if (partial && last_byte_ms_ != 0 && now - last_byte_ms_ > BYTE_TIMEOUT_MS) {
+    ESP_LOGV(TAG, "%s inter-byte timeout after %ums; discarding partial frame", protocol_name_(scan_protocol_),
+             static_cast<unsigned>(now - last_byte_ms_));
+    reset_readers_(true);
+  }
+}
+
 void ToshibaAbClimate::process_frame_(Protocol protocol, const uint8_t *data, size_t size, bool crc_ok) {
   uint8_t source = 0;
   const bool keepalive = crc_ok && is_master_keepalive_(protocol, data, size, source);
   const char *description = keepalive ? "master keepalive" : (crc_ok ? "non-keepalive (ignored)" : "CRC failed");
-  ESP_LOGD(TAG, "RX %s: %s [%s]", protocol_name_(protocol), hex_(data, size).c_str(), description);
+  ESP_LOGD(TAG, "RX %s opcode1=0x%02X opcode2=0x%04X: %s [%s]", protocol_name_(protocol),
+           opcode1_(protocol, data, size), opcode2_(protocol, data, size), hex_(data, size).c_str(), description);
   if (!crc_ok)
     return;
   if (keepalive)
@@ -150,23 +226,37 @@ bool ToshibaAbClimate::is_master_keepalive_(Protocol protocol, const uint8_t *da
                                             uint8_t &source) const {
   switch (protocol) {
     case Protocol::TCC:
-      if (system_type_ == SystemType::AIR && size >= 7 && data[2] == 0x10) {
+      // Main's normal-protocol path first validates the complete frame, then
+      // only treats OPCODE_PING from the master as a keepalive. During auto
+      // discovery the master is not known yet, so also require the canonical
+      // read-mode/opcode2 keepalive signature (80:8A) and its exact LEN=2
+      // shape instead of accepting every opcode1=0x10 frame.
+      if (size == 7 && data[3] == 0x02 && data[4] == 0x80 &&
+          opcode1_(protocol, data, size) == KEEPALIVE_OPCODE1.for_protocol(protocol) &&
+          opcode2_(protocol, data, size) == 0x8A && (master_setting_ == AUTO_ADDRESS || data[0] == master_setting_)) {
         source = data[0];
         return true;
       }
       return false;
     case Protocol::TU2C:
-      // Air TU2C and first-generation water systems share the 0x0A/0x3A
-      // master keepalive, but are deliberately selected by system_type here.
-      if (size == 0x0A && data[7] == 0x3A) {
+      // Main identifies this with the total length and the complete 00:3A
+      // tail signature. Air TU2C and first-generation water systems share it.
+      if (size == 0x0A && data[2] == 0x0A && data[size - 4] == 0x00 &&
+          opcode1_(protocol, data, size) == KEEPALIVE_OPCODE1.for_protocol(protocol) &&
+          (master_setting_ == AUTO_ADDRESS || data[3] == master_setting_)) {
         source = data[3];
         return true;
       }
       return false;
     case Protocol::A0:
-      // A0/HM: 00 before SRC and the mode bytes before SRC/DST are not IDs.
+      // A0 water and air units use the same type 0x10 keepalive.
       // Wire layout is A0:00:TYPE:LEN:00:SRC_MODE:SRC:DST_MODE:DST:...
-      if (size >= 12 && data[2] == 0x10) {
+      // Main additionally identifies 08:00 as the A0 master source; without
+      // that check a valid type 0x10 frame from another bus participant could
+      // incorrectly end discovery.
+      if (size >= 12 && data[4] == 0x00 && data[5] == 0x08 && data[6] == 0x00 &&
+          opcode1_(protocol, data, size) == KEEPALIVE_OPCODE1.for_protocol(protocol) &&
+          (master_setting_ == AUTO_ADDRESS || data[6] == master_setting_)) {
         source = data[6];
         return true;
       }
@@ -184,6 +274,7 @@ void ToshibaAbClimate::consider_keepalive_(Protocol protocol, uint8_t source) {
   }
   protocol_detected_ = protocol;
   protocol_confirmed_ = true;
+  discovery_finished_ = true;
 
   if (master_setting_ != AUTO_ADDRESS && master_setting_ != source) {
     char message[96];
@@ -213,8 +304,19 @@ void ToshibaAbClimate::set_runtime_parity_(uart::UARTParityOptions parity) {
 
 void ToshibaAbClimate::diagnostic_(const std::string &message) {
   ESP_LOGI(TAG, "%s", message.c_str());
+  if (!diagnostic_history_.empty())
+    diagnostic_history_ += '\n';
+  diagnostic_history_ += message;
+  while (diagnostic_history_.size() > 255) {
+    const size_t newline = diagnostic_history_.find('\n');
+    if (newline == std::string::npos) {
+      diagnostic_history_.erase(0, diagnostic_history_.size() - 255);
+      break;
+    }
+    diagnostic_history_.erase(0, newline + 1);
+  }
   if (diagnostic_ != nullptr)
-    diagnostic_->publish_state(message);
+    diagnostic_->publish_state(diagnostic_history_);
 }
 
 const char *ToshibaAbClimate::protocol_name_(Protocol protocol) {
@@ -228,6 +330,22 @@ const char *ToshibaAbClimate::protocol_name_(Protocol protocol) {
     default:
       return "auto";
   }
+}
+
+uint8_t ToshibaAbClimate::opcode1_(Protocol protocol, const uint8_t *data, size_t size) {
+  if (protocol == Protocol::TCC)
+    return size > 2 ? data[2] : 0;
+  if (protocol == Protocol::TU2C)
+    return size > 7 ? data[7] : 0;  // TU2C semantic opcode is at stripped raw[5].
+  return size > 2 ? data[2] : 0;
+}
+
+uint16_t ToshibaAbClimate::opcode2_(Protocol protocol, const uint8_t *data, size_t size) {
+  if (protocol == Protocol::TCC)
+    return size > 5 ? data[5] : 0;
+  if (protocol == Protocol::TU2C)
+    return size > 6 ? data[6] : 0;
+  return size > 10 ? (static_cast<uint16_t>(data[9]) << 8) | data[10] : 0;
 }
 
 std::string ToshibaAbClimate::hex_(const uint8_t *data, size_t size) {

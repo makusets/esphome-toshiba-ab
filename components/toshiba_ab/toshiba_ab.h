@@ -13,6 +13,19 @@ namespace toshiba_ab {
 enum class Protocol : uint8_t { AUTO, TCC, TU2C, A0 };
 enum class SystemType : uint8_t { AIR, WATER };
 
+// A semantic opcode can have a different wire value in every protocol.  Keep
+// those values together rather than spreading protocol-specific magic numbers
+// through the readers.
+struct ProtocolOpcodes {
+  uint8_t tcc;
+  uint8_t tu2c;
+  uint8_t a0;
+
+  uint8_t for_protocol(Protocol protocol) const {
+    return protocol == Protocol::TCC ? tcc : (protocol == Protocol::TU2C ? tu2c : a0);
+  }
+};
+
 class DiagnosticTextSensor : public text_sensor::TextSensor {};
 
 class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, public Component {
@@ -33,18 +46,27 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
 
  protected:
   static constexpr uint8_t AUTO_ADDRESS = 0xAA;
-  static constexpr uint32_t LISTEN_ONLY_MS = 30000;
+  static constexpr uint32_t PROTOCOL_SCAN_MS = 20000;
+  static constexpr uint32_t DISCOVERY_MS = 3 * PROTOCOL_SCAN_MS;
+  static constexpr uint32_t BYTE_TIMEOUT_MS = 25;
   static constexpr size_t MAX_FRAME_SIZE = 132;
+  static constexpr ProtocolOpcodes KEEPALIVE_OPCODE1{0x10, 0x3A, 0x10};
 
   void read_byte_(uint8_t byte);
   void read_even_byte_(uint8_t byte);
   void read_tu2c_byte_(uint8_t byte);
+  void update_discovery_(uint32_t now);
+  void select_scan_protocol_(Protocol protocol);
+  void reset_readers_(bool timeout = false);
+  void check_reader_timeout_(uint32_t now);
   void process_frame_(Protocol protocol, const uint8_t *data, size_t size, bool crc_ok);
   bool is_master_keepalive_(Protocol protocol, const uint8_t *data, size_t size, uint8_t &source) const;
   void consider_keepalive_(Protocol protocol, uint8_t source);
   void set_runtime_parity_(uart::UARTParityOptions parity);
   void diagnostic_(const std::string &message);
   static const char *protocol_name_(Protocol protocol);
+  static uint8_t opcode1_(Protocol protocol, const uint8_t *data, size_t size);
+  static uint16_t opcode2_(Protocol protocol, const uint8_t *data, size_t size);
   static std::string hex_(const uint8_t *data, size_t size);
   static uint16_t crc16_mcrf4xx_(const uint8_t *data, size_t size);
 
@@ -56,8 +78,12 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   uint8_t esp_address_{AUTO_ADDRESS};
   bool master_address_confirmed_{false};
   bool protocol_confirmed_{false};
-  bool using_none_parity_{false};
+  Protocol scan_protocol_{Protocol::AUTO};
+  bool discovery_finished_{false};
   uint32_t boot_ms_{0};
+  uint32_t last_byte_ms_{0};
+  uint32_t reader_reset_count_{0};
+  std::string diagnostic_history_;
   text_sensor::TextSensor *diagnostic_{nullptr};
   uint8_t hardware_uart_rx_pin_{0xFF};
 
