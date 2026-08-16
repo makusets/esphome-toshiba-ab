@@ -10,7 +10,8 @@ namespace esphome {
 namespace toshiba_ab {
 
 static const char *const TAG = "toshiba_ab";
-constexpr ProtocolOpcodes ToshibaAbClimate::KEEPALIVE_OPCODE1;
+constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_OPCODE;
+constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_DATA_TYPE;
 
 #ifdef USE_ESP8266
 static HardwareSerial bus_serial(UART0);
@@ -23,8 +24,8 @@ void ToshibaAbClimate::setup() {
   this->target_temperature = 22.0f;
   select_scan_protocol_(protocol_setting_ == Protocol::AUTO ? Protocol::TCC : protocol_setting_);
   diagnostic_(protocol_setting_ == Protocol::AUTO
-                  ? "Discovery started: scanning TCC keepalives (0-20s)"
-                  : std::string("Listening for a ") + protocol_name_(protocol_setting_) + " keepalive");
+                  ? "Discovery started: scanning TCC master keepalives (0-20s)"
+                  : std::string("Listening for a ") + protocol_name_(protocol_setting_) + " master keepalive");
 
 #ifdef USE_ESP8266
   if (hardware_uart_rx_pin_ == 13)
@@ -170,7 +171,7 @@ void ToshibaAbClimate::update_discovery_(uint32_t now) {
   if (elapsed >= DISCOVERY_MS) {
     discovery_finished_ = true;
     char message[128];
-    std::snprintf(message, sizeof(message), "Discovery finished: no keepalive found in 60s (%u reader resyncs)",
+    std::snprintf(message, sizeof(message), "Discovery finished: no master keepalive found in 60s (%u reader resyncs)",
                   static_cast<unsigned>(reader_reset_count_));
     diagnostic_(message);
     return;
@@ -178,8 +179,9 @@ void ToshibaAbClimate::update_discovery_(uint32_t now) {
   if (wanted != scan_protocol_) {
     select_scan_protocol_(wanted);
     char message[96];
-    std::snprintf(message, sizeof(message), "Discovery: scanning %s keepalives (%us-%us)", protocol_name_(wanted),
-                  static_cast<unsigned>(elapsed / 20000 * 20), static_cast<unsigned>(elapsed / 20000 * 20 + 20));
+    std::snprintf(message, sizeof(message), "Discovery: scanning %s master keepalives (%us-%us)",
+                  protocol_name_(wanted), static_cast<unsigned>(elapsed / 20000 * 20),
+                  static_cast<unsigned>(elapsed / 20000 * 20 + 20));
     diagnostic_(message);
   }
 }
@@ -212,58 +214,56 @@ void ToshibaAbClimate::check_reader_timeout_(uint32_t now) {
 
 void ToshibaAbClimate::process_frame_(Protocol protocol, const uint8_t *data, size_t size, bool crc_ok) {
   uint8_t source = 0;
-  const bool keepalive = crc_ok && is_master_keepalive_(protocol, data, size, source);
-  const char *description = keepalive ? "master keepalive" : (crc_ok ? "non-keepalive (ignored)" : "CRC failed");
-  ESP_LOGD(TAG, "RX %s opcode1=0x%02X opcode2=0x%04X: %s [%s]", protocol_name_(protocol),
-           opcode1_(protocol, data, size), opcode2_(protocol, data, size), hex_(data, size).c_str(), description);
+  const bool master_keepalive = crc_ok && is_master_keepalive_(protocol, data, size, source);
+  const char *description =
+      master_keepalive ? "master keepalive" : (crc_ok ? "not a master keepalive (ignored)" : "CRC failed");
+  ESP_LOGD(TAG, "RX %s opcode=0x%02X data_type=0x%04X: %s [%s]", protocol_name_(protocol),
+           opcode_(protocol, data, size), data_type_(protocol, data, size), hex_(data, size).c_str(), description);
   if (!crc_ok)
     return;
-  if (keepalive)
+  if (master_keepalive)
     consider_keepalive_(protocol, source);
 }
 
 bool ToshibaAbClimate::is_master_keepalive_(Protocol protocol, const uint8_t *data, size_t size,
                                             uint8_t &source) const {
+  bool signature_matches = false;
   switch (protocol) {
     case Protocol::TCC:
       // Main's normal-protocol path first validates the complete frame, then
       // only treats OPCODE_PING from the master as a keepalive. During auto
       // discovery the master is not known yet, so also require the canonical
-      // read-mode/opcode2 keepalive signature (80:8A) and its exact LEN=2
-      // shape instead of accepting every opcode1=0x10 frame.
-      if (size == 7 && data[3] == 0x02 && data[4] == 0x80 &&
-          opcode1_(protocol, data, size) == KEEPALIVE_OPCODE1.for_protocol(protocol) &&
-          opcode2_(protocol, data, size) == 0x8A && (master_setting_ == AUTO_ADDRESS || data[0] == master_setting_)) {
-        source = data[0];
-        return true;
-      }
-      return false;
+      // read-mode/data-type keepalive signature and its exact LEN=2 shape
+      // instead of accepting every opcode=0x10 frame.
+      source = size > 0 ? data[0] : 0;
+      signature_matches = size == 7 && data[3] == 0x02 && data[4] == 0x80 &&
+                          opcode_(protocol, data, size) == MASTER_KEEPALIVE_OPCODE.for_protocol(protocol) &&
+                          data_type_(protocol, data, size) == MASTER_KEEPALIVE_DATA_TYPE.for_protocol(protocol);
+      break;
     case Protocol::TU2C:
       // Main identifies this with the total length and the complete 00:3A
       // tail signature. Air TU2C and first-generation water systems share it.
-      if (size == 0x0A && data[2] == 0x0A && data[size - 4] == 0x00 &&
-          opcode1_(protocol, data, size) == KEEPALIVE_OPCODE1.for_protocol(protocol) &&
-          (master_setting_ == AUTO_ADDRESS || data[3] == master_setting_)) {
-        source = data[3];
-        return true;
-      }
-      return false;
+      source = size > 3 ? data[3] : 0;
+      signature_matches = size == 0x0A && data[2] == 0x0A &&
+                          opcode_(protocol, data, size) == MASTER_KEEPALIVE_OPCODE.for_protocol(protocol) &&
+                          data_type_(protocol, data, size) == MASTER_KEEPALIVE_DATA_TYPE.for_protocol(protocol);
+      break;
     case Protocol::A0:
       // A0 water and air units use the same type 0x10 keepalive.
       // Wire layout is A0:00:TYPE:LEN:00:SRC_MODE:SRC:DST_MODE:DST:...
-      // Main additionally identifies 08:00 as the A0 master source; without
-      // that check a valid type 0x10 frame from another bus participant could
-      // incorrectly end discovery.
-      if (size >= 12 && data[4] == 0x00 && data[5] == 0x08 && data[6] == 0x00 &&
-          opcode1_(protocol, data, size) == KEEPALIVE_OPCODE1.for_protocol(protocol) &&
-          (master_setting_ == AUTO_ADDRESS || data[6] == master_setting_)) {
-        source = data[6];
-        return true;
-      }
-      return false;
+      source = size > 6 ? data[6] : 0;
+      signature_matches = size >= 12 && data[4] == 0x00 && data[5] == 0x08 &&
+                          opcode_(protocol, data, size) == MASTER_KEEPALIVE_OPCODE.for_protocol(protocol) &&
+                          data_type_(protocol, data, size) == MASTER_KEEPALIVE_DATA_TYPE.for_protocol(protocol);
+      break;
     default:
-      return false;
+      break;
   }
+
+  // The first master keepalive establishes the source address. Once discovery
+  // has completed, do not treat traffic from another participant as a master
+  // keepalive; remote keepalives will be handled separately.
+  return signature_matches && (!protocol_confirmed_ || source == master_address_);
 }
 
 void ToshibaAbClimate::consider_keepalive_(Protocol protocol, uint8_t source) {
@@ -332,19 +332,19 @@ const char *ToshibaAbClimate::protocol_name_(Protocol protocol) {
   }
 }
 
-uint8_t ToshibaAbClimate::opcode1_(Protocol protocol, const uint8_t *data, size_t size) {
+uint8_t ToshibaAbClimate::opcode_(Protocol protocol, const uint8_t *data, size_t size) {
   if (protocol == Protocol::TCC)
     return size > 2 ? data[2] : 0;
   if (protocol == Protocol::TU2C)
-    return size > 7 ? data[7] : 0;  // TU2C semantic opcode is at stripped raw[5].
+    return size > 6 ? data[6] : 0;
   return size > 2 ? data[2] : 0;
 }
 
-uint16_t ToshibaAbClimate::opcode2_(Protocol protocol, const uint8_t *data, size_t size) {
+uint16_t ToshibaAbClimate::data_type_(Protocol protocol, const uint8_t *data, size_t size) {
   if (protocol == Protocol::TCC)
     return size > 5 ? data[5] : 0;
   if (protocol == Protocol::TU2C)
-    return size > 6 ? data[6] : 0;
+    return size > 7 ? data[7] : 0;
   return size > 10 ? (static_cast<uint16_t>(data[9]) << 8) | data[10] : 0;
 }
 
