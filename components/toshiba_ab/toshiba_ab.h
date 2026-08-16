@@ -13,15 +13,15 @@ namespace toshiba_ab {
 enum class Protocol : uint8_t { AUTO, TCC, TU2C, A0 };
 enum class SystemType : uint8_t { AIR, WATER };
 
-// A semantic opcode can have a different wire value in every protocol.  Keep
-// those values together rather than spreading protocol-specific magic numbers
+// A semantic field can have a different wire value in every protocol. Keep
+// protocol-specific values together rather than spreading magic numbers
 // through the readers.
-struct ProtocolOpcodes {
-  uint8_t tcc;
-  uint8_t tu2c;
-  uint8_t a0;
+struct ProtocolValue {
+  uint16_t tcc;
+  uint16_t tu2c;
+  uint16_t a0;
 
-  uint8_t for_protocol(Protocol protocol) const {
+  uint16_t for_protocol(Protocol protocol) const {
     return protocol == Protocol::TCC ? tcc : (protocol == Protocol::TU2C ? tu2c : a0);
   }
 };
@@ -50,7 +50,11 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   static constexpr uint32_t DISCOVERY_MS = 3 * PROTOCOL_SCAN_MS;
   static constexpr uint32_t BYTE_TIMEOUT_MS = 25;
   static constexpr size_t MAX_FRAME_SIZE = 132;
-  static constexpr ProtocolOpcodes KEEPALIVE_OPCODE1{0x10, 0x3A, 0x10};
+  static constexpr ProtocolValue MASTER_KEEPALIVE_OPCODE{0x10, 0x00, 0x10};
+  // TCC carries data type 0x8A. In the TU2C 00:3A tail, 0x00 is the opcode
+  // and 0x3A is the data type. A0 master heartbeats carry the two-byte data
+  // type 00:8A in the corresponding field.
+  static constexpr ProtocolValue MASTER_KEEPALIVE_DATA_TYPE{0x8A, 0x3A, 0x008A};
 
   void read_byte_(uint8_t byte);
   void read_even_byte_(uint8_t byte);
@@ -65,8 +69,8 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   void set_runtime_parity_(uart::UARTParityOptions parity);
   void diagnostic_(const std::string &message);
   static const char *protocol_name_(Protocol protocol);
-  static uint8_t opcode1_(Protocol protocol, const uint8_t *data, size_t size);
-  static uint16_t opcode2_(Protocol protocol, const uint8_t *data, size_t size);
+  static uint8_t opcode_(Protocol protocol, const uint8_t *data, size_t size);
+  static uint16_t data_type_(Protocol protocol, const uint8_t *data, size_t size);
   static std::string hex_(const uint8_t *data, size_t size);
   static uint16_t crc16_mcrf4xx_(const uint8_t *data, size_t size);
 
