@@ -315,8 +315,8 @@ void ToshibaAbClimate::diagnostic_(const std::string &message) {
     }
     diagnostic_history_.erase(0, newline + 1);
   }
-  if (diagnostic_ != nullptr)
-    diagnostic_->publish_state(diagnostic_history_);
+  if (diagnostic_sensor_ != nullptr)
+    diagnostic_sensor_->publish_state(diagnostic_history_);
 }
 
 const char *ToshibaAbClimate::protocol_name_(Protocol protocol) {
