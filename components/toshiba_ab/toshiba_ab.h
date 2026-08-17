@@ -41,7 +41,7 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   void set_esp_address(uint8_t address) { esp_address_ = address; }
   void set_protocol(Protocol protocol) { protocol_setting_ = protocol; }
   void set_system_type(SystemType type) { system_type_ = type; }
-  void set_diagnostic_sensor(text_sensor::TextSensor *sensor) { diagnostic_ = sensor; }
+  void set_diagnostic_sensor(text_sensor::TextSensor *sensor) { diagnostic_sensor_ = sensor; }
   void set_hardware_uart_rx_pin(uint8_t pin) { hardware_uart_rx_pin_ = pin; }
 
  protected:
@@ -88,7 +88,7 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   uint32_t last_byte_ms_{0};
   uint32_t reader_reset_count_{0};
   std::string diagnostic_history_;
-  text_sensor::TextSensor *diagnostic_{nullptr};
+  text_sensor::TextSensor *diagnostic_sensor_{nullptr};
   uint8_t hardware_uart_rx_pin_{0xFF};
 
   std::array<uint8_t, MAX_FRAME_SIZE> tcc_{};
