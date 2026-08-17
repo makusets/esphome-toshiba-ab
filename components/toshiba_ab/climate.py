@@ -2,7 +2,14 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 import esphome.final_validate as fv
 from esphome.components import climate, text_sensor, uart
-from esphome.const import CONF_ID, CONF_NUMBER, CONF_RX_PIN, CONF_TX_PIN, CONF_UART_ID
+from esphome.const import (
+    CONF_ID,
+    CONF_NAME,
+    CONF_NUMBER,
+    CONF_RX_PIN,
+    CONF_TX_PIN,
+    CONF_UART_ID,
+)
 from esphome.core import CORE
 
 DEPENDENCIES = ["uart"]
@@ -13,15 +20,17 @@ toshiba_ab_ns = cg.esphome_ns.namespace("toshiba_ab")
 ToshibaAbClimate = toshiba_ab_ns.class_(
     "ToshibaAbClimate", climate.Climate, uart.UARTDevice, cg.Component
 )
-DiagnosticTextSensor = toshiba_ab_ns.class_("DiagnosticTextSensor", text_sensor.TextSensor)
-Protocol = toshiba_ab_ns.enum("Protocol")
-SystemType = toshiba_ab_ns.enum("SystemType")
+DiagnosticTextSensor = toshiba_ab_ns.class_(
+    "DiagnosticTextSensor", text_sensor.TextSensor
+)
+Protocol = toshiba_ab_ns.enum("Protocol", is_class=True)
+SystemType = toshiba_ab_ns.enum("SystemType", is_class=True)
 
 CONF_MASTER_ADDRESS = "master_address"
 CONF_ESP_ADDRESS = "esp_address"
 CONF_FORMAT = "format"
 CONF_SYSTEM_TYPE = "system_type"
-CONF_DIAGNOSTIC_ID = "diagnostic_id"
+CONF_DIAGNOSTIC = "diagnostic"
 CONF_HARDWARE_UART_RX_PIN = "hardware_uart_rx_pin"
 AUTO_ADDRESS = 0xAA
 
@@ -40,16 +49,26 @@ FORMATS = {
 }
 SYSTEM_TYPES = {"air": SystemType.AIR, "water": SystemType.WATER}
 
-CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
-    {
-        cv.GenerateID(): cv.declare_id(ToshibaAbClimate),
-        cv.GenerateID(CONF_DIAGNOSTIC_ID): cv.declare_id(DiagnosticTextSensor),
-        cv.Optional(CONF_MASTER_ADDRESS, default="auto"): _address,
-        cv.Optional(CONF_ESP_ADDRESS, default="auto"): _address,
-        cv.Optional(CONF_FORMAT, default="auto"): cv.enum(FORMATS, lower=True),
-        cv.Optional(CONF_SYSTEM_TYPE, default="Air"): cv.enum(SYSTEM_TYPES, lower=True),
-    }
-).extend(uart.UART_DEVICE_SCHEMA).extend(cv.COMPONENT_SCHEMA)
+CONFIG_SCHEMA = (
+    climate._CLIMATE_SCHEMA.extend(
+        {
+            cv.GenerateID(): cv.declare_id(ToshibaAbClimate),
+            cv.Optional(
+                CONF_DIAGNOSTIC, default={CONF_NAME: "Toshiba AB Diagnostic"}
+            ): text_sensor.text_sensor_schema(
+                DiagnosticTextSensor, entity_category="diagnostic"
+            ),
+            cv.Optional(CONF_MASTER_ADDRESS, default="auto"): _address,
+            cv.Optional(CONF_ESP_ADDRESS, default="auto"): _address,
+            cv.Optional(CONF_FORMAT, default="auto"): cv.enum(FORMATS, lower=True),
+            cv.Optional(CONF_SYSTEM_TYPE, default="Air"): cv.enum(
+                SYSTEM_TYPES, lower=True
+            ),
+        }
+    )
+    .extend(uart.UART_DEVICE_SCHEMA)
+    .extend(cv.COMPONENT_SCHEMA)
+)
 
 
 def _pin_number(pin):
@@ -97,8 +116,5 @@ async def to_code(config):
     if CONF_HARDWARE_UART_RX_PIN in config:
         cg.add(var.set_hardware_uart_rx_pin(config[CONF_HARDWARE_UART_RX_PIN]))
 
-    diagnostic = cg.new_Pvariable(config[CONF_DIAGNOSTIC_ID])
-    cg.add(diagnostic.set_name("Toshiba AB Diagnostic"))
-    cg.add(diagnostic.set_entity_category(cg.EntityCategory.ENTITY_CATEGORY_DIAGNOSTIC))
-    cg.add(cg.App.register_text_sensor(diagnostic))
+    diagnostic = await text_sensor.new_text_sensor(config[CONF_DIAGNOSTIC])
     cg.add(var.set_diagnostic_sensor(diagnostic))
