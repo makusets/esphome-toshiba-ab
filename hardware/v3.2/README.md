@@ -1,10 +1,10 @@
 # v3.2 Jan 2026
 # Ordering or building the board
 
-You will need to build the compatible hardware. This folder contains all necessary files. I designed the board using EasyEDA online editor (free). All files are EasyEDA compatible format.
+You will need to order or build the compatible hardware. This folder contains all necessary files. I designed the board using EasyEDA online editor (free). All files are EasyEDA compatible format.
 easyEDA_project.zip file can be imported onto EasyEDA editor to open the project with schematics and board design, make sure you use the 3.2 version once the project has been imported.
 
-Alternatively, you can order the board from places like JLCPCB. You will need the 3 files included:
+You can order the board from places like JLCPCB. You will need the 3 files included:
 
   - Gerber_v3_2.zip: This is the gerber file for the physical design of the board, if you only one the board made, that's all you need.
   - BOM_v3_2.csv: Contains the list of components (BOM). (needed if you want the full circuit board populated)
@@ -14,7 +14,9 @@ When ordering, make sure all the components that you want included are selected 
 I placed the electrolytic capacitors on the bottom side, so this will typically not be mounted if you are ordering the board from JLCPCB or similar. These are easily sourced and soldered by hand.
 Use the 3D view to double check that all components appear on the board in the right orientation.
 
-Alternatively, import easyEDA_project.zip and adjust it project to your needs. 
+Alternatively, import easyEDA_project.zip and adjust it project to your needs.
+
+If you are after a fully finished product, I usually have some fully assembled boards that I am happy to sell. Check the eBay links at the bottom of this page if interested.
 
 
 ## Component shortfall
@@ -27,7 +29,7 @@ The K78xx DCDC buck is a critical component, the board works fine with a DEXU br
 
 # DIY tips
 
-The internet is full of electronics sodering instructional tips and videos. I have nothing to add there, but I believe the board can be built with a bit of practice and some basic equipment, including a good soldering iron.
+The internet is full of electronics soldering instructional tips and videos. I have nothing to add there, but I believe the board can be built with a bit of practice and some basic equipment, including a good soldering iron.
 
 I personally did not use any magnifying device, reflow oven, or special equipment.
 
@@ -46,7 +48,11 @@ This is how I installed it
 
 <img src="/hardware/v3/Final.jpg" width="49%">      <img src="/hardware/v3/Final2.jpg" width="49%">
 
+# Boards on eBay
 
+1 board: [eBay link](https://www.ebay.com.au/itm/307132294608)
+
+2 boards: [eBay link](https://www.ebay.com.au/itm/307132302164)
 
 
 
