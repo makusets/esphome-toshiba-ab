@@ -217,8 +217,8 @@ void ToshibaAbClimate::process_frame_(Protocol protocol, const uint8_t *data, si
   const bool master_keepalive = crc_ok && is_master_keepalive_(protocol, data, size, source);
   const char *description =
       master_keepalive ? "master keepalive" : (crc_ok ? "not a master keepalive (ignored)" : "CRC failed");
-  ESP_LOGD(TAG, "RX %s opcode=0x%02X data_type=0x%04X: %s [%s]", protocol_name_(protocol),
-           opcode_(protocol, data, size), data_type_(protocol, data, size), hex_(data, size).c_str(), description);
+  ESP_LOGD(TAG, "RX %s: %s [%s]", protocol_name_(protocol), colored_hex_(protocol, data, size, crc_ok).c_str(),
+           description);
   if (!crc_ok)
     return;
   if (master_keepalive)
@@ -303,6 +303,15 @@ void ToshibaAbClimate::set_runtime_parity_(uart::UARTParityOptions parity) {
 }
 
 void ToshibaAbClimate::diagnostic_(const std::string &message) {
+  // The diagnostic sensor contains a short event history. Periodic frames can
+  // produce the same event repeatedly, but consecutive copies carry no extra
+  // information and would crowd useful discovery messages out of the sensor.
+  const size_t last_message = diagnostic_history_.find_last_of('\n');
+  const size_t last_message_start = last_message == std::string::npos ? 0 : last_message + 1;
+  if (!diagnostic_history_.empty() && diagnostic_history_.size() - last_message_start == message.size() &&
+      diagnostic_history_.compare(last_message_start, message.size(), message) == 0)
+    return;
+
   ESP_LOGI(TAG, "%s", message.c_str());
   if (!diagnostic_history_.empty())
     diagnostic_history_ += '\n';
@@ -356,6 +365,47 @@ std::string ToshibaAbClimate::hex_(const uint8_t *data, size_t size) {
     if (i)
       output += ':';
     output += byte;
+  }
+  return output;
+}
+
+std::string ToshibaAbClimate::colored_hex_(Protocol protocol, const uint8_t *data, size_t size, bool crc_ok) {
+  if (!crc_ok)
+    return ESPHOME_LOG_COLOR(ESPHOME_LOG_COLOR_YELLOW) + hex_(data, size) + ESPHOME_LOG_RESET_COLOR;
+
+  std::string output;
+  char byte[4];
+  for (size_t i = 0; i < size; i++) {
+    if (i)
+      output += ':';
+
+    bool address = false;
+    bool command = false;
+    switch (protocol) {
+      case Protocol::TCC:
+        address = i == 0 || i == 1;
+        command = i == 2 || i == 5;
+        break;
+      case Protocol::TU2C:
+        address = i == 3 || i == 4;
+        command = i == 6 || i == 7;
+        break;
+      case Protocol::A0:
+        address = i == 5 || i == 6 || i == 7 || i == 8;
+        command = i == 2 || i == 9 || i == 10;
+        break;
+      default:
+        break;
+    }
+
+    if (address)
+      output += ESPHOME_LOG_COLOR(ESPHOME_LOG_COLOR_RED);
+    else if (command)
+      output += ESPHOME_LOG_COLOR(ESPHOME_LOG_COLOR_YELLOW);
+    std::snprintf(byte, sizeof(byte), "%02X", data[i]);
+    output += byte;
+    if (address || command)
+      output += ESPHOME_LOG_RESET_COLOR;
   }
   return output;
 }
