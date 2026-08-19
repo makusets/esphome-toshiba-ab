@@ -11,6 +11,7 @@ namespace toshiba_ab {
 
 static const char *const TAG = "toshiba_ab";
 constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_OPCODE;
+constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_LENGTH;
 constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_DATA_TYPE;
 
 void ResetButton::press_action() {
@@ -235,10 +236,9 @@ void ToshibaAbClimate::check_reader_timeout_(uint32_t now) {
 void ToshibaAbClimate::process_frame_(Protocol protocol, const uint8_t *data, size_t size, bool crc_ok) {
   uint8_t source = 0;
   const bool master_keepalive = crc_ok && is_master_keepalive_(protocol, data, size, source);
-  const char *description =
-      master_keepalive ? "master keepalive" : (crc_ok ? "not a master keepalive (ignored)" : "CRC failed");
-  ESP_LOGD(TAG, "RX %s: %s [%s]", protocol_name_(protocol), colored_hex_(protocol, data, size, crc_ok).c_str(),
-           description);
+  const char *description = master_keepalive ? "master keepalive" : (crc_ok ? "" : "CRC failed");
+  ESP_LOGD(TAG, "RX %s: %s [%s%s%s]", protocol_name_(protocol), colored_hex_(protocol, data, size, crc_ok).c_str(),
+           ESPHOME_LOG_COLOR(ESPHOME_LOG_COLOR_GREEN), description, ESPHOME_LOG_RESET_COLOR);
   if (!crc_ok)
     return;
   if (master_keepalive)
@@ -247,38 +247,32 @@ void ToshibaAbClimate::process_frame_(Protocol protocol, const uint8_t *data, si
 
 bool ToshibaAbClimate::is_master_keepalive_(Protocol protocol, const uint8_t *data, size_t size,
                                             uint8_t &source) const {
-  bool signature_matches = false;
   switch (protocol) {
     case Protocol::TCC:
       // Main's normal-protocol path first validates the complete frame, then
       // only treats OPCODE_PING from the master as a keepalive. During auto
       // discovery the master is not known yet, so also require the canonical
-      // read-mode/data-type keepalive signature and its exact LEN=2 shape
+      // data-type keepalive signature and its exact length
       // instead of accepting every opcode=0x10 frame.
       source = size > 0 ? data[0] : 0;
-      signature_matches = size == 7 && data[3] == 0x02 && data[4] == 0x80 &&
-                          opcode_(protocol, data, size) == MASTER_KEEPALIVE_OPCODE.for_protocol(protocol) &&
-                          data_type_(protocol, data, size) == MASTER_KEEPALIVE_DATA_TYPE.for_protocol(protocol);
       break;
     case Protocol::TU2C:
-      // Main identifies this with the total length and the complete 00:3A
-      // tail signature. Air TU2C and first-generation water systems share it.
+      // Air TU2C and first-generation water systems share the 00:3A tail.
       source = size > 3 ? data[3] : 0;
-      signature_matches = size == 0x0A && data[2] == 0x0A &&
-                          opcode_(protocol, data, size) == MASTER_KEEPALIVE_OPCODE.for_protocol(protocol) &&
-                          data_type_(protocol, data, size) == MASTER_KEEPALIVE_DATA_TYPE.for_protocol(protocol);
       break;
     case Protocol::A0:
       // A0 water and air units use the same type 0x10 keepalive.
       // Wire layout is A0:00:TYPE:LEN:00:SRC_MODE:SRC:DST_MODE:DST:...
       source = size > 6 ? data[6] : 0;
-      signature_matches = size >= 12 && data[4] == 0x00 && data[5] == 0x08 &&
-                          opcode_(protocol, data, size) == MASTER_KEEPALIVE_OPCODE.for_protocol(protocol) &&
-                          data_type_(protocol, data, size) == MASTER_KEEPALIVE_DATA_TYPE.for_protocol(protocol);
       break;
     default:
-      break;
+      return false;
   }
+
+  const bool signature_matches =
+      frame_length_(protocol, data, size) == MASTER_KEEPALIVE_LENGTH.for_protocol(protocol) &&
+      opcode_(protocol, data, size) == MASTER_KEEPALIVE_OPCODE.for_protocol(protocol) &&
+      data_type_(protocol, data, size) == MASTER_KEEPALIVE_DATA_TYPE.for_protocol(protocol);
 
   // The first master keepalive establishes the source address. Once discovery
   // has completed, do not treat traffic from another participant as a master
@@ -367,6 +361,11 @@ uint8_t ToshibaAbClimate::opcode_(Protocol protocol, const uint8_t *data, size_t
   if (protocol == Protocol::TU2C)
     return size > 6 ? data[6] : 0;
   return size > 2 ? data[2] : 0;
+}
+
+uint8_t ToshibaAbClimate::frame_length_(Protocol protocol, const uint8_t *data, size_t size) {
+  const size_t offset = protocol == Protocol::TU2C ? 2 : 3;
+  return size > offset ? data[offset] : 0;
 }
 
 uint16_t ToshibaAbClimate::data_type_(Protocol protocol, const uint8_t *data, size_t size) {

@@ -64,6 +64,9 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   static constexpr uint32_t BYTE_TIMEOUT_MS = 25;
   static constexpr size_t MAX_FRAME_SIZE = 132;
   static constexpr ProtocolValue MASTER_KEEPALIVE_OPCODE{0x10, 0x00, 0x10};
+  // Length is the value carried by each protocol's length byte, rather than
+  // the size of the reader's complete frame buffer.
+  static constexpr ProtocolValue MASTER_KEEPALIVE_LENGTH{0x02, 0x0A, 0x07};
   // TCC carries data type 0x8A. In the TU2C 00:3A tail, 0x00 is the opcode
   // and 0x3A is the data type. A0 master heartbeats carry the two-byte data
   // type 00:8A in the corresponding field.
@@ -83,6 +86,7 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   void diagnostic_(const std::string &message);
   static const char *protocol_name_(Protocol protocol);
   static uint8_t opcode_(Protocol protocol, const uint8_t *data, size_t size);
+  static uint8_t frame_length_(Protocol protocol, const uint8_t *data, size_t size);
   static uint16_t data_type_(Protocol protocol, const uint8_t *data, size_t size);
   static std::string hex_(const uint8_t *data, size_t size);
   static std::string colored_hex_(Protocol protocol, const uint8_t *data, size_t size, bool crc_ok);
