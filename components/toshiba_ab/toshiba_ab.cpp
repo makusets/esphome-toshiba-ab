@@ -13,6 +13,11 @@ static const char *const TAG = "toshiba_ab";
 constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_OPCODE;
 constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_DATA_TYPE;
 
+void ResetButton::press_action() {
+  if (parent_ != nullptr)
+    parent_->reset();
+}
+
 #ifdef USE_ESP8266
 static HardwareSerial bus_serial(UART0);
 #endif
@@ -31,6 +36,21 @@ void ToshibaAbClimate::setup() {
   if (hardware_uart_rx_pin_ == 13)
     ESP_LOGCONFIG(TAG, "UART0 RX swapped from GPIO3 to GPIO13");
 #endif
+}
+
+void ToshibaAbClimate::reset() {
+  boot_ms_ = millis();
+  master_address_ = master_setting_;
+  master_address_confirmed_ = false;
+  protocol_detected_ = Protocol::AUTO;
+  protocol_confirmed_ = false;
+  discovery_finished_ = false;
+  reader_reset_count_ = 0;
+  diagnostic_history_.clear();
+  select_scan_protocol_(protocol_setting_ == Protocol::AUTO ? Protocol::TCC : protocol_setting_);
+  diagnostic_(protocol_setting_ == Protocol::AUTO
+                  ? "Reset: scanning TCC master keepalives (0-20s)"
+                  : std::string("Reset: listening for a ") + protocol_name_(protocol_setting_) + " master keepalive");
 }
 
 void ToshibaAbClimate::loop() {

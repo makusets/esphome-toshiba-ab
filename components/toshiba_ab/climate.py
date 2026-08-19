@@ -1,7 +1,7 @@
 import esphome.codegen as cg
 import esphome.config_validation as cv
 import esphome.final_validate as fv
-from esphome.components import climate, text_sensor, uart
+from esphome.components import button, climate, text_sensor, uart
 from esphome.const import (
     CONF_ID,
     CONF_NAME,
@@ -13,13 +13,14 @@ from esphome.const import (
 from esphome.core import CORE
 
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["text_sensor"]
+AUTO_LOAD = ["button", "text_sensor"]
 CODEOWNERS = ["@muxa"]
 
 toshiba_ab_ns = cg.esphome_ns.namespace("toshiba_ab")
 ToshibaAbClimate = toshiba_ab_ns.class_(
     "ToshibaAbClimate", climate.Climate, uart.UARTDevice, cg.Component
 )
+ResetButton = toshiba_ab_ns.class_("ResetButton", button.Button)
 DiagnosticTextSensor = toshiba_ab_ns.class_(
     "DiagnosticTextSensor", text_sensor.TextSensor
 )
@@ -32,6 +33,7 @@ CONF_FORMAT = "format"
 CONF_SYSTEM_TYPE = "system_type"
 CONF_DIAGNOSTIC = "diagnostic"
 CONF_HARDWARE_UART_RX_PIN = "hardware_uart_rx_pin"
+CONF_RESET_BUTTON = "reset_button"
 AUTO_ADDRESS = 0xAA
 
 
@@ -57,6 +59,11 @@ CONFIG_SCHEMA = (
                 CONF_DIAGNOSTIC, default={CONF_NAME: "Toshiba AB Diagnostic"}
             ): text_sensor.text_sensor_schema(
                 DiagnosticTextSensor, entity_category="diagnostic"
+            ),
+            cv.Optional(
+                CONF_RESET_BUTTON, default={CONF_NAME: "Toshiba AB Reset"}
+            ): button.button_schema(
+                ResetButton, icon="mdi:restart", entity_category="diagnostic"
             ),
             cv.Optional(CONF_MASTER_ADDRESS, default="auto"): _address,
             cv.Optional(CONF_ESP_ADDRESS, default="auto"): _address,
@@ -118,3 +125,6 @@ async def to_code(config):
 
     diagnostic = await text_sensor.new_text_sensor(config[CONF_DIAGNOSTIC])
     cg.add(var.set_diagnostic_sensor(diagnostic))
+
+    reset_button = await button.new_button(config[CONF_RESET_BUTTON])
+    cg.add(reset_button.set_parent(var))
