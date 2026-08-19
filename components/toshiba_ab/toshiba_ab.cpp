@@ -376,8 +376,8 @@ bool ToshibaAbClimate::should_track_tu2c_command_ack_(const DataFrame &frame) co
   }
 
   // Track ACKs for TU2C/first-gen Estia write commands.
-  return frame.raw[5] == 0x21 || frame.raw[5] == 0x22 || frame.raw[5] == 0x23 ||
-         frame.raw[5] == 0x24 || frame.raw[5] == 0x2C;
+  return frame.raw[5] == 0x21 || frame.raw[5] == 0x22 || frame.raw[5] == 0x23 || frame.raw[5] == 0x24 ||
+         frame.raw[5] == 0x2C || frame.raw[5] == 0x2F;
 }
 
 bool ToshibaAbClimate::should_track_command_ack_(const DataFrame &frame) const {
@@ -655,6 +655,24 @@ void write_set_mode_tu2c(struct DataFrame *command, uint8_t remote_address, uint
   command->raw[4] = marker_msb;
   command->raw[5] = marker_lsb;
   command->raw[6] = state->mode;
+  command->raw[7] = calculate_tu2c_crc(command->raw, 7);
+}
+
+void write_set_preset_tu2c(struct DataFrame *command, uint8_t remote_address, uint8_t master_address, uint8_t preset) {
+  // Wall remote preset frames: 0B:50:90:C0:01:2F:PP
+  // PP = 00 normal, 01 Hi POWER, 03 ECO, 10 QUIET.
+  constexpr uint8_t tu2c_length = 0x0B;
+  constexpr uint8_t marker_msb = 0x01;
+  constexpr uint8_t marker_lsb = 0x2F;
+
+  command->set_tu2c(true);
+  command->raw[0] = tu2c_length;
+  command->raw[1] = remote_address;
+  command->raw[2] = master_address;
+  command->raw[3] = TU2C_FRAME_MARKER;
+  command->raw[4] = marker_msb;
+  command->raw[5] = marker_lsb;
+  command->raw[6] = preset;
   command->raw[7] = calculate_tu2c_crc(command->raw, 7);
 }
 
@@ -1338,9 +1356,14 @@ void ToshibaAbClimate::setup() {
       this->traits_.set_visual_max_temperature(65);
     }
     this->traits_.set_visual_temperature_step(0.5);
+  } else if (this->data_reader.frame_format() == FrameFormat::TU2C) {
+    this->traits_.set_supported_presets({
+        climate::CLIMATE_PRESET_NONE,
+        climate::CLIMATE_PRESET_BOOST,
+        climate::CLIMATE_PRESET_ECO,
+        climate::CLIMATE_PRESET_SLEEP,
+    });
   }
-  
-
 
   pinMode(16, OUTPUT); // Set GPIO16 low, only needed for my old board, to be removed soon
   digitalWrite(16, LOW);
@@ -1535,6 +1558,33 @@ void ToshibaAbClimate::sync_from_received_state() {
   if (new_fan_mode != fan_mode) {
     fan_mode = new_fan_mode;
     changes++;
+  }
+
+  if (this->data_reader.frame_format() == FrameFormat::TU2C) {
+    climate::ClimatePreset new_preset;
+    bool valid_preset = true;
+    switch (tcc_state.preset) {
+      case TU2C_PRESET_NORMAL:
+        new_preset = climate::CLIMATE_PRESET_NONE;
+        break;
+      case TU2C_PRESET_HI_POWER:
+        new_preset = climate::CLIMATE_PRESET_BOOST;
+        break;
+      case TU2C_PRESET_ECO:
+        new_preset = climate::CLIMATE_PRESET_ECO;
+        break;
+      case TU2C_PRESET_QUIET:
+        new_preset = climate::CLIMATE_PRESET_SLEEP;
+        break;
+      default:
+        valid_preset = false;
+        ESP_LOGW(TAG, "Ignoring unknown TU2C preset value 0x%02X", tcc_state.preset);
+        break;
+    }
+    if (valid_preset && (!this->preset.has_value() || this->preset.value() != new_preset)) {
+      this->preset = new_preset;
+      changes++;
+    }
   }
 
   if (target_temperature != tcc_state.target_temp && tcc_state.target_temp >= 16 &&
@@ -2030,12 +2080,15 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
     }
     tcc_state.preheating = (payload[STATUS_DATA_FLAGS_BYTE] & 0b00000010) >> 1;
     tcc_state.filter_alert = (payload[STATUS_DATA_FLAGS_BYTE] & 0b10000000) >> 7;
+    if (payload_available > TU2C_STATUS_DATA_PRESET_BYTE) {
+      tcc_state.preset = payload[TU2C_STATUS_DATA_PRESET_BYTE];
+    }
 
-    ESP_LOGD(TAG,
-             "TU2C %sstatus: power=%d mode=%02X fan=%02X vent=%02X target=%.1f room=%.1f preheat=%d filter=%d",
-             is_extended_status_frame ? "extended " : "",
-             tcc_state.power, tcc_state.mode, tcc_state.fan, tcc_state.vent, tcc_state.target_temp,
-             tcc_state.room_temp, tcc_state.preheating, tcc_state.filter_alert);
+    ESP_LOGD(
+        TAG,
+        "TU2C %sstatus: power=%d mode=%02X fan=%02X vent=%02X target=%.1f room=%.1f preset=%02X preheat=%d filter=%d",
+        is_extended_status_frame ? "extended " : "", tcc_state.power, tcc_state.mode, tcc_state.fan, tcc_state.vent,
+        tcc_state.target_temp, tcc_state.room_temp, tcc_state.preset, tcc_state.preheating, tcc_state.filter_alert);
     sync_from_received_state();
     return;
   }
@@ -3091,6 +3144,31 @@ void ToshibaAbClimate::control(const climate::ClimateCall &call) {
   }
 
   send_new_state(&new_state);
+
+  if (this->data_reader.frame_format() == FrameFormat::TU2C && call.get_preset().has_value()) {
+    uint8_t tu2c_preset;
+    switch (call.get_preset().value()) {
+      case climate::CLIMATE_PRESET_NONE:
+        tu2c_preset = TU2C_PRESET_NORMAL;
+        break;
+      case climate::CLIMATE_PRESET_BOOST:
+        tu2c_preset = TU2C_PRESET_HI_POWER;
+        break;
+      case climate::CLIMATE_PRESET_ECO:
+        tu2c_preset = TU2C_PRESET_ECO;
+        break;
+      case climate::CLIMATE_PRESET_SLEEP:
+        tu2c_preset = TU2C_PRESET_QUIET;
+        break;
+      default:
+        ESP_LOGW(TAG, "Unsupported TU2C climate preset requested");
+        return;
+    }
+
+    auto command = DataFrame{};
+    write_set_preset_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_, tu2c_preset);
+    this->send_command(command);
+  }
 }
 
 bool ToshibaAbClimate::enqueue_command_(const DataFrame &command) {
