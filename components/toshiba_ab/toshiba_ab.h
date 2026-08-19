@@ -63,6 +63,7 @@ const uint8_t STATUS_DATA_FAN_SHIFT_BITS = 5;
 const uint8_t STATUS_DATA_VENT_MASK = 0b00000100;
 const uint8_t STATUS_DATA_VENT_SHIFT_BITS = 2;
 const uint8_t STATUS_DATA_TARGET_TEMP_BYTE = 6;
+const uint8_t TU2C_STATUS_DATA_PRESET_BYTE = 8;
 
 const uint8_t COMMAND_MODE_READ = 0x08;
 const uint8_t COMMAND_MODE_WRITE = 0x80;
@@ -94,6 +95,11 @@ const uint8_t EMPTY_DATA = 0x00;
 
 const uint8_t POWER_ON = 0x01;
 const uint8_t POWER_OFF = 0x00;
+
+const uint8_t TU2C_PRESET_NORMAL = 0x00;
+const uint8_t TU2C_PRESET_HI_POWER = 0x01;
+const uint8_t TU2C_PRESET_ECO = 0x03;
+const uint8_t TU2C_PRESET_QUIET = 0x10;
 
 const uint8_t MODE_MASK = 0x07;
 const uint8_t MODE_HEAT = 0x01;
@@ -791,6 +797,7 @@ struct TccState {
   float room_temp = NAN;
   float target_temp = NAN;
   uint8_t power;
+  uint8_t preset = TU2C_PRESET_NORMAL;
   uint8_t cooling;
   uint8_t heating;
   uint8_t preheating;
@@ -806,6 +813,7 @@ struct TccState {
     room_temp = src->room_temp;
     target_temp = src->target_temp;
     power = src->power;
+    preset = src->preset;
     cooling = src->cooling;
     heating = src->heating;
     preheating = src->preheating;
