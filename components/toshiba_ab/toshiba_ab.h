@@ -72,6 +72,7 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   static uint8_t opcode_(Protocol protocol, const uint8_t *data, size_t size);
   static uint16_t data_type_(Protocol protocol, const uint8_t *data, size_t size);
   static std::string hex_(const uint8_t *data, size_t size);
+  static std::string colored_hex_(Protocol protocol, const uint8_t *data, size_t size, bool crc_ok);
   static uint16_t crc16_mcrf4xx_(const uint8_t *data, size_t size);
 
   Protocol protocol_setting_{Protocol::AUTO};
