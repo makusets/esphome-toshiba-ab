@@ -446,28 +446,19 @@ climate::ClimateTraits ToshibaAbClimate::traits() {
     // Identification mode must still expose the complete climate capability
     // schema. This makes every field available in the native API response
     // while protocol support is being rebuilt incrementally.
-    traits.set_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE |
-                             climate::CLIMATE_SUPPORTS_TWO_POINT_TARGET_TEMPERATURE |
-                             climate::CLIMATE_SUPPORTS_CURRENT_HUMIDITY | climate::CLIMATE_SUPPORTS_TARGET_HUMIDITY |
-                             climate::CLIMATE_SUPPORTS_ACTION);
+    traits.set_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE | climate::CLIMATE_SUPPORTS_ACTION);
     traits.set_supported_modes({climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT_COOL, climate::CLIMATE_MODE_COOL,
                                 climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_FAN_ONLY, climate::CLIMATE_MODE_DRY,
                                 climate::CLIMATE_MODE_AUTO});
-    traits.set_supported_fan_modes({climate::CLIMATE_FAN_ON, climate::CLIMATE_FAN_OFF, climate::CLIMATE_FAN_AUTO,
-                                    climate::CLIMATE_FAN_LOW, climate::CLIMATE_FAN_MEDIUM, climate::CLIMATE_FAN_HIGH,
-                                    climate::CLIMATE_FAN_MIDDLE, climate::CLIMATE_FAN_FOCUS,
-                                    climate::CLIMATE_FAN_DIFFUSE, climate::CLIMATE_FAN_QUIET});
+    traits.set_supported_fan_modes({climate::CLIMATE_FAN_AUTO, climate::CLIMATE_FAN_LOW, climate::CLIMATE_FAN_MEDIUM, climate::CLIMATE_FAN_HIGH});
     traits.set_supported_swing_modes({climate::CLIMATE_SWING_OFF, climate::CLIMATE_SWING_BOTH,
                                       climate::CLIMATE_SWING_VERTICAL, climate::CLIMATE_SWING_HORIZONTAL});
-    traits.set_supported_presets({climate::CLIMATE_PRESET_NONE, climate::CLIMATE_PRESET_HOME,
-                                  climate::CLIMATE_PRESET_AWAY, climate::CLIMATE_PRESET_BOOST,
-                                  climate::CLIMATE_PRESET_COMFORT, climate::CLIMATE_PRESET_ECO,
-                                  climate::CLIMATE_PRESET_SLEEP, climate::CLIMATE_PRESET_ACTIVITY});
+    traits.set_supported_presets({climate::CLIMATE_PRESET_NONE, climate::CLIMATE_PRESET_BOOST, climate::CLIMATE_PRESET_ECO, climate::CLIMATE_PRESET_SLEEP);
   } else {
     traits.set_supported_modes({climate::CLIMATE_MODE_OFF});
   }
-  traits.set_visual_min_temperature(5);
-  traits.set_visual_max_temperature(35);
+  traits.set_visual_min_temperature(16);
+  traits.set_visual_max_temperature(32);
   traits.set_visual_temperature_step(0.5);
   return traits;
 }
