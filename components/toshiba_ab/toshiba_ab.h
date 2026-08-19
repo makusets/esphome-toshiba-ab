@@ -1,5 +1,6 @@
 #pragma once
 
+#include "esphome/components/button/button.h"
 #include "esphome/components/climate/climate.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/uart/uart.h"
@@ -12,6 +13,17 @@ namespace toshiba_ab {
 
 enum class Protocol : uint8_t { AUTO, TCC, TU2C, A0 };
 enum class SystemType : uint8_t { AIR, WATER };
+
+class ToshibaAbClimate;
+
+class ResetButton : public button::Button {
+ public:
+  void set_parent(ToshibaAbClimate *parent) { parent_ = parent; }
+
+ protected:
+  void press_action() override;
+  ToshibaAbClimate *parent_{nullptr};
+};
 
 // A semantic field can have a different wire value in every protocol. Keep
 // protocol-specific values together rather than spreading magic numbers
@@ -36,6 +48,7 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   float get_setup_priority() const override { return setup_priority::DATA; }
   climate::ClimateTraits traits() override;
   void control(const climate::ClimateCall &call) override;
+  void reset();
 
   void set_master_address(uint8_t address) { master_setting_ = address; }
   void set_esp_address(uint8_t address) { esp_address_ = address; }
