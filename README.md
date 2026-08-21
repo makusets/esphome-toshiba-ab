@@ -230,3 +230,7 @@ improvements, and [@yvertman](https://github.com/yvertman) and
 [@Dieghito72](https://github.com/Dieghito72) for their contributions to fully
 functional TU2C support. Thanks also to every contributor and tester who has
 shared hardware findings, models, captures, code and documentation.
+
+## Boards on eBay
+
+If you are after a fully finished product, I usually have some fully assembled boards that I am happy to sell. Search for "makusets" on eBay.
