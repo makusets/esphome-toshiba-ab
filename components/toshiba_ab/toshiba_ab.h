@@ -844,6 +844,12 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_command_mode_write(uint8_t value) { command_mode_write_ = value; }
   void set_filter_alert_sensor(binary_sensor::BinarySensor *sensor) { filter_alert_sensor_ = sensor; }
   void set_outdoor_temp_sensor(sensor::Sensor *sensor) { outdoor_temp_sensor_ = sensor; }
+  void set_temp1_sensor(sensor::Sensor *sensor) { temp1_sensor_ = sensor; }
+  void set_temp2_sensor(sensor::Sensor *sensor) { temp2_sensor_ = sensor; }
+  void set_temp3_sensor(sensor::Sensor *sensor) { temp3_sensor_ = sensor; }
+  void set_temp4_sensor(sensor::Sensor *sensor) { temp4_sensor_ = sensor; }
+  void set_temp5_sensor(sensor::Sensor *sensor) { temp5_sensor_ = sensor; }
+  void set_temp6_sensor(sensor::Sensor *sensor) { temp6_sensor_ = sensor; }
   void set_compressor_hours_sensor(sensor::Sensor *sensor) { compressor_hours_sensor_ = sensor; }
   void set_waterpump_hours_sensor(sensor::Sensor *sensor) { waterpump_hours_sensor_ = sensor; }
   void set_backup_heater_hours_sensor(sensor::Sensor *sensor) { backup_heater_hours_sensor_ = sensor; }
@@ -1082,6 +1088,12 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
 
   // Estia sensors
   sensor::Sensor *outdoor_temp_sensor_{nullptr};
+  sensor::Sensor *temp1_sensor_{nullptr};
+  sensor::Sensor *temp2_sensor_{nullptr};
+  sensor::Sensor *temp3_sensor_{nullptr};
+  sensor::Sensor *temp4_sensor_{nullptr};
+  sensor::Sensor *temp5_sensor_{nullptr};
+  sensor::Sensor *temp6_sensor_{nullptr};
   sensor::Sensor *compressor_hours_sensor_{nullptr};
   sensor::Sensor *waterpump_hours_sensor_{nullptr};
   sensor::Sensor *backup_heater_hours_sensor_{nullptr};
