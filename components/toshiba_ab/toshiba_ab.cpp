@@ -2448,6 +2448,30 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
         this->outdoor_temp_sensor_->publish_state(outdoor_temp);
       }
 
+      // Also expose all six raw status temperatures while their purposes are
+      // still being identified. The established climate and outdoor states
+      // above remain unchanged.
+      if (this->temp1_sensor_ != nullptr) {
+        this->temp1_sensor_->publish_state(current_temp);
+      }
+      if (this->temp2_sensor_ != nullptr) {
+        this->temp2_sensor_->publish_state(setpoint);
+      }
+      if (this->temp3_sensor_ != nullptr) {
+        this->temp3_sensor_->publish_state(outdoor_temp);
+      }
+      if (frame_len >= 18) {
+        if (this->temp4_sensor_ != nullptr) {
+          this->temp4_sensor_->publish_state(frame->raw[15] / 2.0f - 16.0f);
+        }
+        if (this->temp5_sensor_ != nullptr) {
+          this->temp5_sensor_->publish_state(frame->raw[16] / 2.0f - 16.0f);
+        }
+        if (this->temp6_sensor_ != nullptr) {
+          this->temp6_sensor_->publish_state(frame->raw[17] / 2.0f - 16.0f);
+        }
+      }
+
       last_master_alive_millis_ = millis();
       if (this->connected_binary_sensor_) {
         this->connected_binary_sensor_->publish_state(true);

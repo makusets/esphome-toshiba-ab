@@ -63,6 +63,12 @@ CONF_PING = "ping"
 
 # Estia-specific sensors
 CONF_OUTDOOR_TEMPERATURE = "outdoor_temperature"
+CONF_TEMP1 = "temp1"
+CONF_TEMP2 = "temp2"
+CONF_TEMP3 = "temp3"
+CONF_TEMP4 = "temp4"
+CONF_TEMP5 = "temp5"
+CONF_TEMP6 = "temp6"
 CONF_COMPRESSOR_HOURS = "compressor_hours"
 CONF_WATERPUMP_HOURS = "waterpump_hours"
 CONF_BACKUP_HEATER_HOURS = "backup_heater_hours"
@@ -327,6 +333,42 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
             device_class=DEVICE_CLASS_TEMPERATURE,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
+        cv.Optional(CONF_TEMP1): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS,
+            accuracy_decimals=1,
+            device_class=DEVICE_CLASS_TEMPERATURE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_TEMP2): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS,
+            accuracy_decimals=1,
+            device_class=DEVICE_CLASS_TEMPERATURE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_TEMP3): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS,
+            accuracy_decimals=1,
+            device_class=DEVICE_CLASS_TEMPERATURE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_TEMP4): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS,
+            accuracy_decimals=1,
+            device_class=DEVICE_CLASS_TEMPERATURE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_TEMP5): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS,
+            accuracy_decimals=1,
+            device_class=DEVICE_CLASS_TEMPERATURE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_TEMP6): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS,
+            accuracy_decimals=1,
+            device_class=DEVICE_CLASS_TEMPERATURE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
         cv.Optional(CONF_COMPRESSOR_HOURS): sensor.sensor_schema(
             unit_of_measurement=UNIT_HOUR,
             accuracy_decimals=0,
@@ -535,6 +577,24 @@ async def to_code(config):
     if CONF_OUTDOOR_TEMPERATURE in config:
         sens = await sensor.new_sensor(config[CONF_OUTDOOR_TEMPERATURE])
         cg.add(var.set_outdoor_temp_sensor(sens))
+    if CONF_TEMP1 in config:
+        sens = await sensor.new_sensor(config[CONF_TEMP1])
+        cg.add(var.set_temp1_sensor(sens))
+    if CONF_TEMP2 in config:
+        sens = await sensor.new_sensor(config[CONF_TEMP2])
+        cg.add(var.set_temp2_sensor(sens))
+    if CONF_TEMP3 in config:
+        sens = await sensor.new_sensor(config[CONF_TEMP3])
+        cg.add(var.set_temp3_sensor(sens))
+    if CONF_TEMP4 in config:
+        sens = await sensor.new_sensor(config[CONF_TEMP4])
+        cg.add(var.set_temp4_sensor(sens))
+    if CONF_TEMP5 in config:
+        sens = await sensor.new_sensor(config[CONF_TEMP5])
+        cg.add(var.set_temp5_sensor(sens))
+    if CONF_TEMP6 in config:
+        sens = await sensor.new_sensor(config[CONF_TEMP6])
+        cg.add(var.set_temp6_sensor(sens))
     if CONF_COMPRESSOR_HOURS in config:
         sens = await sensor.new_sensor(config[CONF_COMPRESSOR_HOURS])
         cg.add(var.set_compressor_hours_sensor(sens))
