@@ -2338,6 +2338,22 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       bool is_cooling = (flags & 0x20) != 0;
       bool is_heating = (flags & 0x40) != 0;
 
+      // Cache the three real setpoints (DHW/Zone1/Zone2 on raw[12]/[13]/[14])
+      // so a write of just one zone (send_estia_setpoint()/send_estia_zone2_setpoint())
+      // can fill in the other two, matching what the physical remote itself sends.
+      this->estia_dhw_setpoint_c_ = current_temp;    // raw[12] — mislabeled "current_temp" above
+      this->estia_zone1_setpoint_c_ = setpoint;       // raw[13]
+      this->estia_zone2_setpoint_c_ = outdoor_temp;   // raw[14] — mislabeled "outdoor_temp" above
+      if (this->zone1_setpoint_number_ != nullptr) {
+        this->zone1_setpoint_number_->publish_state(this->estia_zone1_setpoint_c_);
+      }
+      if (this->zone2_setpoint_number_ != nullptr) {
+        this->zone2_setpoint_number_->publish_state(this->estia_zone2_setpoint_c_);
+      }
+      if (this->dhw_setpoint_number_ != nullptr) {
+        this->dhw_setpoint_number_->publish_state(this->estia_dhw_setpoint_c_);
+      }
+
       ESP_LOGV(TAG, "Status: power=%s flags=0x%02X %s current=%.1f°C setpoint=%.1f°C outdoor=%.1f°C",
                power_on ? "ON" : "OFF", flags,
                is_cooling ? "COOL" : (is_heating ? "HEAT" : "???"),
@@ -2435,6 +2451,20 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       bool is_cooling = (flags & 0x20) != 0;
       bool is_heating = (flags & 0x40) != 0;
       float setpoint = frame->raw[13] / 2.0f - 16.0f;
+
+      // Same cache update as the 0x58 handler above (raw[12]=DHW, raw[13]=Zone1, raw[14]=Zone2).
+      this->estia_dhw_setpoint_c_ = frame->raw[12] / 2.0f - 16.0f;
+      this->estia_zone1_setpoint_c_ = setpoint;
+      this->estia_zone2_setpoint_c_ = frame->raw[14] / 2.0f - 16.0f;
+      if (this->zone1_setpoint_number_ != nullptr) {
+        this->zone1_setpoint_number_->publish_state(this->estia_zone1_setpoint_c_);
+      }
+      if (this->zone2_setpoint_number_ != nullptr) {
+        this->zone2_setpoint_number_->publish_state(this->estia_zone2_setpoint_c_);
+      }
+      if (this->dhw_setpoint_number_ != nullptr) {
+        this->dhw_setpoint_number_->publish_state(this->estia_dhw_setpoint_c_);
+      }
 
       climate::ClimateMode new_mode;
       if (!power_on) {
@@ -3350,20 +3380,90 @@ void ToshibaAbClimate::send_estia_tracked_(const uint8_t *frame, size_t len, uin
   }
 }
 
-void ToshibaAbClimate::send_estia_setpoint(float target_temp) {
+void ToshibaAbClimate::send_estia_zone_setpoints(uint8_t marker, float zone1_temp, float zone2_temp, float dhw_temp) {
   if (this->read_only_) {
-    ESP_LOGW(TAG, "Read-only mode: not sending Estia setpoint");
+    ESP_LOGW(TAG, "Read-only mode: not sending Estia zone setpoints");
     return;
   }
 
+  // The physical wired remote always writes Zone 1, Zone 2, and DHW setpoints
+  // together in a single dtype 03:C1 frame, even when the user only changes
+  // one of them — but which one actually gets applied depends on the marker
+  // byte, confirmed from two separate real-hardware captures:
+  //   Zone 2 changed (marker 0x04, 30°C -> 27°C):
+  //     before: ...03:C1:04:5C:5C:98:5C:...   (Zone1=30 Zone2=30 DHW=60)
+  //     after:  ...03:C1:04:5C:56:98:5C:...   (Zone1=30 Zone2=27 DHW=60)
+  //   Zone 1 changed (marker 0x02 = heat mode, 30°C -> 35°C):
+  //     11:0C:...:03:C1:02:66:59:76:66:...    (Zone1=35 Zone2=28.5 DHW=43)
+  //     -> status broadcast setpoint zone 1 = 35.0°C afterwards
+  // My first cut of this function hardcoded marker 0x04 for every write,
+  // which is why zone1_setpoint silently did nothing on real hardware: with
+  // marker 0x04, only the Zone 2 byte is actually applied — Zone 1 and DHW
+  // are present in the frame but ignored (also how DHW's byte here turned
+  // out to be ignored; DHW needs its own marker/frame, see
+  // send_estia_dhw_setpoint()). Payload shape is always
+  // [marker][Zone1][Zone2][DHW][Zone1 again]; only the byte the marker
+  // "selects" is actually applied by the controller — the rest are, as far
+  // as we can tell, ignored placeholders the remote fills in with whatever
+  // it currently knows.
+  //
+  // Any temperature argument that is NAN means "leave this zone unchanged"
+  // — we fall back to the last value seen in the status broadcast (dtype
+  // 03:C6).
+  if (std::isnan(zone1_temp)) {
+    zone1_temp = this->estia_zone1_setpoint_c_;
+  }
+  if (std::isnan(zone2_temp)) {
+    zone2_temp = this->estia_zone2_setpoint_c_;
+  }
+  if (std::isnan(dhw_temp)) {
+    dhw_temp = this->estia_dhw_setpoint_c_;
+  }
+
+  if (std::isnan(zone1_temp) || std::isnan(zone2_temp) || std::isnan(dhw_temp)) {
+    ESP_LOGW(TAG,
+             "Cannot send Estia zone setpoints yet: no status broadcast seen so far to fill in the "
+             "unspecified zone(s) (zone1=%.1f zone2=%.1f dhw=%.1f)",
+             zone1_temp, zone2_temp, dhw_temp);
+    return;
+  }
+
+  // Confirmed on real hardware: the heat pump's own control logic refuses a
+  // Zone 2 setpoint above Zone 1's. Clamp here so we never send a combination
+  // the controller would reject anyway, regardless of which zone was the one
+  // actually being changed.
+  bool zone2_clamped = false;
+  if (zone2_temp > zone1_temp) {
+    ESP_LOGW(TAG,
+             "Zone 2 setpoint %.1f°C would exceed Zone 1 setpoint %.1f°C; clamping Zone 2 down to match "
+             "(the controller does not allow Zone 2 > Zone 1)",
+             zone2_temp, zone1_temp);
+    zone2_temp = zone1_temp;
+    zone2_clamped = true;
+  }
+
+  // The clamp above only rewrites the Zone 2 byte *in this frame's payload*.
+  // That's enough when marker == 0x04 (a genuine Zone 2 write — the byte we
+  // just clamped is exactly the one the controller applies). But when this
+  // call is actually a Zone 1 write (marker 0x01/0x02), the Zone 2 byte in
+  // this same frame is one of the ignored placeholders (see the big comment
+  // above) — the controller keeps its old, real Zone 2 setpoint, which can
+  // now be *higher* than the new Zone 1 value. Confirmed on real hardware:
+  // Zone1=30 -> Zone2=28 -> Zone1=25 leaves the device's real Zone 2 at 28°C
+  // (Zone 2 > Zone 1), even though the clamp above "fixed" the (inert)
+  // Zone 2 byte in the Zone 1 frame. So whenever the clamp fires on a frame
+  // whose marker won't actually apply Zone 2, we also queue a genuine
+  // marker=0x04 follow-up frame further down so the real device's Zone 2
+  // actually gets pulled down too.
+  bool needs_zone2_followup = zone2_clamped && (marker != 0x04);
+
   // Encode temperature: val = (°C + 16) * 2
-  uint8_t encoded = static_cast<uint8_t>((target_temp + 16.0f) * 2.0f);
+  uint8_t zone1_enc = static_cast<uint8_t>(std::round((zone1_temp + 16.0f) * 2.0f));
+  uint8_t zone2_enc = static_cast<uint8_t>(std::round((zone2_temp + 16.0f) * 2.0f));
+  uint8_t dhw_enc = static_cast<uint8_t>(std::round((dhw_temp + 16.0f) * 2.0f));
   uint16_t src = this->estia_source_address_;
 
-  // Sub-command: 0x02 = heating setpoint, 0x01 = cooling setpoint
-  uint8_t subcmd = (this->mode == climate::CLIMATE_MODE_COOL) ? 0x01 : 0x02;
-
-  // Command frame: A0:00:11:0C:00:SRC_H:SRC_L:08:00:03:C1:SUBCMD:TEMP:00:00:00
+  // Command frame: A0:00:11:0C:00:SRC_H:SRC_L:08:00:03:C1:MARKER:ZONE1:ZONE2:DHW:ZONE1(repeat):CRC
   uint8_t frame[] = {
     0xA0, 0x00,                         // prefix
     0x11,                               // type: command
@@ -3371,10 +3471,12 @@ void ToshibaAbClimate::send_estia_setpoint(float target_temp) {
     0x00,                               // fixed
     (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),  // source
     0x08, 0x00,                         // dest: master
-    0x03, 0xC1,                         // command type: setpoint
-    subcmd,                             // 0x02=heat, 0x01=cool
-    encoded,                            // target temperature
-    0x00, 0x00, 0x00,                   // padding
+    0x03, 0xC1,                         // command type: zone setpoints
+    marker,                              // selects which byte is actually applied (0x01/0x02=Zone1, 0x04=Zone2)
+    zone1_enc,                          // Zone 1 (Fußbodenheizung) setpoint
+    zone2_enc,                          // Zone 2 (Heizkörper) setpoint
+    dhw_enc,                            // DHW (Brauchwasser) setpoint
+    zone1_enc,                          // repeated, matching the real remote's frame
     0x00, 0x00                          // CRC placeholder
   };
 
@@ -3383,10 +3485,123 @@ void ToshibaAbClimate::send_estia_setpoint(float target_temp) {
   frame[crc_len]     = (crc >> 8) & 0xFF;
   frame[crc_len + 1] = crc & 0xFF;
 
-  ESP_LOGD(TAG, "TX: setpoint=%.1f°C (0x%02X) subcmd=0x%02X", target_temp, encoded, subcmd);
+  ESP_LOGD(TAG, "TX: zone setpoints marker=0x%02X zone1=%.1f°C zone2=%.1f°C dhw=%.1f°C", marker, zone1_temp, zone2_temp, dhw_temp);
   log_raw_data("Estia TX", frame, sizeof(frame));
 
   this->send_estia_tracked_(frame, sizeof(frame), 0x03C1);  // ACK: 00:A1:03:C1
+
+  if (needs_zone2_followup) {
+    ESP_LOGW(TAG,
+             "Marker 0x%02X above does not actually apply the Zone 2 byte on real hardware; sending an "
+             "additional corrective Zone 2 write (marker 0x04) so Zone 2 %.1f°C actually takes effect",
+             marker, zone2_temp);
+    uint8_t frame2[] = {
+      0xA0, 0x00,                         // prefix
+      0x11,                               // type: command
+      0x0C,                               // length: 12
+      0x00,                               // fixed
+      (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),  // source
+      0x08, 0x00,                         // dest: master
+      0x03, 0xC1,                         // command type: zone setpoints
+      0x04,                                // marker: Zone 2 (the one that actually applies here)
+      zone1_enc,                          // Zone 1 (unchanged, already applied above if this was a Zone 1 write)
+      zone2_enc,                          // Zone 2 (the clamped value — this is the byte that really counts now)
+      dhw_enc,                            // DHW (unchanged)
+      zone1_enc,                          // repeated, matching the real remote's frame
+      0x00, 0x00                          // CRC placeholder
+    };
+    size_t crc_len2 = sizeof(frame2) - 2;
+    uint16_t crc2 = estia_crc16(frame2, crc_len2);
+    frame2[crc_len2]     = (crc2 >> 8) & 0xFF;
+    frame2[crc_len2 + 1] = crc2 & 0xFF;
+    log_raw_data("Estia TX (Zone 2 clamp follow-up)", frame2, sizeof(frame2));
+    this->send_estia_tracked_(frame2, sizeof(frame2), 0x03C1);  // ACK: 00:A1:03:C1
+  }
+
+  // Optimistic local update with the actual (possibly clamped) values, for
+  // whichever of the three number entities exist; the real state comes back
+  // via the next status broadcast (dtype 03:C6) and will overwrite this if
+  // it differs. Centralized here (rather than in each Number::control())
+  // so the Zone 2 clamp above is reflected immediately too.
+  if (this->zone1_setpoint_number_ != nullptr) {
+    this->zone1_setpoint_number_->publish_state(zone1_temp);
+  }
+  if (this->zone2_setpoint_number_ != nullptr) {
+    this->zone2_setpoint_number_->publish_state(zone2_temp);
+  }
+  if (this->dhw_setpoint_number_ != nullptr) {
+    this->dhw_setpoint_number_->publish_state(dhw_temp);
+  }
+}
+
+void ToshibaAbClimate::send_estia_setpoint(float target_temp) {
+  // Zone 1 (the main climate entity's target_temperature) uses marker
+  // 0x01/0x02 depending on cool/heat mode — confirmed on real hardware (see
+  // send_estia_zone_setpoints() for the capture). Zone 2/DHW are left
+  // unchanged (NAN).
+  uint8_t marker = (this->mode == climate::CLIMATE_MODE_COOL) ? 0x01 : 0x02;
+  this->send_estia_zone_setpoints(marker, target_temp, NAN, NAN);
+}
+
+void ToshibaAbClimate::send_estia_zone1_setpoint(float zone1_temp) {
+  uint8_t marker = (this->mode == climate::CLIMATE_MODE_COOL) ? 0x01 : 0x02;
+  this->send_estia_zone_setpoints(marker, zone1_temp, NAN, NAN);
+}
+
+void ToshibaAbClimate::send_estia_zone2_setpoint(float zone2_temp) {
+  this->send_estia_zone_setpoints(0x04, NAN, zone2_temp, NAN);
+}
+
+void ToshibaAbClimate::send_estia_dhw_setpoint(float dhw_temp) {
+  if (this->read_only_) {
+    ESP_LOGW(TAG, "Read-only mode: not sending Estia DHW setpoint");
+    return;
+  }
+
+  // NOT the same sub-command as send_estia_zone_setpoints()! That one (dtype
+  // 03:C1, marker 0x04) turned out to be ignored by the controller for its
+  // DHW byte — confirmed on real hardware: writing a new DHW value through
+  // it got ACKed, but the status broadcast kept reporting the old DHW target
+  // afterwards. Captured directly from the physical wired remote's own DHW
+  // setpoint change instead (60°C -> 58°C), which uses a different marker
+  // (0x08) and DOES apply:
+  //   TX: 11:0C:00:00:40:08:00:03:C1:08:00:00:94:00:CRC  -> ACK 00:A1:03:C1
+  //   status raw[12] (DHW) goes from 0x98 (60.0°C) to 0x94 (58.0°C)
+  uint8_t dhw_enc = static_cast<uint8_t>(std::round((dhw_temp + 16.0f) * 2.0f));
+  uint16_t src = this->estia_source_address_;
+
+  // Command frame: A0:00:11:0C:00:SRC_H:SRC_L:08:00:03:C1:08:00:00:DHW:00:CRC
+  uint8_t frame[] = {
+    0xA0, 0x00,
+    0x11,
+    0x0C,
+    0x00,
+    (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),
+    0x08, 0x00,
+    0x03, 0xC1,
+    0x08,     // marker: DHW-setpoint-only sub-command (distinct from 0x04)
+    0x00,
+    0x00,
+    dhw_enc,  // DHW (Brauchwasser) setpoint
+    0x00,
+    0x00, 0x00  // CRC placeholder
+  };
+
+  size_t crc_len = sizeof(frame) - 2;
+  uint16_t crc = estia_crc16(frame, crc_len);
+  frame[crc_len]     = (crc >> 8) & 0xFF;
+  frame[crc_len + 1] = crc & 0xFF;
+
+  ESP_LOGD(TAG, "TX: DHW setpoint=%.1f°C (0x%02X)", dhw_temp, dhw_enc);
+  log_raw_data("Estia TX", frame, sizeof(frame));
+
+  this->send_estia_tracked_(frame, sizeof(frame), 0x03C1);  // ACK: 00:A1:03:C1
+
+  // Optimistic local update; the real state comes back via the next status
+  // broadcast (dtype 03:C6) and will overwrite this if it differs.
+  if (this->dhw_setpoint_number_ != nullptr) {
+    this->dhw_setpoint_number_->publish_state(dhw_temp);
+  }
 }
 
 void ToshibaAbClimate::send_estia_power(bool on) {
@@ -3841,6 +4056,48 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
 
 void ToshibaAbEstiaZone1Switch::write_state(bool state) {
   this->climate_->send_estia_first_gen_zone1(state);
+}
+
+void ToshibaAbEstiaZone1Number::control(float value) {
+  // Zone 1 setpoint write (dtype 03:C1) is an A0-only frame; there's no known
+  // first-generation equivalent, so refuse rather than sending an A0 frame
+  // that a first-gen bus wouldn't understand. (The main climate entity's
+  // target_temperature already writes Zone 1 the same way — this number
+  // entity is an independent, dedicated control for it, per user request.)
+  if (this->climate_->is_estia_first_gen()) {
+    ESP_LOGW(TAG, "zone1_setpoint is only supported on A0-protocol (Estia) systems");
+    return;
+  }
+  // Optimistic publish happens centrally in send_estia_zone_setpoints(),
+  // since Zone 2 may get silently clamped as a side effect of this write
+  // (Zone 2 must never exceed Zone 1) — publishing the raw requested value
+  // here could show a value that doesn't match what was actually applied.
+  this->climate_->send_estia_zone1_setpoint(value);
+}
+
+void ToshibaAbEstiaZone2Number::control(float value) {
+  // Zone 2 setpoint write (dtype 03:C1) is an A0-only frame; there's no known
+  // first-generation equivalent, so refuse rather than sending an A0 frame
+  // that a first-gen bus wouldn't understand.
+  if (this->climate_->is_estia_first_gen()) {
+    ESP_LOGW(TAG, "zone2_setpoint is only supported on A0-protocol (Estia) systems");
+    return;
+  }
+  // Optimistic publish happens centrally in send_estia_zone_setpoints(),
+  // since the requested value itself may get clamped (Zone 2 must never
+  // exceed Zone 1) — publishing it here first could show a stale value.
+  this->climate_->send_estia_zone2_setpoint(value);
+}
+
+void ToshibaAbEstiaDhwSetpointNumber::control(float value) {
+  // DHW setpoint write (dtype 03:C1) is an A0-only frame; on true
+  // first-generation Estia buses, DHW setpoint is controlled through the
+  // existing first-gen helper instead (send_estia_first_gen_dhw_setpoint()).
+  if (this->climate_->is_estia_first_gen()) {
+    this->climate_->send_estia_first_gen_dhw_setpoint(value);
+    return;
+  }
+  this->climate_->send_estia_dhw_setpoint(value);
 }
 
 void ToshibaAbEstiaDhwBoostSwitch::write_state(bool state) {

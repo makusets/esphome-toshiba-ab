@@ -2,7 +2,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
 import esphome.final_validate as fv
-from esphome.components import climate, uart, binary_sensor, sensor, switch, text_sensor, template
+from esphome.components import climate, uart, binary_sensor, sensor, switch, text_sensor, template, number
 from esphome.const import (
     CONF_ID,
     CONF_NAME,
@@ -30,7 +30,7 @@ from esphome.const import (
 from esphome.core import CORE
 
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["climate", "binary_sensor", "sensor", "switch", "text_sensor"]
+AUTO_LOAD = ["climate", "binary_sensor", "sensor", "switch", "text_sensor", "number"]
 CODEOWNERS = ["@muxa"]
 
 toshiba_ab_ns = cg.esphome_ns.namespace("toshiba_ab")
@@ -77,6 +77,9 @@ CONF_DEMAND_ENABLED = "demand_enabled"
 CONF_ZONE1_SWITCH = "zone1_switch"
 CONF_DHW_BOOST = "dhw_boost"
 CONF_ANTIBACTERIA = "antibacteria"
+CONF_ZONE1_SETPOINT = "zone1_setpoint"
+CONF_ZONE2_SETPOINT = "zone2_setpoint"
+CONF_DHW_SETPOINT = "dhw_setpoint"
 CONF_ZONE1_WATER_TEMPERATURE = "zone1_water_temperature"
 CONF_ZONE1_TARGET_TEMPERATURE = "zone1_target_temperature"
 CONF_DHW_CURRENT_TEMPERATURE = "dhw_current_temperature"
@@ -118,6 +121,15 @@ ToshibaAbEstiaDhwBoostSwitch = toshiba_ab_ns.class_(
 )
 ToshibaAbEstiaAntibacteriaSwitch = toshiba_ab_ns.class_(
     "ToshibaAbEstiaAntibacteriaSwitch", switch.Switch, cg.Component
+)
+ToshibaAbEstiaZone1Number = toshiba_ab_ns.class_(
+    "ToshibaAbEstiaZone1Number", number.Number, cg.Component
+)
+ToshibaAbEstiaZone2Number = toshiba_ab_ns.class_(
+    "ToshibaAbEstiaZone2Number", number.Number, cg.Component
+)
+ToshibaAbEstiaDhwSetpointNumber = toshiba_ab_ns.class_(
+    "ToshibaAbEstiaDhwSetpointNumber", number.Number, cg.Component
 )
 
 ToshibaAbOnDataReceivedTrigger = toshiba_ab_ns.class_(
@@ -257,6 +269,47 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
                         cv.GenerateID(): cv.declare_id(ToshibaAbEstiaAntibacteriaSwitch),
                     }
                 )
+            ),
+            key=CONF_NAME,
+        ),
+        # Zone 1 (Fußbodenheizung) setpoint, adjustable from Home Assistant,
+        # independently of the main climate entity (which also controls Zone
+        # 1). Writing this sends the real dtype 03:C1 multi-value frame
+        # captured from the physical wired remote (Zone1/Zone2/DHW together);
+        # Zone 2 and DHW are left at their last-known value. A0-protocol
+        # (Estia) only.
+        cv.Optional(CONF_ZONE1_SETPOINT): cv.maybe_simple_value(
+            number.number_schema(
+                ToshibaAbEstiaZone1Number,
+                device_class=DEVICE_CLASS_TEMPERATURE,
+                unit_of_measurement=UNIT_CELSIUS,
+            ),
+            key=CONF_NAME,
+        ),
+        # Zone 2 (Heizkörper) setpoint, adjustable from Home Assistant. Writing
+        # this sends the real dtype 03:C1 multi-value frame captured from the
+        # physical wired remote (Zone1/Zone2/DHW together); Zone 1 and DHW are
+        # left at their last-known value. A0-protocol (Estia) only.
+        cv.Optional(CONF_ZONE2_SETPOINT): cv.maybe_simple_value(
+            number.number_schema(
+                ToshibaAbEstiaZone2Number,
+                device_class=DEVICE_CLASS_TEMPERATURE,
+                unit_of_measurement=UNIT_CELSIUS,
+            ),
+            key=CONF_NAME,
+        ),
+        # DHW (Brauchwasser) setpoint, adjustable from Home Assistant,
+        # independent of Zone 1/Zone 2. On A0 systems this writes the same
+        # dtype 03:C1 multi-value frame as the zone setpoints, leaving both
+        # zones at their last-known value; on first-generation Estia buses it
+        # uses the existing dedicated DHW-setpoint command instead, so this
+        # works either way (unlike zone1_setpoint/zone2_setpoint, which are
+        # A0-only).
+        cv.Optional(CONF_DHW_SETPOINT): cv.maybe_simple_value(
+            number.number_schema(
+                ToshibaAbEstiaDhwSetpointNumber,
+                device_class=DEVICE_CLASS_TEMPERATURE,
+                unit_of_measurement=UNIT_CELSIUS,
             ),
             key=CONF_NAME,
         ),
@@ -536,6 +589,25 @@ async def to_code(config):
     if CONF_ANTIBACTERIA in config:
         sw = await switch.new_switch(config[CONF_ANTIBACTERIA], var)
         cg.add(var.set_antibacteria_switch(sw))
+    # step=1.0: the physical wired remote itself only offers whole-degree
+    # increments for these setpoints (no 0.5° option on its own display), so
+    # Home Assistant is set to match rather than offer a precision the
+    # hardware doesn't actually support.
+    if CONF_ZONE1_SETPOINT in config:
+        num = await number.new_number(
+            config[CONF_ZONE1_SETPOINT], var, min_value=5.0, max_value=60.0, step=1.0
+        )
+        cg.add(var.set_zone1_setpoint_number(num))
+    if CONF_ZONE2_SETPOINT in config:
+        num = await number.new_number(
+            config[CONF_ZONE2_SETPOINT], var, min_value=5.0, max_value=60.0, step=1.0
+        )
+        cg.add(var.set_zone2_setpoint_number(num))
+    if CONF_DHW_SETPOINT in config:
+        num = await number.new_number(
+            config[CONF_DHW_SETPOINT], var, min_value=30.0, max_value=75.0, step=1.0
+        )
+        cg.add(var.set_dhw_setpoint_number(num))
 
     if CONF_ON_DATA_RECEIVED in config:
         for on_data_received in config.get(CONF_ON_DATA_RECEIVED, []):

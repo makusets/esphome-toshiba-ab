@@ -2,6 +2,7 @@
 
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/climate/climate.h"
+#include "esphome/components/number/number.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/switch/switch.h"
 #include "esphome/components/text_sensor/text_sensor.h"
@@ -935,6 +936,22 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
 
   void set_read_only_switch(switch_::Switch *read_only_switch) { read_only_switch_ = read_only_switch; }
   void set_zone1_switch(switch_::Switch *zone1_switch) { zone1_switch_ = zone1_switch; }
+  void set_zone1_setpoint_number(number::Number *number) { zone1_setpoint_number_ = number; }
+  void set_zone2_setpoint_number(number::Number *number) { zone2_setpoint_number_ = number; }
+  void set_dhw_setpoint_number(number::Number *number) { dhw_setpoint_number_ = number; }
+  // Builds and sends the dtype 03:C1 multi-value frame (Zone1/Zone2/DHW
+  // temperature bytes together), matching the shape the physical wired
+  // remote itself always sends. Any of the three temperatures may be NAN to
+  // mean "leave unchanged" (the last value read from the bus is
+  // substituted). `marker` selects which single byte the controller
+  // actually applies — confirmed on real hardware that the other two are
+  // present but ignored: 0x01/0x02 (cool/heat) applies Zone 1, 0x04 applies
+  // Zone 2. (DHW uses a different marker/frame shape entirely — see
+  // send_estia_dhw_setpoint().)
+  void send_estia_zone_setpoints(uint8_t marker, float zone1_temp, float zone2_temp, float dhw_temp);
+  void send_estia_zone1_setpoint(float zone1_temp);
+  void send_estia_zone2_setpoint(float zone2_temp);
+  void send_estia_dhw_setpoint(float dhw_temp);
   void set_dhw_boost_switch(switch_::Switch *dhw_boost_switch) { dhw_boost_switch_ = dhw_boost_switch; }
   void set_antibacteria_switch(switch_::Switch *antibacteria_switch) { antibacteria_switch_ = antibacteria_switch; }
 
@@ -1067,6 +1084,15 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   switch_::Switch *vent_switch_{nullptr};
   switch_::Switch *read_only_switch_{nullptr};
   switch_::Switch *zone1_switch_{nullptr};
+  number::Number *zone1_setpoint_number_{nullptr};
+  number::Number *zone2_setpoint_number_{nullptr};
+  number::Number *dhw_setpoint_number_{nullptr};
+  // Last setpoints seen from a status broadcast, used to fill in the two
+  // zones/DHW not being written when only one setpoint changes (see
+  // send_estia_zone_setpoints()).
+  float estia_zone1_setpoint_c_{NAN};
+  float estia_zone2_setpoint_c_{NAN};
+  float estia_dhw_setpoint_c_{NAN};
   switch_::Switch *dhw_boost_switch_{nullptr};
   switch_::Switch *antibacteria_switch_{nullptr};
   sensor::Sensor *failed_crcs_sensor_{nullptr};
@@ -1269,6 +1295,30 @@ class ToshibaAbEstiaZone1Switch : public switch_::Switch, public Component {
   ToshibaAbEstiaZone1Switch(ToshibaAbClimate *climate) { climate_ = climate; }
  protected:
   void write_state(bool state) override;
+  ToshibaAbClimate *climate_;
+};
+
+class ToshibaAbEstiaZone1Number : public number::Number, public Component {
+ public:
+  ToshibaAbEstiaZone1Number(ToshibaAbClimate *climate) { climate_ = climate; }
+ protected:
+  void control(float value) override;
+  ToshibaAbClimate *climate_;
+};
+
+class ToshibaAbEstiaZone2Number : public number::Number, public Component {
+ public:
+  ToshibaAbEstiaZone2Number(ToshibaAbClimate *climate) { climate_ = climate; }
+ protected:
+  void control(float value) override;
+  ToshibaAbClimate *climate_;
+};
+
+class ToshibaAbEstiaDhwSetpointNumber : public number::Number, public Component {
+ public:
+  ToshibaAbEstiaDhwSetpointNumber(ToshibaAbClimate *climate) { climate_ = climate; }
+ protected:
+  void control(float value) override;
   ToshibaAbClimate *climate_;
 };
 
