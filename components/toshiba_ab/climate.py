@@ -49,6 +49,7 @@ CONF_REMOTE_ADDRESSES = "remote_addresses"
 CONF_ON_DATA_RECEIVED = "on_data_received"
 CONF_MASTER = "master"
 CONF_REMOTE = "remote"
+CONF_ESTIA_REMOTE_ADDRESS = "estia_remote_address"
 CONF_COMMAND_MODE_READ = "command_mode_read"
 CONF_COMMAND_MODE_WRITE = "command_mode_write"
 CONF_FRAME_FORMAT = "frame_format"
@@ -194,6 +195,15 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
     {
         cv.Optional(CONF_MASTER): cv.uint8_t,
         cv.Optional(CONF_REMOTE): cv.uint8_t,
+        # Source address this component uses for all A0 (Estia) frames it
+        # sends, and the destination address it checks incoming 0x1A/00:EF
+        # sensor-query replies against (see the receive_data_frame() handler
+        # in toshiba_ab.cpp). Defaults to 0x0040, the same address a physical
+        # wired remote uses by default — if a real wired remote is also on
+        # the bus, set this to a distinct value (e.g. 0x50) so replies can be
+        # told apart. Do NOT use 0x0041: that address is reserved for the
+        # optional 0-10V demand-interface emulation (see `demand_enabled`).
+        cv.Optional(CONF_ESTIA_REMOTE_ADDRESS): cv.uint8_t,
         cv.Optional(CONF_COMMAND_MODE_READ, default=0x08): cv.uint8_t,
         cv.Optional(CONF_COMMAND_MODE_WRITE, default=0x80): cv.uint8_t,
         cv.Optional(CONF_FRAME_FORMAT, default="auto"): cv.one_of(*FRAME_FORMATS, lower=True),
@@ -479,6 +489,8 @@ async def to_code(config):
         cg.add(var.set_master_address(config[CONF_MASTER]))
     if CONF_REMOTE in config:
         cg.add(var.set_remote_address(config[CONF_REMOTE]))
+    if CONF_ESTIA_REMOTE_ADDRESS in config:
+        cg.add(var.set_estia_source_address(config[CONF_ESTIA_REMOTE_ADDRESS]))
 
     if CONF_COMMAND_MODE_READ in config:
         cg.add(var.set_command_mode_read(config[CONF_COMMAND_MODE_READ]))

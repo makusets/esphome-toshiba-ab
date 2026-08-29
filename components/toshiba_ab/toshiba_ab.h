@@ -1036,6 +1036,11 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void sync_from_received_state();
   void autoreset_remote_error_();
   void estia_first_gen_reset_remote_error_();
+  // Returns true if the bus is configured as true first-generation Estia
+  // (frame_format: estia). Otherwise logs a warning naming `feature` and
+  // returns false, so callers can skip building/sending a first-gen-only
+  // frame that would be wire-incompatible garbage on an A0/TU2C/HM/Normal bus.
+  bool estia_first_gen_guard_(const char *feature);
   bool begin_remote_error_autoreset_();
   void update_remote_error_(bool active);
   bool is_own_tx_echo_(const DataFrame *f) const; //used to filter echo after sending frame
@@ -1119,8 +1124,19 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   uint8_t last_sensor_query_id_{0xFF};     // 0xFF = invalid / none
   bool    sensor_query_outstanding_{false}; // true after send, cleared on reply
   uint32_t last_sensor_query_ms_{0};
-  uint32_t sensor_query_timeout_ms_{2500};  // Give busy HM buses time to answer before releasing the guard.
+  uint32_t sensor_query_timeout_ms_{4000};  // Give busy HM/A0 buses time to answer before releasing the guard.
   uint32_t sensor_query_timeouts_{0};       // (optional) stats
+  // The 0x17/0x1A "EF-channel" reply carries no ID of its own, so on a slow,
+  // busy A0 bus a reply that finally arrives just after we've already timed
+  // out and moved on to the next query would otherwise get silently credited
+  // to that new (wrong) query. This tracks when the last query was resolved
+  // (matched, timed out, or came back "undefined") so drain_sensor_query_queue_()
+  // can hold off dispatching the next query for a short cooldown window,
+  // giving any straggling reply time to arrive and be safely ignored
+  // (last_sensor_query_id_ is already 0xFF by then) instead of colliding
+  // with a freshly-sent query.
+  uint32_t last_sensor_query_resolved_ms_{0};
+  static constexpr uint32_t SENSOR_QUERY_COOLDOWN_MS = 1200;
 
   // Pending-query ring buffer. Periodic intervals push sensor IDs here;
   // the loop drains one at a time once the previous query has been

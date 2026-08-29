@@ -16,6 +16,10 @@ namespace toshiba_ab {
 
 static const char *const TAG = "tcc_link.climate";
 
+// Forward declaration: defined further down (near the other Estia A0-protocol
+// frame builders); needed here because send_sensor_query() (A0 branch) uses it.
+static uint16_t estia_crc16(const uint8_t *data, size_t len);
+
 static uint8_t command_opcode_for_ack_log(const DataFrame &frame) {
   if (frame.is_tu2c()) {
     // TU2C and first-generation Estia frames are stored as
@@ -935,30 +939,52 @@ void ToshibaAbClimate::send_sensor_query(uint8_t sensor_id) {
     return;
   }
 
-  DataFrame cmd{};
-  cmd.source      = this->remote_address_;           // 0x40
-  cmd.dest        = this->master_address_;    // usually 0x00
-  cmd.opcode1     = OPCODE_SENSOR_QUERY;      // 0x17
-  cmd.data_length = 8;
+  // A0 protocol: this is the same "EF-channel" service/diagnostic-value
+  // query the physical wired remote's manual service-code screen uses.
+  // A0 needs its own 2-byte-addressed, CRC-16 wire frame here (like the
+  // other send_estia_*() builders below) — it is NOT compatible with the
+  // classic/HM DataFrame -> send_command() path (1-byte addressing, XOR
+  // CRC), which would silently produce a frame the master ignores.
+  // Captured on the bus (raw[], i.e. without the A0:00 prefix):
+  //   17:0F:00:00:40:08:00:00:80:00:EF:00:2C:08:00:<ID>:00:CRC_H:CRC_L
+  const uint16_t src = this->estia_source_address_;  // default 0x0040 (remote)
+  uint8_t frame[] = {
+    0xA0, 0x00,                                   // prefix
+    0x17,                                         // type: sensor/service query
+    0x0F,                                         // length: 15
+    0x00,                                         // fixed
+    static_cast<uint8_t>(src >> 8), static_cast<uint8_t>(src & 0xFF),  // source
+    0x08, 0x00,                                   // dest: master
+    0x00, 0x80,                                   // dtype
+    0x00, 0xEF, 0x00, 0x2C,                        // marker
+    0x08, 0x00,                                   // fixed
+    sensor_id,                                     // service code ID
+    0x00,                                          // padding
+    0x00, 0x00                                     // CRC placeholder
+  };
 
-  // Payload (common pattern observed in this family):
-  // 08 80 EF 00 2C 08 00 <id>
-  cmd.data[0] = this->command_mode_read_;   // READ
-  cmd.data[1] = 0x80;
-  cmd.data[2] = 0xEF;
-  cmd.data[3] = 0x00;
-  cmd.data[4] = 0x2C;   // sensor/value table marker
-  cmd.data[5] = this->command_mode_read_;
-  cmd.data[6] = 0x00;
-  cmd.data[7] = sensor_id;
-  
-  cmd.data[cmd.data_length] = cmd.calculate_crc();
-  this->last_sensor_query_id_ = sensor_id; // <-- for short replies
+  const size_t crc_len = sizeof(frame) - 2;
+  const uint16_t crc = estia_crc16(frame, crc_len);
+  frame[crc_len]     = (crc >> 8) & 0xFF;
+  frame[crc_len + 1] = crc & 0xFF;
+
+  // Only raise the outstanding-query guard here (so drain_sensor_query_queue_()
+  // won't enqueue a second query before this one is actually sent — raw_write_queue_
+  // is shared with E8:C0/E8:C1 requests etc. and can sit for a while before its
+  // turn). Do NOT commit last_sensor_query_id_ yet: this frame may wait seconds
+  // in raw_write_queue_ before it is actually written to the bus (see the "Write
+  // raw frame" dispatch in loop()), and a straggling reply to an earlier, already-
+  // resolved query could otherwise land in that gap and get misattributed to this
+  // ID before our own request has even gone out. last_sensor_query_id_ is set
+  // instead at the moment this exact frame is popped and written in loop().
   this->sensor_query_outstanding_ = true;
-  this->last_sensor_query_ms_     = millis();  // timestamp for timeout handling
+  this->last_sensor_query_ms_     = millis();  // conservative timeout baseline; refreshed at actual TX
 
+  ESP_LOGV(TAG, "TX: sensor query id=0x%02X (queued)", sensor_id);
+  log_raw_data("Estia TX", frame, sizeof(frame));
 
-  this->send_command(cmd);  // enqueue; loop() will transmit when idle
+  std::vector<uint8_t> raw(frame, frame + sizeof(frame));
+  this->enqueue_raw_frame_(raw);  // enqueue; loop() will transmit when idle
 }
 
 
@@ -969,6 +995,11 @@ void ToshibaAbClimate::drain_sensor_query_queue_() {
   if (this->sensor_query_outstanding_) return;
   if (this->pending_count_ == 0) return;
   if (this->write_queue_.size() >= WRITE_QUEUE_THROTTLE) return;
+  // Cooldown: the EF-channel reply carries no ID, so give a straggling
+  // reply to the just-resolved query a short quiet window to arrive (and be
+  // safely ignored, since no query is outstanding right now) before we
+  // commit to a new last_sensor_query_id_ it could otherwise be misattributed to.
+  if (millis() - this->last_sensor_query_resolved_ms_ < SENSOR_QUERY_COOLDOWN_MS) return;
 
   const uint8_t next = this->pending_sensor_queries_[this->pending_head_];
   this->pending_head_ = (this->pending_head_ + 1) & (MAX_PENDING_SENSOR_QUERIES - 1);
@@ -1527,6 +1558,7 @@ void ToshibaAbClimate::setup() {
     if (now - this->last_sensor_query_ms_ > this->sensor_query_timeout_ms_) {
       this->sensor_query_outstanding_ = false;
       this->last_sensor_query_id_     = 0xFF;
+      this->last_sensor_query_resolved_ms_ = now;  // start the cooldown for a late straggler reply
       this->sensor_query_timeouts_++;  // optional stat
       ESP_LOGW(TAG, "Sensor query timed out; clearing outstanding flag (timeouts=%u)",
                this->sensor_query_timeouts_);
@@ -2561,6 +2593,84 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       ESP_LOGW(TAG, "ALARM: error=0x%02X (%s)", error_byte, error_desc);
     }
 
+    // Sensor/service-code query response (0x1A) with dtype 00:EF — reply to
+    // our own 0x17 "sensors:" poll (send_sensor_query), or an overheard
+    // reply to the physical wired remote's manual service-code screen.
+    // Captured on the bus (raw[]):
+    //   value:     1A:0D:00:08:00:00:40:00:EF:00:80:00:2C:00:<VAL>:CRC_H:CRC_L
+    //   undefined: 1A:0D:00:08:00:00:40:00:EF:00:80:00:A2:00:2C:CRC_H:CRC_L
+    // raw[5:6] here is the DESTINATION address (which remote this reply is
+    // for) — 0x00:0x40 in the example above.
+    //
+    // CONFIRMED real-world bug: unlike every other A0 dtype, an 00:EF reply
+    // carries no ID field saying which service code it answers — the
+    // component has to assume "the most recent one I asked for". That's
+    // fine in isolation, but if a physical wired remote is on the same bus
+    // and its own manual service-code screen polls this same channel
+    // independently (very plausible, and confirmed from a user log: dozens
+    // of 0x17 queries for codes never present in this component's own
+    // `sensors:` list, interleaved with ours), any reply arriving while we
+    // have an outstanding query used to get blindly attributed to whatever
+    // we last asked for — even though it was actually the answer to the
+    // OTHER device's query. Symptom: a sensor's published value randomly
+    // jumping to a wildly wrong number for one sample.
+    // The fix is to check the destination address: only treat a reply as
+    // ours if it's actually addressed to our own estia_remote_address (see
+    // estia_source_address_ / set_estia_source_address()). This only helps
+    // if that address is configured to something other than the physical
+    // remote's own address (0x0040 default) — if both share 0x0040, this
+    // check can't tell them apart either. Set `estia_remote_address:` in
+    // YAML to a distinct value (e.g. 0x50) if you have a real wired remote
+    // on the same bus.
+    if (frame_type == 0x1A && frame_len >= 13 && frame->raw[7] == 0x00 && frame->raw[8] == 0xEF) {
+      const bool addressed_to_us = frame->raw[5] == static_cast<uint8_t>(this->estia_source_address_ >> 8) &&
+                                    frame->raw[6] == static_cast<uint8_t>(this->estia_source_address_ & 0xFF);
+      if (!addressed_to_us) {
+        // Overheard reply to a different device's query (most likely the
+        // physical wired remote's own service-code screen) — not ours.
+        // Leave our own outstanding-query tracking untouched so we keep
+        // waiting for the actual reply to our own query.
+        ESP_LOGV(TAG, "0x1A sensor reply addressed to 0x%02X%02X, not us (0x%04X) — overheard, ignoring",
+                 frame->raw[5], frame->raw[6], this->estia_source_address_);
+      } else {
+        const uint8_t prev_id = this->last_sensor_query_id_;
+
+        if (frame->raw[11] == 0x00 && frame->raw[12] == 0xA2) {
+          ESP_LOGW(TAG, "0x1A: sensor id=0x%02X returned A2 (undefined/not supported)", prev_id);
+        } else if (frame->raw[11] == 0x00 && frame->raw[12] == 0x2C) {
+          const uint8_t value = frame->raw[14];
+          if (prev_id != 0xFF) {
+            bool published = false;
+            for (auto &ps : this->polled_sensors_) {
+              if (ps.id == prev_id) {
+                const float scaled = static_cast<float>(value) * ps.scale;
+                if (ps.sensor != nullptr) {
+                  ps.sensor->publish_state(scaled);
+                }
+                ESP_LOGD(TAG, "0x1A sensor: id=0x%02X raw=%u -> %.3f", prev_id, value, scaled);
+                published = true;
+                break;
+              }
+            }
+            if (!published) {
+              ESP_LOGV(TAG, "0x1A sensor id=0x%02X (raw=%u) has no matching polled sensor", prev_id, value);
+            }
+          } else {
+            // No outstanding query of our own, but still addressed to us —
+            // e.g. a straggler reply that arrived just after we already
+            // gave up on it. Nothing to do.
+            ESP_LOGV(TAG, "0x1A sensor reply with no outstanding query (raw=%u), ignoring", value);
+          }
+        } else {
+          log_raw_data("0x1A unrecognized", frame->raw, fsz);
+        }
+
+        this->sensor_query_outstanding_ = false;
+        this->last_sensor_query_id_     = 0xFF;
+        this->last_sensor_query_resolved_ms_ = millis();  // start the straggler cooldown
+      }
+    }
+
     return true;
   }
   // Wrapped TU2C and first-generation Estia frames both carry an additive
@@ -2760,6 +2870,21 @@ void ToshibaAbClimate::loop() {
       }
 
       ESP_LOGD(TAG, "Write raw frame: %s", payload.c_str());
+
+      // If this is one of our own A0 sensor/service-code queries (see
+      // send_sensor_query()), only NOW — at the moment it actually goes out
+      // on the bus — commit last_sensor_query_id_ / last_sensor_query_ms_.
+      // Committing this any earlier (e.g. at enqueue time) left a window,
+      // while the frame was still waiting its turn in raw_write_queue_,
+      // where a straggling reply to an unrelated/earlier query could be
+      // misattributed to this ID before our request had even been sent.
+      if (raw_frame.size() == 21 && raw_frame[2] == 0x17 && raw_frame[9] == 0x00 &&
+          raw_frame[10] == 0x80 && raw_frame[11] == 0x00 && raw_frame[12] == 0xEF && raw_frame[14] == 0x2C) {
+        this->last_sensor_query_id_ = raw_frame[17];
+        this->last_sensor_query_ms_ = now;
+        ESP_LOGV(TAG, "TX: sensor query id=0x%02X (sent)", raw_frame[17]);
+      }
+
       this->remember_tx_frame_for_echo_(raw_frame.data(), raw_frame.size(), false);
       this->write_array(raw_frame.data(), raw_frame.size());
 
@@ -3600,44 +3725,65 @@ static DataFrame make_estia_first_gen_frame(uint8_t src, uint8_t dst, const uint
   return frame;
 }
 
+bool ToshibaAbClimate::estia_first_gen_guard_(const char *feature) {
+  // These functions build a classic 1-byte-addressed / checksum-summed TU2C
+  // frame (see make_estia_first_gen_frame()) and are only meaningful on true
+  // first-generation Estia buses (frame_format: estia). On an A0 bus
+  // (frame_format: a0) that frame format is wire-incompatible garbage: it
+  // would be enqueued and physically transmitted (wrapped as F0:F0:...:A0),
+  // but the real A0 control board has no reason to understand or act on it.
+  // Refuse instead of silently spamming the bus with a no-op frame.
+  if (this->is_estia_first_gen()) return true;
+  ESP_LOGW(TAG, "%s is only implemented for frame_format: estia (first generation) - "
+                "ignoring on this bus (frame_format: a0/tu2c/normal/hm)", feature);
+  return false;
+}
+
 void ToshibaAbClimate::send_estia_first_gen_zone1(bool on) {
   if (this->read_only_) return;
+  if (!this->estia_first_gen_guard_("zone1_switch")) return;
   const uint8_t payload[] = {0xE0, 0x01, 0x21, static_cast<uint8_t>(on ? 0x03 : 0x02)};
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
 void ToshibaAbClimate::send_estia_first_gen_dhw_on() {
   if (this->read_only_) return;
+  if (!this->estia_first_gen_guard_("dhw on/off")) return;
   const uint8_t payload[] = {0xE0, 0x01, 0x21, 0x0C};
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
 void ToshibaAbClimate::send_estia_first_gen_dhw_off() {
   if (this->read_only_) return;
+  if (!this->estia_first_gen_guard_("dhw on/off")) return;
   const uint8_t payload[] = {0xE0, 0x01, 0x21, 0x08};
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
 void ToshibaAbClimate::send_estia_first_gen_dhw_boost(bool on) {
   if (this->read_only_) return;
+  if (!this->estia_first_gen_guard_("dhw_boost")) return;
   const uint8_t payload[] = {0xE0, 0x01, 0x24, 0x10, static_cast<uint8_t>(on ? 0x10 : 0x00)};
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
 void ToshibaAbClimate::send_estia_first_gen_antibacteria(bool on) {
   if (this->read_only_) return;
+  if (!this->estia_first_gen_guard_("antibacteria")) return;
   const uint8_t payload[] = {0xE0, 0x01, 0x24, 0x60, static_cast<uint8_t>(on ? 0x20 : 0x00)};
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
 void ToshibaAbClimate::send_estia_first_gen_auto_mode(bool on) {
   if (this->read_only_) return;
+  if (!this->estia_first_gen_guard_("auto_mode")) return;
   const uint8_t payload[] = {0xE0, 0x01, 0x24, 0x01, static_cast<uint8_t>(on ? 0x01 : 0x00)};
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
 void ToshibaAbClimate::send_estia_first_gen_dhw_setpoint(float target_temp) {
   if (this->read_only_) return;
+  if (!this->estia_first_gen_guard_("dhw setpoint")) return;
   uint8_t encoded = static_cast<uint8_t>(std::round((target_temp + 16.0f) * 2.0f));
   const uint8_t payload[] = {0xE0, 0x01, 0x23, 0x08, 0x00, 0x00, encoded, 0x00};
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
@@ -3645,6 +3791,7 @@ void ToshibaAbClimate::send_estia_first_gen_dhw_setpoint(float target_temp) {
 
 void ToshibaAbClimate::send_estia_first_gen_request_data(uint8_t request_code) {
   if (this->read_only_) return;
+  if (!this->estia_first_gen_guard_("request_data")) return;
   const uint8_t payload[] = {0xE0, 0x41, 0x5C, 0x70, request_code};
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
