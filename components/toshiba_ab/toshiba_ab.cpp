@@ -2335,8 +2335,12 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       float outdoor_temp = frame->raw[14] / 2.0f - 16.0f;
 
       bool power_on = (flags & 0x01) != 0;
+      bool dhw_active = (flags & 0x02) != 0;
       bool is_cooling = (flags & 0x20) != 0;
       bool is_heating = (flags & 0x40) != 0;
+      if (this->dhw_switch_ != nullptr) {
+        this->dhw_switch_->publish_state(dhw_active);
+      }
 
       ESP_LOGV(TAG, "Status: power=%s flags=0x%02X %s current=%.1f°C setpoint=%.1f°C outdoor=%.1f°C",
                power_on ? "ON" : "OFF", flags,
@@ -2432,9 +2436,14 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
     if (frame_type == 0x1C && frame_len >= 15 && frame->raw[7] == 0x03 && frame->raw[8] == 0xC6) {
       uint8_t flags = frame->raw[9];
       bool power_on = (flags & 0x01) != 0;
+      bool dhw_active = (flags & 0x02) != 0;
       bool is_cooling = (flags & 0x20) != 0;
       bool is_heating = (flags & 0x40) != 0;
       float setpoint = frame->raw[13] / 2.0f - 16.0f;
+
+      if (this->dhw_switch_ != nullptr) {
+        this->dhw_switch_->publish_state(dhw_active);
+      }
 
       climate::ClimateMode new_mode;
       if (!power_on) {
@@ -3423,6 +3432,43 @@ void ToshibaAbClimate::send_estia_power(bool on) {
   this->send_estia_tracked_(frame, sizeof(frame), 0x0041);  // ACK: 00:A1:00:41
 }
 
+void ToshibaAbClimate::send_estia_dhw(bool on) {
+  if (this->read_only_) {
+    ESP_LOGW(TAG, "Read-only mode: not sending Estia DHW command");
+    return;
+  }
+
+  uint16_t src = this->estia_source_address_;
+  // DHW production on/off shares the same dtype (00:41) as system power, but
+  // uses distinct command bytes (2C=on/28=off) rather than power's 23=on/22=off.
+  // Confirmed by capturing the physical wired remote's own frames:
+  //   TX: 11:08:00:00:40:08:00:00:41:2C:CRC  -> ACK 00:A1:00:41, status flags gain bit 0x02
+  //   TX: 11:08:00:00:40:08:00:00:41:28:CRC  -> ACK 00:A1:00:41, status flags lose bit 0x02
+  uint8_t dhw_cmd = on ? 0x2C : 0x28;
+
+  uint8_t frame[] = {
+    0xA0, 0x00,                         // prefix
+    0x11,                               // type: command
+    0x08,                               // length: 8
+    0x00,                               // fixed
+    (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),  // source
+    0x08, 0x00,                         // dest: master
+    0x00, 0x41,                         // dtype: power/DHW control channel
+    dhw_cmd,                            // 0x2C=DHW ON, 0x28=DHW OFF
+    0x00, 0x00                          // CRC placeholder
+  };
+
+  size_t crc_len = sizeof(frame) - 2;
+  uint16_t crc = estia_crc16(frame, crc_len);
+  frame[crc_len]     = (crc >> 8) & 0xFF;
+  frame[crc_len + 1] = crc & 0xFF;
+
+  ESP_LOGD(TAG, "TX: DHW %s (cmd=0x%02X)", on ? "ON" : "OFF", dhw_cmd);
+  log_raw_data("Estia TX", frame, sizeof(frame));
+
+  this->send_estia_tracked_(frame, sizeof(frame), 0x0041);  // ACK: 00:A1:00:41 (shared with power)
+}
+
 void ToshibaAbClimate::send_estia_mode(uint8_t mode_cmd) {
   if (this->read_only_) {
     ESP_LOGW(TAG, "Read-only mode: not sending Estia mode command");
@@ -3841,6 +3887,21 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
 
 void ToshibaAbEstiaZone1Switch::write_state(bool state) {
   this->climate_->send_estia_first_gen_zone1(state);
+}
+
+void ToshibaAbEstiaDhwSwitch::write_state(bool state) {
+  // A0-native command (dtype 00:41, cmd 2C/28) confirmed from a real capture
+  // of the physical wired remote; on true first-generation Estia buses, DHW
+  // on/off is controlled through the existing first-gen helper instead.
+  if (this->climate_->is_estia_first_gen()) {
+    if (state) {
+      this->climate_->send_estia_first_gen_dhw_on();
+    } else {
+      this->climate_->send_estia_first_gen_dhw_off();
+    }
+  } else {
+    this->climate_->send_estia_dhw(state);
+  }
 }
 
 void ToshibaAbEstiaDhwBoostSwitch::write_state(bool state) {

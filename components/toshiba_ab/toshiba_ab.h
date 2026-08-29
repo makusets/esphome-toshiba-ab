@@ -935,6 +935,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
 
   void set_read_only_switch(switch_::Switch *read_only_switch) { read_only_switch_ = read_only_switch; }
   void set_zone1_switch(switch_::Switch *zone1_switch) { zone1_switch_ = zone1_switch; }
+  void set_dhw_switch(switch_::Switch *dhw_switch) { dhw_switch_ = dhw_switch; }
+  void send_estia_dhw(bool on);  // A0-native DHW on/off (dtype 00:41, cmd 2C=on/28=off)
   void set_dhw_boost_switch(switch_::Switch *dhw_boost_switch) { dhw_boost_switch_ = dhw_boost_switch; }
   void set_antibacteria_switch(switch_::Switch *antibacteria_switch) { antibacteria_switch_ = antibacteria_switch; }
 
@@ -1067,6 +1069,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   switch_::Switch *vent_switch_{nullptr};
   switch_::Switch *read_only_switch_{nullptr};
   switch_::Switch *zone1_switch_{nullptr};
+  switch_::Switch *dhw_switch_{nullptr};
   switch_::Switch *dhw_boost_switch_{nullptr};
   switch_::Switch *antibacteria_switch_{nullptr};
   sensor::Sensor *failed_crcs_sensor_{nullptr};
@@ -1267,6 +1270,14 @@ class ToshibaAbVentSwitch : public switch_::Switch, public Component {
 class ToshibaAbEstiaZone1Switch : public switch_::Switch, public Component {
  public:
   ToshibaAbEstiaZone1Switch(ToshibaAbClimate *climate) { climate_ = climate; }
+ protected:
+  void write_state(bool state) override;
+  ToshibaAbClimate *climate_;
+};
+
+class ToshibaAbEstiaDhwSwitch : public switch_::Switch, public Component {
+ public:
+  ToshibaAbEstiaDhwSwitch(ToshibaAbClimate *climate) { climate_ = climate; }
  protected:
   void write_state(bool state) override;
   ToshibaAbClimate *climate_;

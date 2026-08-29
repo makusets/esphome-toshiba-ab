@@ -75,6 +75,7 @@ CONF_BACKUP_HEATER_HOURS = "backup_heater_hours"
 CONF_DEMAND = "demand"
 CONF_DEMAND_ENABLED = "demand_enabled"
 CONF_ZONE1_SWITCH = "zone1_switch"
+CONF_DHW_SWITCH = "dhw_switch"
 CONF_DHW_BOOST = "dhw_boost"
 CONF_ANTIBACTERIA = "antibacteria"
 CONF_ZONE1_WATER_TEMPERATURE = "zone1_water_temperature"
@@ -112,6 +113,9 @@ ToshibaAbReadOnlySwitch = toshiba_ab_ns.class_(
 )
 ToshibaAbEstiaZone1Switch = toshiba_ab_ns.class_(
     "ToshibaAbEstiaZone1Switch", switch.Switch, cg.Component
+)
+ToshibaAbEstiaDhwSwitch = toshiba_ab_ns.class_(
+    "ToshibaAbEstiaDhwSwitch", switch.Switch, cg.Component
 )
 ToshibaAbEstiaDhwBoostSwitch = toshiba_ab_ns.class_(
     "ToshibaAbEstiaDhwBoostSwitch", switch.Switch, cg.Component
@@ -235,6 +239,16 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
                 cv.Schema(
                     {
                         cv.GenerateID(): cv.declare_id(ToshibaAbEstiaZone1Switch),
+                    }
+                )
+            ),
+            key=CONF_NAME,
+        ),
+        cv.Optional(CONF_DHW_SWITCH): cv.maybe_simple_value(
+            switch._SWITCH_SCHEMA.extend(
+                cv.Schema(
+                    {
+                        cv.GenerateID(): cv.declare_id(ToshibaAbEstiaDhwSwitch),
                     }
                 )
             ),
@@ -530,6 +544,9 @@ async def to_code(config):
     if CONF_ZONE1_SWITCH in config:
         sw = await switch.new_switch(config[CONF_ZONE1_SWITCH], var)
         cg.add(var.set_zone1_switch(sw))
+    if CONF_DHW_SWITCH in config:
+        sw = await switch.new_switch(config[CONF_DHW_SWITCH], var)
+        cg.add(var.set_dhw_switch(sw))
     if CONF_DHW_BOOST in config:
         sw = await switch.new_switch(config[CONF_DHW_BOOST], var)
         cg.add(var.set_dhw_boost_switch(sw))
