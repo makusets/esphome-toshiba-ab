@@ -843,6 +843,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_master_address(uint8_t address);
   void set_remote_address(uint8_t address) {
     remote_address_ = std::min(address, static_cast<uint8_t>(TOSHIBA_ESTIA_REMOTE_MAX));
+    // A0 represents the same YAML remote address as a two-byte address with
+    // a zero mode byte (for example 0x40 becomes 0x0040).
+    estia_source_address_ = remote_address_;
     remote_address_auto_ = false;
   }
   bool get_master_address_auto() const { return master_address_auto_; }
@@ -1215,6 +1218,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   uint32_t last_master_alive_millis_ = 0;
   bool estia_was_connected_{false};
   uint16_t estia_source_address_{0x0040};  // default: mimic remote controller
+  uint16_t estia_master_address_{0x0800};  // A0 master mode byte 0x08 + YAML master address
   climate::ClimateMode estia_last_active_mode_{climate::CLIMATE_MODE_HEAT};  // last known mode while powered on
   bool estia_power_on_pending_{false};  // waiting for mode ACK before sending power on
   uint8_t estia_pending_mode_cmd_{0};   // mode command to retry (0x01=cool, 0x02=heat)

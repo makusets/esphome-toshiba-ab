@@ -54,6 +54,11 @@ climate:
     frame_format: a0
     filter_frames: false
 
+    # Optional one-byte addresses. For A0 these become source 0x0040 and
+    # destination 0x0800 on the wire; the defaults below may be omitted.
+    # remote: 0x40
+    # master: 0x00
+
     # Read-only mode: needs to be set to false to allow sending commands
     read_only: false
 

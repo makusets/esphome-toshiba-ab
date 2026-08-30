@@ -3359,6 +3359,7 @@ void ToshibaAbClimate::send_estia_setpoint(float target_temp) {
   // Encode temperature: val = (°C + 16) * 2
   uint8_t encoded = static_cast<uint8_t>((target_temp + 16.0f) * 2.0f);
   uint16_t src = this->estia_source_address_;
+  uint16_t dst = this->estia_master_address_;
 
   // Sub-command: 0x02 = heating setpoint, 0x01 = cooling setpoint
   uint8_t subcmd = (this->mode == climate::CLIMATE_MODE_COOL) ? 0x01 : 0x02;
@@ -3370,7 +3371,7 @@ void ToshibaAbClimate::send_estia_setpoint(float target_temp) {
     0x0C,                               // length: 12
     0x00,                               // fixed
     (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),  // source
-    0x08, 0x00,                         // dest: master
+    (uint8_t)(dst >> 8), (uint8_t)(dst & 0xFF),  // dest: master
     0x03, 0xC1,                         // command type: setpoint
     subcmd,                             // 0x02=heat, 0x01=cool
     encoded,                            // target temperature
@@ -3396,6 +3397,7 @@ void ToshibaAbClimate::send_estia_power(bool on) {
   }
 
   uint16_t src = this->estia_source_address_;
+  uint16_t dst = this->estia_master_address_;
   uint8_t power_cmd = on ? 0x23 : 0x22;
 
   // Power command: A0:00:11:08:00:SRC:08:00:00:41:CMD:CRC
@@ -3406,7 +3408,7 @@ void ToshibaAbClimate::send_estia_power(bool on) {
     0x08,                               // length: 8
     0x00,                               // fixed
     (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),  // source
-    0x08, 0x00,                         // dest: master
+    (uint8_t)(dst >> 8), (uint8_t)(dst & 0xFF),  // dest: master
     0x00, 0x41,                         // dtype: power control
     power_cmd,                          // 0x23=ON, 0x22=OFF
     0x00, 0x00                          // CRC placeholder
@@ -3430,6 +3432,7 @@ void ToshibaAbClimate::send_estia_mode(uint8_t mode_cmd) {
   }
 
   uint16_t src = this->estia_source_address_;
+  uint16_t dst = this->estia_master_address_;
 
   // Mode command: A0:00:11:08:00:SRC:08:00:03:C0:CMD:CRC
   // 0x02=heating, 0x01=cooling
@@ -3439,7 +3442,7 @@ void ToshibaAbClimate::send_estia_mode(uint8_t mode_cmd) {
     0x08,                               // length: 8
     0x00,                               // fixed
     (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),  // source
-    0x08, 0x00,                         // dest: master
+    (uint8_t)(dst >> 8), (uint8_t)(dst & 0xFF),  // dest: master
     0x03, 0xC0,                         // dtype: mode control
     mode_cmd,                           // 0x02=heat, 0x01=cool
     0x00, 0x00                          // CRC placeholder
@@ -3480,6 +3483,7 @@ void ToshibaAbClimate::send_estia_demand(uint8_t demand) {
   }
   if (demand > 15) demand = 15;
   estia_demand_value_ = demand;
+  uint16_t dst = this->estia_master_address_;
 
   // 0-10V demand command: A0:00:11:0A:00:00:41:08:00:00:5F:DD:00:00:CRC
   // Uses source address 0x0041 (0-10V interface address)
@@ -3489,7 +3493,7 @@ void ToshibaAbClimate::send_estia_demand(uint8_t demand) {
     0x0A,                               // length: 10
     0x00,                               // fixed
     0x00, 0x41,                         // source: 0-10V interface address
-    0x08, 0x00,                         // dest: master
+    (uint8_t)(dst >> 8), (uint8_t)(dst & 0xFF),  // dest: master
     0x00, 0x5F,                         // dtype: demand control
     demand,                             // demand value (0..15)
     0x00, 0x00,                         // padding
@@ -3511,13 +3515,14 @@ void ToshibaAbClimate::send_estia_demand_heartbeat() {
   // Emulate 0-10V interface periodic status (0x55 from 0x0041)
   // Captured: 55:0C:00:00:41:08:00:00:9F:00:DD:14:00:00:CRC
   // raw[10]=demand, raw[11]=0x14 (min temp config = 20°C)
+  uint16_t dst = this->estia_master_address_;
   uint8_t frame[] = {
     0xA0, 0x00,                         // prefix
     0x55,                               // type: remote status
     0x0C,                               // length: 12
     0x00,                               // fixed
     0x00, 0x41,                         // source: 0-10V interface address
-    0x08, 0x00,                         // dest: master
+    (uint8_t)(dst >> 8), (uint8_t)(dst & 0xFF),  // dest: master
     0x00, 0x9F,                         // dtype: 0-10V status
     0x00, estia_demand_value_,          // 0x00 + demand value
     0x14,                               // min temp config (20°C)
@@ -3539,6 +3544,7 @@ void ToshibaAbClimate::send_estia_demand_heartbeat() {
 
 void ToshibaAbClimate::send_estia_data_request(uint8_t subtype) {
   uint16_t src = this->estia_source_address_;
+  uint16_t dst = this->estia_master_address_;
 
   // Data request frame: A0:00:15:0A:00:SRC:DST:00:E8:Cx:01:00:CRC
   // Mirrors what KNX gateway sends as 0x15 request
@@ -3548,7 +3554,7 @@ void ToshibaAbClimate::send_estia_data_request(uint8_t subtype) {
     0x0A,                               // length: 10
     0x00,                               // fixed
     (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),  // source
-    0x08, 0x00,                         // dest: master
+    (uint8_t)(dst >> 8), (uint8_t)(dst & 0xFF),  // dest: master
     0x00, 0xE8,                         // data type
     subtype,                            // C0=temperatures, C1=counters
     0x01, 0x00,                         // request params
@@ -3867,6 +3873,9 @@ void ToshibaAbReadOnlySwitch::write_state(bool state) {
 void ToshibaAbClimate::set_master_address(uint8_t address) {
   this->master_address_ = address;
   this->tu2c_master_address_ = address;
+  // A0 uses a two-byte destination: mode byte 0x08 followed by the same
+  // one-byte master address supplied in YAML (for example 0x00 -> 0x0800).
+  this->estia_master_address_ = 0x0800 | address;
   this->master_address_auto_ = false;
   this->master_address_confirmed_ = false;
 }
