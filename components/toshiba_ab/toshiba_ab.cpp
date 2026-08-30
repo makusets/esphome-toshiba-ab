@@ -16,6 +16,8 @@ namespace toshiba_ab {
 
 static const char *const TAG = "tcc_link.climate";
 
+static uint16_t estia_crc16(const uint8_t *data, size_t len);
+
 static uint8_t command_opcode_for_ack_log(const DataFrame &frame) {
   if (frame.is_tu2c()) {
     // TU2C and first-generation Estia frames are stored as
@@ -932,6 +934,31 @@ void ToshibaAbClimate::send_sensor_query(uint8_t sensor_id) {
     this->sensor_query_outstanding_ = true;
     this->last_sensor_query_ms_ = millis();
     this->send_estia_first_gen_request_data(sensor_id);
+    return;
+  }
+
+  if (this->data_reader.frame_format() == FrameFormat::A0) {
+    const uint16_t src = this->estia_source_address_;
+    const uint16_t dst = this->estia_master_address_;
+    // A0 service-code query: two-byte addresses and CRC-16 over the complete prefixed frame.
+    uint8_t frame[] = {
+      0xA0, 0x00, 0x17, 0x0F, 0x00,
+      static_cast<uint8_t>(src >> 8), static_cast<uint8_t>(src),
+      static_cast<uint8_t>(dst >> 8), static_cast<uint8_t>(dst),
+      0x00, 0x80, 0x00, 0xEF, 0x00, 0x2C, 0x08, 0x00, sensor_id, 0x00,
+      0x00, 0x00,
+    };
+    const size_t crc_offset = sizeof(frame) - 2;
+    const uint16_t crc = estia_crc16(frame, crc_offset);
+    frame[crc_offset] = static_cast<uint8_t>(crc >> 8);
+    frame[crc_offset + 1] = static_cast<uint8_t>(crc);
+
+    this->last_sensor_query_id_ = sensor_id;
+    this->sensor_query_outstanding_ = true;
+    this->last_sensor_query_ms_ = millis();
+    ESP_LOGV(TAG, "TX: A0 sensor query id=0x%02X from 0x%04X to 0x%04X", sensor_id, src, dst);
+    log_raw_data("Estia TX", frame, sizeof(frame));
+    this->enqueue_raw_frame_(std::vector<uint8_t>(frame, frame + sizeof(frame)));
     return;
   }
 
@@ -2467,9 +2494,46 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       }
     }
 
+    // EF replies carry no sensor ID. Only consume replies addressed to this
+    // component, since a physical remote can query the same channel concurrently.
+    if (frame_type == 0x1A && frame_len >= 13 && frame->raw[7] == 0x00 && frame->raw[8] == 0xEF) {
+      const uint16_t source = (static_cast<uint16_t>(frame->raw[3]) << 8) | frame->raw[4];
+      const uint16_t destination = (static_cast<uint16_t>(frame->raw[5]) << 8) | frame->raw[6];
+      if (source != this->estia_master_address_ || destination != this->estia_source_address_) {
+        ESP_LOGV(TAG, "Ignoring A0 sensor response from 0x%04X to 0x%04X", source, destination);
+      } else if (!this->sensor_query_outstanding_ || this->last_sensor_query_id_ == 0xFF) {
+        ESP_LOGV(TAG, "Ignoring unsolicited A0 sensor response addressed to us");
+      } else {
+        const uint8_t sensor_id = this->last_sensor_query_id_;
+        if (frame->raw[11] == 0x00 && frame->raw[12] == 0xA2) {
+          ESP_LOGW(TAG, "0x1A: sensor id=0x%02X returned A2 (undefined/not supported)", sensor_id);
+        } else if (frame_len >= 15 && frame->raw[11] == 0x00 && frame->raw[12] == 0x2C) {
+          const uint8_t value = frame->raw[14];
+          for (auto &polled_sensor : this->polled_sensors_) {
+            if (polled_sensor.id == sensor_id && polled_sensor.sensor != nullptr) {
+              const float scaled = static_cast<float>(value) * polled_sensor.scale;
+              polled_sensor.sensor->publish_state(scaled);
+              ESP_LOGD(TAG, "0x1A sensor: id=0x%02X raw=%u -> %.3f", sensor_id, value, scaled);
+              break;
+            }
+          }
+        } else {
+          log_raw_data("0x1A unrecognized", frame->raw, fsz);
+        }
+        this->sensor_query_outstanding_ = false;
+        this->last_sensor_query_id_ = 0xFF;
+      }
+    }
+
     // ACK (0x18) with dtype 00:A1 — general ACK handler
     // Format: 18:LL:00:SRC:DST:00:A1:XX:YY:CRC where XX:YY = acknowledged dtype
     if (frame_type == 0x18 && frame_len >= 9 && frame->raw[7] == 0x00 && frame->raw[8] == 0xA1) {
+      const uint16_t destination = (static_cast<uint16_t>(frame->raw[5]) << 8) | frame->raw[6];
+      if (destination != this->estia_source_address_) {
+        ESP_LOGV(TAG, "Ignoring A0 ACK addressed to 0x%04X (ours is 0x%04X)", destination,
+                 this->estia_source_address_);
+        return true;
+      }
       uint16_t acked_dtype = (frame->raw[9] << 8) | frame->raw[10];
       ESP_LOGD(TAG, "ACK for dtype %02X:%02X", frame->raw[9], frame->raw[10]);
 
