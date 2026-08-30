@@ -85,8 +85,7 @@ climate:
     zone1_switch:
       name: "Estia Zone 1"
 
-    # Switch to activate boost mode for domestic-hot-water operation. In the current first-gen
-    # implementation this uses the known DHW on/off command fallback, as boost command still unknown.
+    # Switch to activate boost mode for domestic-hot-water operation.
     dhw_boost:
       name: "Estia DHW Boost"
       
