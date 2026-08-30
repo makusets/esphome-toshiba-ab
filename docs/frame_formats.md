@@ -193,6 +193,12 @@ Common SRC and DST addresses are `0x00` for the master, `0x40` for the remote, `
 for the optional 0-10 V demand interface emulation, and `0xFE` for broadcast. Consistent
 with Toshiba conventions.
 
+The optional one-byte `remote:` and `master:` YAML values are also used for A0
+without requiring separate A0 address options. The remote value is zero-extended
+(`remote: 0x40` becomes `0x0040`, written as `00:40`) and the A0 master mode byte
+`0x08` is prepended to the master value (`master: 0x00` becomes `0x0800`, written
+as `08:00`). If omitted, those same `0x40` and `0x00` defaults apply.
+
 Example frames:
 
 ```text
