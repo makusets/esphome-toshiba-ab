@@ -2,6 +2,7 @@
 
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/climate/climate.h"
+#include "esphome/components/select/select.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/switch/switch.h"
 #include "esphome/components/text_sensor/text_sensor.h"
@@ -940,6 +941,12 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_zone1_switch(switch_::Switch *zone1_switch) { zone1_switch_ = zone1_switch; }
   void set_dhw_boost_switch(switch_::Switch *dhw_boost_switch) { dhw_boost_switch_ = dhw_boost_switch; }
   void set_antibacteria_switch(switch_::Switch *antibacteria_switch) { antibacteria_switch_ = antibacteria_switch; }
+  void set_automatik_select(select::Select *automatik_select) { automatik_select_ = automatik_select; }
+  // Toggles Automatik/Heizkurve (on) vs. Manuell/Fest (off) mode, dtype 03:C4.
+  // Confirmed from a real capture of the physical remote's own "Automatik"
+  // toggle: payload 01:01:00:00 (on) / 01:00:00:00 (off), which flips bit
+  // 0x04 of the status-broadcast mode byte (raw[10]) between 0x84 and 0x80.
+  void send_estia_automatik_mode(bool on);
 
   void set_failed_crcs_sensor(sensor::Sensor *failed_crcs_sensor) { this->failed_crcs_sensor_ = failed_crcs_sensor; }
   void set_noise_rate_sensor(sensor::Sensor *sensor) { this->noise_rate_sensor_ = sensor; }
@@ -1072,6 +1079,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   switch_::Switch *zone1_switch_{nullptr};
   switch_::Switch *dhw_boost_switch_{nullptr};
   switch_::Switch *antibacteria_switch_{nullptr};
+  select::Select *automatik_select_{nullptr};
   sensor::Sensor *failed_crcs_sensor_{nullptr};
   sensor::Sensor *noise_rate_sensor_{nullptr};
   sensor::Sensor *crc_failures_5min_sensor_{nullptr};
@@ -1289,6 +1297,17 @@ class ToshibaAbEstiaAntibacteriaSwitch : public switch_::Switch, public Componen
   ToshibaAbEstiaAntibacteriaSwitch(ToshibaAbClimate *climate) { climate_ = climate; }
  protected:
   void write_state(bool state) override;
+  ToshibaAbClimate *climate_;
+};
+
+// Automatik/Heizkurve vs. Manuell/Fest as a select entity (options
+// "Automatik"/"Manuell") instead of a plain on/off switch, so the entity's
+// own state text reads the actual mode names rather than generic "An"/"Aus".
+class ToshibaAbEstiaAutomatikSelect : public select::Select, public Component {
+ public:
+  ToshibaAbEstiaAutomatikSelect(ToshibaAbClimate *climate) { climate_ = climate; }
+ protected:
+  void control(const std::string &value) override;
   ToshibaAbClimate *climate_;
 };
 
