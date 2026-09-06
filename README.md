@@ -86,17 +86,17 @@ before building a board or substituting components.
    OTA and secrets settings.
 2. Select the UART pins for your board: v3.2 uses TX `GPIO12` and RX `GPIO13`;
    v3 uses TX `GPIO10` and RX `GPIO13`; v1 uses TX `GPIO15` and RX `GPIO13`;
-   D1 mini uses TX `D8` and RX `D7`. Also select the parity and `frame_format`
-   required by your AC system in the tables below.
-3. **Leave the AC's A/B wires disconnected.** With all power removed, put the
+   D1 mini uses TX `D8` and RX `D7`. Also select the parity and optionally the
+   `frame_format` required by your AC system in the tables below.
+4. **Leave the AC's A/B wires disconnected.** With all power removed, put the
    board's power-selection jumper/switch (if fitted) in the **USB** position,
    then attach it to the computer with a data-capable USB cable.
-4. In the ESPHome dashboard, open the device and choose **Install → Plug into
+5. In the ESPHome dashboard, open the device and choose **Install → Plug into
    this computer**, or run `esphome run your-device.yaml` from the ESPHome CLI
    and select the USB serial port. Follow ESPHome's
    [first-device connection guide](https://esphome.io/guides/physical_device_connection/)
    if the serial device is not detected.
-5. For v3.2, if flashing does not start, disconnect USB, hold **BOOT**, reconnect
+6. For v3.2, if flashing does not start, disconnect USB, hold **BOOT**, reconnect
    USB while continuing to hold **BOOT**, and retry the installation. When the
    upload finishes, confirm that the device boots, joins Wi-Fi and appears in
    ESPHome/Home Assistant. Later firmware updates can be installed over Wi-Fi.
