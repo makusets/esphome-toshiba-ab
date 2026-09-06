@@ -376,6 +376,13 @@ bool ToshibaAbClimate::is_remote_ping_(Protocol protocol, const uint8_t *data, s
 }
 
 void ToshibaAbClimate::consider_keepalive_(Protocol protocol, uint8_t source) {
+  // Keepalives continue for the lifetime of the bus, but confirmation is a
+  // discovery transition rather than a periodic event. In particular, do not
+  // clear and rebuild the diagnostic history for every keepalive after both
+  // the protocol and master have already been confirmed.
+  if (protocol_confirmed_ && master_address_confirmed_)
+    return;
+
   if (protocol_setting_ != Protocol::AUTO && protocol_setting_ != protocol) {
     diagnostic_(std::string("Detected ") + protocol_name_(protocol) + " but YAML format is " +
                 protocol_name_(protocol_setting_));
