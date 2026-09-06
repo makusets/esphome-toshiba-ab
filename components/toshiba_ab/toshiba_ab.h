@@ -134,7 +134,6 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
     uint32_t last_seen;
   };
   std::vector<RemotePresence> remotes_;
-  std::string diagnostic_history_;
   text_sensor::TextSensor *diagnostic_sensor_{nullptr};
   uint8_t hardware_uart_rx_pin_{0xFF};
 

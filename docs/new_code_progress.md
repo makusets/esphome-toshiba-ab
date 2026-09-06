@@ -44,8 +44,8 @@ Status meanings:
 | Master-address discovery and validation | Done | Learns the source from the first valid master keepalive or checks it against an explicitly configured address. |
 | Existing remote discovery | Partial | After protocol and master confirmation, known checksum-valid remote pings maintain a live address inventory. Addresses expire after five minutes without a ping; ESP address assignment is not implemented yet. |
 | Frame logging | Done | Logs every complete candidate, highlights addresses and command/type fields, and marks checksum failures. |
-| Diagnostic history | Done | Publishes a newline-separated, de-duplicated event history capped at 255 characters. |
-| Manual rediscovery | Done | The diagnostic reset button clears discovery state, reader state, counters, and history, then restarts scanning. |
+| Diagnostic sensor | Done | Publishes the latest discovery event; earlier states remain available through Home Assistant history. |
+| Manual rediscovery | Done | The diagnostic reset button clears discovery state, reader state, and counters, then restarts scanning. |
 | Climate API capability declaration | Partial | Air systems advertise the intended climate modes, fan modes, swing modes, presets, current temperature, and action. Water systems currently expose only off mode. These are API declarations, not working controls. |
 | Climate state decoding | Not started | Valid non-keepalive frames are logged and then discarded. State parsing and publication must be rebuilt. |
 | Command generation/transmission | Not started | `control()` deliberately ignores calls. Address assignment, command queues, retries, and bus timing still need implementation. |
@@ -64,7 +64,7 @@ that protocol is selected.
 
 The reset button calls the same discovery initialization intentionally, with
 additional cleanup: protocol/master confirmation flags, frame-reader buffers,
-the resynchronization counter, and diagnostic history are cleared.
+and the resynchronization counter are cleared.
 
 ### 2. Protocol scan schedule
 
@@ -180,7 +180,7 @@ All of these frames are addressed to the master. Classification therefore
 requires that the frame destination equal the confirmed master address. The
 component keeps a live remote-address inventory internally. A valid ping adds
 or refreshes its source address, and an address is removed after five minutes
-without another ping. The diagnostic history records `Remote discovered:` and
+without another ping. The diagnostic sensor reports `Remote discovered:` and
 `Remote removed:` events only when membership changes; routine presence
 refreshes do not republish a current-address snapshot. The addresses do not yet
 influence the configured ESP address. As with master keepalive identification, encoded
@@ -229,7 +229,7 @@ These capabilities must not be interpreted as functional support yet:
 | `zone_2` | `false` | Create a second heating/cooling thermostat when enabled. |
 | `master_address` | `auto` (`0xAA` internally) | Learn the master or require an explicit 8-bit address. |
 | `esp_address` | `auto` (`0xAA` internally) | Stores the future local address; it is not yet used to transmit. |
-| `diagnostic` | `Toshiba AB Diagnostic` | Text sensor containing recent discovery events. |
+| `diagnostic` | `Toshiba AB Diagnostic` | Text sensor containing the latest discovery event. |
 | `reset_button` | `Toshiba AB Reset` | Restarts the identification process without rebooting. |
 
 The UART validator requires 2400 baud. It normally requires an RX pin; on
