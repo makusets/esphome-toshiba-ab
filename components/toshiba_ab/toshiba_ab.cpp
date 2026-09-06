@@ -14,6 +14,35 @@ constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_OPCODE;
 constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_LENGTH;
 constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_DATA_TYPE;
 
+ToshibaAbThermostat::ToshibaAbThermostat(ToshibaAbClimate *parent, WaterCircuit circuit)
+    : parent_(parent), circuit_(circuit) {
+  this->mode = climate::CLIMATE_MODE_OFF;
+  this->target_temperature = circuit == WaterCircuit::DHW ? 50.0f : 22.0f;
+}
+
+climate::ClimateTraits ToshibaAbThermostat::traits() {
+  auto traits = climate::ClimateTraits();
+  traits.set_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE | climate::CLIMATE_SUPPORTS_ACTION);
+  // Hydronic controllers expose these operating presets independently of the
+  // circuit's heat/cool mode. Keep them on DHW and both zones so each entity
+  // can eventually report and control the corresponding water-system state.
+  traits.set_supported_presets(
+      {climate::CLIMATE_PRESET_NONE, climate::CLIMATE_PRESET_BOOST, climate::CLIMATE_PRESET_ECO});
+  if (circuit_ == WaterCircuit::DHW) {
+    traits.set_supported_modes({climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT});
+    traits.set_visual_min_temperature(45);
+    traits.set_visual_max_temperature(60);
+  } else {
+    traits.set_supported_modes({climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_COOL});
+    traits.set_visual_min_temperature(20);
+    traits.set_visual_max_temperature(65);
+  }
+  traits.set_visual_temperature_step(0.5);
+  return traits;
+}
+
+void ToshibaAbThermostat::control(const climate::ClimateCall &call) { parent_->control_water(circuit_, call); }
+
 void ResetButton::press_action() {
   if (parent_ != nullptr)
     parent_->reset();
@@ -449,10 +478,12 @@ climate::ClimateTraits ToshibaAbClimate::traits() {
     traits.set_supported_modes({climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT_COOL, climate::CLIMATE_MODE_COOL,
                                 climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_FAN_ONLY, climate::CLIMATE_MODE_DRY,
                                 climate::CLIMATE_MODE_AUTO});
-    traits.set_supported_fan_modes({climate::CLIMATE_FAN_AUTO, climate::CLIMATE_FAN_LOW, climate::CLIMATE_FAN_MEDIUM, climate::CLIMATE_FAN_HIGH});
+    traits.set_supported_fan_modes(
+        {climate::CLIMATE_FAN_AUTO, climate::CLIMATE_FAN_LOW, climate::CLIMATE_FAN_MEDIUM, climate::CLIMATE_FAN_HIGH});
     traits.set_supported_swing_modes({climate::CLIMATE_SWING_OFF, climate::CLIMATE_SWING_BOTH,
                                       climate::CLIMATE_SWING_VERTICAL, climate::CLIMATE_SWING_HORIZONTAL});
-    traits.set_supported_presets({climate::CLIMATE_PRESET_NONE, climate::CLIMATE_PRESET_BOOST, climate::CLIMATE_PRESET_ECO, climate::CLIMATE_PRESET_SLEEP});
+    traits.set_supported_presets({climate::CLIMATE_PRESET_NONE, climate::CLIMATE_PRESET_BOOST,
+                                  climate::CLIMATE_PRESET_ECO, climate::CLIMATE_PRESET_SLEEP});
   } else {
     traits.set_supported_modes({climate::CLIMATE_MODE_OFF});
   }
@@ -464,6 +495,11 @@ climate::ClimateTraits ToshibaAbClimate::traits() {
 
 void ToshibaAbClimate::control(const climate::ClimateCall &call) {
   ESP_LOGV(TAG, "Climate control ignored while the component is identification-only");
+}
+
+void ToshibaAbClimate::control_water(WaterCircuit circuit, const climate::ClimateCall &call) {
+  const char *name = circuit == WaterCircuit::DHW ? "DHW" : (circuit == WaterCircuit::ZONE_1 ? "Zone 1" : "Zone 2");
+  ESP_LOGV(TAG, "%s climate control ignored while the component is identification-only", name);
 }
 
 void ToshibaAbClimate::dump_config() {
