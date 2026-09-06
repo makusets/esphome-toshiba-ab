@@ -1,5 +1,6 @@
 #include "toshiba_ab.h"
 #include "esphome/core/log.h"
+#include <algorithm>
 #include <cstdio>
 
 #ifdef USE_ESP8266
@@ -79,6 +80,7 @@ void ToshibaAbClimate::reset() {
   protocol_confirmed_ = false;
   discovery_finished_ = false;
   reader_reset_count_ = 0;
+  remotes_.clear();
   diagnostic_history_.clear();
   select_scan_protocol_(protocol_setting_ == Protocol::AUTO ? Protocol::TCC : protocol_setting_);
   diagnostic_(protocol_setting_ == Protocol::AUTO
@@ -90,6 +92,7 @@ void ToshibaAbClimate::loop() {
   const uint32_t now = millis();
   update_discovery_(now);
   check_reader_timeout_(now);
+  expire_remotes_(now);
 
   uint8_t byte;
 #ifdef USE_ESP8266
@@ -283,6 +286,8 @@ void ToshibaAbClimate::process_frame_(Protocol protocol, const uint8_t *data, si
     return;
   if (master_keepalive)
     consider_keepalive_(protocol, source);
+  else if (remote_ping)
+    observe_remote_(source, millis());
 }
 
 bool ToshibaAbClimate::is_master_keepalive_(Protocol protocol, const uint8_t *data, size_t size,
@@ -376,6 +381,32 @@ void ToshibaAbClimate::consider_keepalive_(Protocol protocol, uint8_t source) {
   diagnostic_(std::string("Confirmed ") + protocol_name_(protocol) + " master " + hex_(&source, 1));
 }
 
+void ToshibaAbClimate::observe_remote_(uint8_t address, uint32_t now) {
+  for (auto &remote : remotes_) {
+    if (remote.address == address) {
+      remote.last_seen = now;
+      return;
+    }
+  }
+
+  remotes_.push_back({address, now});
+  std::sort(remotes_.begin(), remotes_.end(),
+            [](const RemotePresence &left, const RemotePresence &right) { return left.address < right.address; });
+  publish_diagnostic_();
+}
+
+void ToshibaAbClimate::expire_remotes_(uint32_t now) {
+  const size_t previous_size = remotes_.size();
+  remotes_.erase(std::remove_if(remotes_.begin(), remotes_.end(),
+                                [now](const RemotePresence &remote) {
+                                  // Unsigned subtraction keeps this correct when millis() wraps.
+                                  return now - remote.last_seen >= REMOTE_EXPIRY_MS;
+                                }),
+                 remotes_.end());
+  if (remotes_.size() != previous_size)
+    publish_diagnostic_();
+}
+
 void ToshibaAbClimate::set_runtime_parity_(uart::UARTParityOptions parity) {
 #ifdef USE_ESP8266
   if (hardware_uart_rx_pin_ == 13 && boot_ms_ != 0) {
@@ -412,8 +443,30 @@ void ToshibaAbClimate::diagnostic_(const std::string &message) {
     }
     diagnostic_history_.erase(0, newline + 1);
   }
-  if (diagnostic_sensor_ != nullptr)
-    diagnostic_sensor_->publish_state(diagnostic_history_);
+  publish_diagnostic_();
+}
+
+std::string ToshibaAbClimate::remote_list_() const {
+  std::string list = "Current remotes:";
+  if (remotes_.empty())
+    return list + " none";
+  for (const auto &remote : remotes_)
+    list += " " + hex_(&remote.address, 1);
+  return list;
+}
+
+void ToshibaAbClimate::publish_diagnostic_() {
+  if (diagnostic_sensor_ == nullptr)
+    return;
+
+  // Build this line at publication time instead of adding it to the event
+  // history. Presence refreshes and expiry therefore replace the old snapshot
+  // without manufacturing diagnostic events.
+  std::string state = diagnostic_history_;
+  if (!state.empty())
+    state += '\n';
+  state += remote_list_();
+  diagnostic_sensor_->publish_state(state);
 }
 
 const char *ToshibaAbClimate::protocol_name_(Protocol protocol) {

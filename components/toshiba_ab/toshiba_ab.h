@@ -7,6 +7,7 @@
 #include "esphome/core/component.h"
 #include <array>
 #include <string>
+#include <vector>
 
 namespace esphome {
 namespace toshiba_ab {
@@ -75,6 +76,7 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   static constexpr uint32_t PROTOCOL_SCAN_MS = 20000;
   static constexpr uint32_t DISCOVERY_MS = 3 * PROTOCOL_SCAN_MS;
   static constexpr uint32_t BYTE_TIMEOUT_MS = 25;
+  static constexpr uint32_t REMOTE_EXPIRY_MS = 5 * 60 * 1000;
   static constexpr size_t MAX_FRAME_SIZE = 132;
   static constexpr ProtocolValue MASTER_KEEPALIVE_OPCODE{0x10, 0x00, 0x10};
   // Length is the value carried by each protocol's length byte, rather than
@@ -102,8 +104,12 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   bool is_master_keepalive_(Protocol protocol, const uint8_t *data, size_t size, uint8_t &source) const;
   bool is_remote_ping_(Protocol protocol, const uint8_t *data, size_t size, uint8_t &source) const;
   void consider_keepalive_(Protocol protocol, uint8_t source);
+  void observe_remote_(uint8_t address, uint32_t now);
+  void expire_remotes_(uint32_t now);
   void set_runtime_parity_(uart::UARTParityOptions parity);
   void diagnostic_(const std::string &message);
+  void publish_diagnostic_();
+  std::string remote_list_() const;
   static const char *protocol_name_(Protocol protocol);
   static uint8_t opcode_(Protocol protocol, const uint8_t *data, size_t size);
   static uint8_t frame_length_(Protocol protocol, const uint8_t *data, size_t size);
@@ -125,6 +131,11 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   uint32_t boot_ms_{0};
   uint32_t last_byte_ms_{0};
   uint32_t reader_reset_count_{0};
+  struct RemotePresence {
+    uint8_t address;
+    uint32_t last_seen;
+  };
+  std::vector<RemotePresence> remotes_;
   std::string diagnostic_history_;
   text_sensor::TextSensor *diagnostic_sensor_{nullptr};
   uint8_t hardware_uart_rx_pin_{0xFF};
