@@ -84,6 +84,12 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   // and 0x3A is the data type. A0 master heartbeats carry the two-byte data
   // type 00:8A in the corresponding field.
   static constexpr ProtocolValue MASTER_KEEPALIVE_DATA_TYPE{0x8A, 0x3A, 0x008A};
+  static constexpr ProtocolValue REMOTE_PING_OPCODE{0x15, 0x41, 0x55};
+  static constexpr ProtocolValue REMOTE_PING_LENGTH{0x07, 0x0C, 0x0C};
+  static constexpr ProtocolValue REMOTE_PING_DATA_TYPE{0x0C, 0x5C, 0x009F};
+  // First-generation Estia shares the TU2C wire format but uses data type
+  // 0x0C for its remote ping instead of the air protocol's 0x5C.
+  static constexpr uint16_t TU2C_FIRST_GEN_REMOTE_PING_DATA_TYPE = 0x0C;
 
   void read_byte_(uint8_t byte);
   void read_even_byte_(uint8_t byte);
@@ -94,6 +100,7 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   void check_reader_timeout_(uint32_t now);
   void process_frame_(Protocol protocol, const uint8_t *data, size_t size, bool crc_ok);
   bool is_master_keepalive_(Protocol protocol, const uint8_t *data, size_t size, uint8_t &source) const;
+  bool is_remote_ping_(Protocol protocol, const uint8_t *data, size_t size, uint8_t &source) const;
   void consider_keepalive_(Protocol protocol, uint8_t source);
   void set_runtime_parity_(uart::UARTParityOptions parity);
   void diagnostic_(const std::string &message);
