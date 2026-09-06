@@ -147,15 +147,31 @@ void ToshibaAbClimate::read_even_byte_(uint8_t byte) {
     return;
   }
 
-  // TCC has no sync marker. Keep a sliding candidate so a bad length or CRC
-  // cannot leave the reader permanently aligned to noise/a truncated frame.
-  if (tcc_size_ < tcc_.size())
-    tcc_[tcc_size_++] = byte;
-  else {
+  // TCC starts directly with source/destination bytes; unlike A0 and TU2C it
+  // has no reserved framing prefix that identifies a frame boundary. Keep a
+  // sliding candidate so a bad length or CRC cannot leave the reader
+  // permanently aligned to noise/a truncated frame.
+  if (tcc_size_ >= tcc_.size())
     reset_readers_();
-    tcc_[tcc_size_++] = byte;
+
+  // The first received byte is the source address. Values above 0xA0 are not
+  // valid TCC participants and are most likely line noise; discard the byte,
+  // reset the reader, and keep waiting for a valid source byte.
+  if (tcc_size_ == 0 && byte > 0xA0) {
+    reset_readers_();
+    reader_reset_count_++;
+    return;
   }
+  tcc_[tcc_size_++] = byte;
+
   while (tcc_size_ >= 4) {
+    // Recovery may have shifted a later byte into the source position. Apply
+    // the same rule there and abandon the candidate buffer completely.
+    if (tcc_[0] > 0xA0) {
+      reset_readers_();
+      reader_reset_count_++;
+      break;
+    }
     if (tcc_expected_ == 0)
       tcc_expected_ = static_cast<size_t>(tcc_[3]) + 5;
     if (tcc_[3] < 2 || tcc_expected_ > tcc_.size()) {
@@ -378,6 +394,11 @@ void ToshibaAbClimate::consider_keepalive_(Protocol protocol, uint8_t source) {
   }
   master_address_ = source;
   master_address_confirmed_ = true;
+  // The scan-start message describes a phase that has now ended. Keeping it
+  // in the published state made every later remote-list update look like it
+  // had restarted discovery, even though update_discovery_ is permanently
+  // disabled after protocol confirmation.
+  diagnostic_history_.clear();
   diagnostic_(std::string("Confirmed ") + protocol_name_(protocol) + " master " + hex_(&source, 1));
 }
 
@@ -392,19 +413,22 @@ void ToshibaAbClimate::observe_remote_(uint8_t address, uint32_t now) {
   remotes_.push_back({address, now});
   std::sort(remotes_.begin(), remotes_.end(),
             [](const RemotePresence &left, const RemotePresence &right) { return left.address < right.address; });
-  publish_diagnostic_();
+  diagnostic_(std::string("Remote discovered: ") + hex_(&address, 1));
 }
 
 void ToshibaAbClimate::expire_remotes_(uint32_t now) {
-  const size_t previous_size = remotes_.size();
+  std::vector<uint8_t> expired;
   remotes_.erase(std::remove_if(remotes_.begin(), remotes_.end(),
-                                [now](const RemotePresence &remote) {
+                                [now, &expired](const RemotePresence &remote) {
                                   // Unsigned subtraction keeps this correct when millis() wraps.
-                                  return now - remote.last_seen >= REMOTE_EXPIRY_MS;
+                                  if (now - remote.last_seen < REMOTE_EXPIRY_MS)
+                                    return false;
+                                  expired.push_back(remote.address);
+                                  return true;
                                 }),
                  remotes_.end());
-  if (remotes_.size() != previous_size)
-    publish_diagnostic_();
+  for (uint8_t address : expired)
+    diagnostic_(std::string("Remote removed: ") + hex_(&address, 1));
 }
 
 void ToshibaAbClimate::set_runtime_parity_(uart::UARTParityOptions parity) {
@@ -443,30 +467,8 @@ void ToshibaAbClimate::diagnostic_(const std::string &message) {
     }
     diagnostic_history_.erase(0, newline + 1);
   }
-  publish_diagnostic_();
-}
-
-std::string ToshibaAbClimate::remote_list_() const {
-  std::string list = "Current remotes:";
-  if (remotes_.empty())
-    return list + " none";
-  for (const auto &remote : remotes_)
-    list += " " + hex_(&remote.address, 1);
-  return list;
-}
-
-void ToshibaAbClimate::publish_diagnostic_() {
-  if (diagnostic_sensor_ == nullptr)
-    return;
-
-  // Build this line at publication time instead of adding it to the event
-  // history. Presence refreshes and expiry therefore replace the old snapshot
-  // without manufacturing diagnostic events.
-  std::string state = diagnostic_history_;
-  if (!state.empty())
-    state += '\n';
-  state += remote_list_();
-  diagnostic_sensor_->publish_state(state);
+  if (diagnostic_sensor_ != nullptr)
+    diagnostic_sensor_->publish_state(diagnostic_history_);
 }
 
 const char *ToshibaAbClimate::protocol_name_(Protocol protocol) {
