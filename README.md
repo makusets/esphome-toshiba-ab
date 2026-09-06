@@ -73,6 +73,63 @@ protocols within related product ranges. Confirm that your unit has an AB port,
 then use the selection tables below and the
 [protocol/frame-format reference](docs/frame_formats.md).
 
+## Start here: flash and connect the board
+
+These essential installation steps are deliberately kept visible rather than
+inside a collapsible section. Read the complete [hardware guide](docs/hardware.md)
+before building a board or substituting components.
+
+### 1. Flash ESPHome over USB
+
+1. Start with [`example.yaml`](example.yaml), or copy the minimal configuration
+   from the air-to-air/ESTIA section below. Add your normal ESPHome Wi-Fi, API,
+   OTA and secrets settings.
+2. Select the UART pins for your board: v3.2 uses TX `GPIO12` and RX `GPIO13`;
+   v3 uses TX `GPIO10` and RX `GPIO13`; v1 uses TX `GPIO15` and RX `GPIO13`;
+   D1 mini uses TX `D8` and RX `D7`. Also select the parity and `frame_format`
+   required by your AC system in the tables below.
+3. **Leave the AC's A/B wires disconnected.** With all power removed, put the
+   board's power-selection jumper/switch (if fitted) in the **USB** position,
+   then attach it to the computer with a data-capable USB cable.
+4. In the ESPHome dashboard, open the device and choose **Install → Plug into
+   this computer**, or run `esphome run your-device.yaml` from the ESPHome CLI
+   and select the USB serial port. Follow ESPHome's
+   [first-device connection guide](https://esphome.io/guides/physical_device_connection/)
+   if the serial device is not detected.
+5. For v3.2, if flashing does not start, disconnect USB, hold **BOOT**, reconnect
+   USB while continuing to hold **BOOT**, and retry the installation. When the
+   upload finishes, confirm that the device boots, joins Wi-Fi and appears in
+   ESPHome/Home Assistant. Later firmware updates can be installed over Wi-Fi.
+
+### 2. Connect the board to the AC system
+
+> **Electrical safety:** completely isolate the HVAC system at the distribution
+> board before opening the wired controller or indoor unit. Hazardous voltages
+> may be present nearby. Never connect the A/B bus directly to ESP UART pins.
+
+1. Disconnect USB and switch off/isolate the complete HVAC system.
+2. Remove the wired controller cover and locate its two **A/B remote-bus**
+   terminals (or use the indoor unit's documented A/B controller terminals).
+   Loosen the terminal screws without removing the existing controller wires.
+3. Run a two-core cable from those A and B terminals to the board's A and B
+   screw terminals. The v1 board is polarity-sensitive, so match A to A and B
+   to B; v3 and v3.2 accept either polarity.
+4. With both USB and the AC still disconnected, move the board's power selector
+   (if fitted) to **AB**. Never move the selector while either power source is
+   connected.
+5. Check the wiring, refit the controller cover, restore HVAC power, and inspect
+   the ESPHome logs for valid frames and a connected state before sending any
+   commands.
+
+The board is connected **in parallel** with the wired controller; it does not
+replace or interrupt the existing A/B pair. Autonomous operation without a wall
+controller is an advanced option documented in
+[`complete_example.yaml`](complete_example.yaml).
+
+The A/B screws on a typical wired-controller PCB look like this:
+
+![A/B terminals on the back of a Toshiba wired controller](https://github.com/issalig/toshiba_air_cond/blob/master/pcb/remote_back_pcb.jpg?raw=true)
+
 <details>
 <summary><strong>Hardware design, construction, installation and case</strong></summary>
 

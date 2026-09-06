@@ -42,7 +42,12 @@ sensor, or another ESPHome-compatible I²C device.
 3. Fit any through-hole capacitors or modules omitted by the assembly service.
 4. For the first ESPHome flash, select **USB** power and connect USB. On v3.2,
    hold **BOOT** while applying USB power to enter flashing mode if necessary.
-5. After the initial flash, normal updates can be installed over the air.
+5. In the ESPHome dashboard choose **Install → Plug into this computer**, or run
+   `esphome run your-device.yaml` and select the USB serial port. See ESPHome's
+   [first-device connection guide](https://esphome.io/guides/physical_device_connection/)
+   for USB driver and browser-installation details.
+6. Confirm that the board boots and joins Wi-Fi. After the initial flash, normal
+   updates can be installed over the air.
 
 Never change the power selector while the board is powered. Disconnect both USB
 and the AB line before moving the jumper or switch.
@@ -55,9 +60,10 @@ and the AB line before moving the jumper or switch.
 1. Flash and validate the ESPHome board before connecting the AB line.
 2. Completely isolate power to the HVAC system.
 3. Remove the wired controller cover and loosen its A/B terminal screws, or use
-   the unit's documented AB connection point.
-4. Wire A and B to the PCB. v1 is polarity-sensitive; v3 and v3.2 can be connected
-   either way.
+   the unit's documented AB connection point. Leave the controller's existing
+   wires in place: the interface board connects in parallel.
+4. Wire A and B to the PCB. v1 is polarity-sensitive (A to A and B to B); v3 and
+   v3.2 can be connected either way.
 5. With USB disconnected, select **AB** power on boards that have a selector.
 6. Reassemble the controller, restore HVAC power and inspect ESPHome logs for
    valid frames before sending commands.
