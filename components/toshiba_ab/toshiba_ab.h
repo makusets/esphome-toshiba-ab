@@ -108,8 +108,6 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   void expire_remotes_(uint32_t now);
   void set_runtime_parity_(uart::UARTParityOptions parity);
   void diagnostic_(const std::string &message);
-  void publish_diagnostic_();
-  std::string remote_list_() const;
   static const char *protocol_name_(Protocol protocol);
   static uint8_t opcode_(Protocol protocol, const uint8_t *data, size_t size);
   static uint8_t frame_length_(Protocol protocol, const uint8_t *data, size_t size);

@@ -89,15 +89,30 @@ and then drains all currently available UART bytes into the active reader.
 
 #### TCC
 
-TCC has no start marker, so the reader maintains a sliding candidate buffer.
-Once four bytes are available, byte 3 gives the payload length and the expected
-complete buffer size is `length + 5`. The length must be at least 2 and the
-complete frame must fit in the 132-byte buffer. The final byte is compared with
-the XOR of all prior frame bytes.
+TCC begins immediately with `SRC:DST:OPCODE:LEN`; it has no reserved byte or
+byte sequence whose only framing purpose is to announce "a frame starts here."
+In other words, source address `0x40` in a captured frame is data, not a sync
+marker, and another `0x40` could legally occur elsewhere in a frame. The reader
+therefore cannot jump directly to a known boundary after corruption and instead
+maintains a sliding candidate buffer. Once four bytes are available, byte 3
+gives the payload length and the expected complete buffer size is `length + 5`.
+The length must be at least 2 and the complete frame must fit in the 132-byte
+buffer. The final byte is compared with the XOR of all prior frame bytes.
 
 - Valid candidate: process it and remove the complete frame from the buffer.
 - Invalid length or checksum: discard only the oldest byte, increment the
   resynchronization count, and evaluate the shifted candidate.
+
+When the reader is waiting for the first byte of a new frame, that byte is the
+source address. A value above `0xA0` cannot identify a valid TCC participant and
+is treated as probable line noise: the byte is discarded immediately, reader
+state is reset, and collection remains at the source-byte position. The filter
+therefore does not wait for the rest of a noise-derived candidate, and it does
+not reject values above `0xA0` while they occupy payload positions in a frame
+whose source was already accepted. If checksum recovery shifts a byte into the
+source position and that byte is invalid, the accumulated candidate buffer is
+reset by the same rule. The filter applies both during automatic TCC discovery
+and while TCC is explicitly selected.
 
 Discarding one byte rather than the entire buffer allows the reader to recover
 when noise or a truncated frame appears immediately before a valid frame.
@@ -108,14 +123,25 @@ The A0 reader waits for the unambiguous `A0:00` wrapper. Byte 3 contains the bod
 length, making the complete size `length + 6` (wrapper, type, length, body, and
 two CRC bytes). Sizes below 8 or above 132 are rejected. The last two bytes are
 read as a big-endian received CRC and compared with CRC-16/MCRF4XX calculated
-over every preceding byte.
+over every preceding byte. After either a valid or checksum-invalid complete
+candidate, the reader discards that whole candidate and waits for the next
+`A0:00` wrapper; it does not reinterpret each overlapping suffix as a frame.
 
 #### TU2C
 
 The TU2C reader waits for `F0:F0`. Byte 2 contains the total frame size,
 including both `F0` bytes and the final `A0`. A valid size is 7–132 bytes. The
 penultimate byte must equal the 8-bit sum of bytes from the length byte through
-the byte before the checksum, and the last byte must be `A0`.
+the byte before the checksum, and the last byte must be `A0`. As with A0, after
+a complete candidate the reader resets to searching for the next `F0:F0`
+prefix rather than sliding one byte at a time through the failed candidate.
+
+Consequently, the deterministic cascade seen in the TCC log cannot be produced
+by the A0 or TU2C recovery paths: one checksum-invalid candidate produces one
+failure report. Multiple failures are still possible when multiple frames are
+actually damaged, or when corrupted/noisy input contains another apparent
+wrapper and forms a second complete candidate. Those are distinct candidates,
+not the overlapping suffixes responsible for the TCC cascade.
 
 For every protocol, a partial wrapper or frame is discarded if no next byte is
 received for more than 25 ms. Switching scan protocols also resets every reader
@@ -152,12 +178,12 @@ logging pipeline identifies these existing remote-controller pings:
 
 All of these frames are addressed to the master. Classification therefore
 requires that the frame destination equal the confirmed master address. The
-diagnostic sensor always ends with a `Current remotes:` snapshot. A valid ping
-adds or refreshes its source address, and an address is removed after five
-minutes without another ping. The snapshot is replaced in place rather than
-added to diagnostic history, so routine presence changes do not displace useful
-discovery events. The addresses do not yet influence the configured ESP
-address. As with master keepalive identification, encoded
+component keeps a live remote-address inventory internally. A valid ping adds
+or refreshes its source address, and an address is removed after five minutes
+without another ping. The diagnostic history records `Remote discovered:` and
+`Remote removed:` events only when membership changes; routine presence
+refreshes do not republish a current-address snapshot. The addresses do not yet
+influence the configured ESP address. As with master keepalive identification, encoded
 lengths, opcodes, and data types are held in protocol-value constants and
 compared through the common semantic field helpers rather than at raw offsets.
 
