@@ -42,7 +42,7 @@ Status meanings:
 | Automatic protocol discovery | Done | Scans TCC, A0, and TU2C for 20 seconds each and confirms a protocol only from a checksum-valid master keepalive. |
 | Runtime UART parity selection | Partial | Selects even parity for TCC/A0 and no parity for TU2C. Includes the existing ESP8266 UART0 GPIO13 swap path; broader hardware validation is still required. |
 | Master-address discovery and validation | Done | Learns the source from the first valid master keepalive or checks it against an explicitly configured address. |
-| Existing remote discovery | Partial | After protocol and master confirmation, labels known checksum-valid remote ping signatures in the normal frame log. Address assignment and a persistent inventory are not implemented yet. |
+| Existing remote discovery | Partial | After protocol and master confirmation, known checksum-valid remote pings maintain a live address inventory. Addresses expire after five minutes without a ping; ESP address assignment is not implemented yet. |
 | Frame logging | Done | Logs every complete candidate, highlights addresses and command/type fields, and marks checksum failures. |
 | Diagnostic history | Done | Publishes a newline-separated, de-duplicated event history capped at 255 characters. |
 | Manual rediscovery | Done | The diagnostic reset button clears discovery state, reader state, counters, and history, then restarts scanning. |
@@ -151,10 +151,13 @@ logging pipeline identifies these existing remote-controller pings:
 | A0 demand interface | Length `0x0C`, opcode `0x55`, data type `00:9F` | `remote ping 0xNN` |
 
 All of these frames are addressed to the master. Classification therefore
-requires that the frame destination equal the confirmed master address. At
-this stage presence is deliberately observable only through
-the existing debug frame log; addresses are not stored and do not yet influence
-the configured ESP address. As with master keepalive identification, encoded
+requires that the frame destination equal the confirmed master address. The
+diagnostic sensor always ends with a `Current remotes:` snapshot. A valid ping
+adds or refreshes its source address, and an address is removed after five
+minutes without another ping. The snapshot is replaced in place rather than
+added to diagnostic history, so routine presence changes do not displace useful
+discovery events. The addresses do not yet influence the configured ESP
+address. As with master keepalive identification, encoded
 lengths, opcodes, and data types are held in protocol-value constants and
 compared through the common semantic field helpers rather than at raw offsets.
 
