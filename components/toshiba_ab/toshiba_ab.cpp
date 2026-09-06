@@ -13,6 +13,9 @@ static const char *const TAG = "toshiba_ab";
 constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_OPCODE;
 constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_LENGTH;
 constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_DATA_TYPE;
+constexpr ProtocolValue ToshibaAbClimate::REMOTE_PING_OPCODE;
+constexpr ProtocolValue ToshibaAbClimate::REMOTE_PING_LENGTH;
+constexpr ProtocolValue ToshibaAbClimate::REMOTE_PING_DATA_TYPE;
 
 ToshibaAbThermostat::ToshibaAbThermostat(ToshibaAbClimate *parent, WaterCircuit circuit)
     : parent_(parent), circuit_(circuit) {
@@ -265,9 +268,17 @@ void ToshibaAbClimate::check_reader_timeout_(uint32_t now) {
 void ToshibaAbClimate::process_frame_(Protocol protocol, const uint8_t *data, size_t size, bool crc_ok) {
   uint8_t source = 0;
   const bool master_keepalive = crc_ok && is_master_keepalive_(protocol, data, size, source);
-  const char *description = master_keepalive ? "master keepalive" : (crc_ok ? "" : "CRC failed");
+  const bool remote_ping = crc_ok && !master_keepalive && is_remote_ping_(protocol, data, size, source);
+  std::string description;
+  if (!crc_ok) {
+    description = "CRC failed";
+  } else if (master_keepalive) {
+    description = "master keepalive " + hex_(&source, 1);
+  } else if (remote_ping) {
+    description = "remote ping " + hex_(&source, 1);
+  }
   ESP_LOGD(TAG, "RX %s: %s [%s%s%s]", protocol_name_(protocol), colored_hex_(protocol, data, size, crc_ok).c_str(),
-           ESPHOME_LOG_COLOR(ESPHOME_LOG_COLOR_GREEN), description, ESPHOME_LOG_RESET_COLOR);
+           ESPHOME_LOG_COLOR(ESPHOME_LOG_COLOR_GREEN), description.c_str(), ESPHOME_LOG_RESET_COLOR);
   if (!crc_ok)
     return;
   if (master_keepalive)
@@ -305,8 +316,42 @@ bool ToshibaAbClimate::is_master_keepalive_(Protocol protocol, const uint8_t *da
 
   // The first master keepalive establishes the source address. Once discovery
   // has completed, do not treat traffic from another participant as a master
-  // keepalive; remote keepalives will be handled separately.
+  // keepalive. Remote pings have separate opcodes and signatures.
   return signature_matches && (!protocol_confirmed_ || source == master_address_);
+}
+
+bool ToshibaAbClimate::is_remote_ping_(Protocol protocol, const uint8_t *data, size_t size, uint8_t &source) const {
+  if (!protocol_confirmed_ || !master_address_confirmed_)
+    return false;
+
+  uint8_t destination = 0;
+  switch (protocol) {
+    case Protocol::TCC:
+      source = size > 0 ? data[0] : 0;
+      destination = size > 1 ? data[1] : 0;
+      break;
+    case Protocol::TU2C:
+      source = size > 3 ? data[3] : 0;
+      destination = size > 4 ? data[4] : 0;
+      break;
+    case Protocol::A0:
+      source = size > 6 ? data[6] : 0;
+      destination = size > 8 ? data[8] : 0;
+      break;
+    default:
+      return false;
+  }
+
+  // Remote pings are requests sent to the master. Do not identify traffic for
+  // another indoor unit as a remote attached to this one.
+  if (destination != master_address_ || source == master_address_)
+    return false;
+
+  const uint16_t data_type = data_type_(protocol, data, size);
+  const bool data_type_matches = data_type == REMOTE_PING_DATA_TYPE.for_protocol(protocol) ||
+                                 (protocol == Protocol::TU2C && data_type == TU2C_FIRST_GEN_REMOTE_PING_DATA_TYPE);
+  return frame_length_(protocol, data, size) == REMOTE_PING_LENGTH.for_protocol(protocol) &&
+         opcode_(protocol, data, size) == REMOTE_PING_OPCODE.for_protocol(protocol) && data_type_matches;
 }
 
 void ToshibaAbClimate::consider_keepalive_(Protocol protocol, uint8_t source) {

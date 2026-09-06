@@ -42,6 +42,7 @@ Status meanings:
 | Automatic protocol discovery | Done | Scans TCC, A0, and TU2C for 20 seconds each and confirms a protocol only from a checksum-valid master keepalive. |
 | Runtime UART parity selection | Partial | Selects even parity for TCC/A0 and no parity for TU2C. Includes the existing ESP8266 UART0 GPIO13 swap path; broader hardware validation is still required. |
 | Master-address discovery and validation | Done | Learns the source from the first valid master keepalive or checks it against an explicitly configured address. |
+| Existing remote discovery | Partial | After protocol and master confirmation, labels known checksum-valid remote ping signatures in the normal frame log. Address assignment and a persistent inventory are not implemented yet. |
 | Frame logging | Done | Logs every complete candidate, highlights addresses and command/type fields, and marks checksum failures. |
 | Diagnostic history | Done | Publishes a newline-separated, de-duplicated event history capped at 255 characters. |
 | Manual rediscovery | Done | The diagnostic reset button clears discovery state, reader state, counters, and history, then restarts scanning. |
@@ -137,9 +138,25 @@ wire offsets and magic values throughout discovery. The exact signature also
 prevents an arbitrary TCC frame with opcode `0x10` from being mistaken for the
 master keepalive.
 
-After confirmation, a matching signature from a different source is not
-treated as the master keepalive. This preserves the confirmed master identity
-and leaves room for separate remote-controller keepalive handling later.
+Master keepalives and remote pings remain separate frame types: they use
+different opcodes and signatures within each protocol and are recognized by
+separate predicates. Once both protocol and master are confirmed, the same
+logging pipeline identifies these existing remote-controller pings:
+
+| Protocol / system | Remote ping signature | Log description |
+| --- | --- | --- |
+| TCC | Length `0x07`, opcode `0x15`, payload prefix `08:0C:81` | `remote ping 0xNN` |
+| TU2C air | Length `0x0C`, payload prefix `41:5C` | `remote ping 0xNN` |
+| TU2C first-generation Estia | Length `0x0C`, payload prefix `E0:41:0C` | `remote ping 0xNN` |
+| A0 demand interface | Length `0x0C`, opcode `0x55`, data type `00:9F` | `remote ping 0xNN` |
+
+All of these frames are addressed to the master. Classification therefore
+requires that the frame destination equal the confirmed master address. At
+this stage presence is deliberately observable only through
+the existing debug frame log; addresses are not stored and do not yet influence
+the configured ESP address. As with master keepalive identification, encoded
+lengths, opcodes, and data types are held in protocol-value constants and
+compared through the common semantic field helpers rather than at raw offsets.
 
 ### 5. Confirming protocol and master
 
