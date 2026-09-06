@@ -81,7 +81,6 @@ void ToshibaAbClimate::reset() {
   discovery_finished_ = false;
   reader_reset_count_ = 0;
   remotes_.clear();
-  diagnostic_history_.clear();
   select_scan_protocol_(protocol_setting_ == Protocol::AUTO ? Protocol::TCC : protocol_setting_);
   diagnostic_(protocol_setting_ == Protocol::AUTO
                   ? "Reset: scanning TCC master keepalives (0-20s)"
@@ -377,9 +376,7 @@ bool ToshibaAbClimate::is_remote_ping_(Protocol protocol, const uint8_t *data, s
 
 void ToshibaAbClimate::consider_keepalive_(Protocol protocol, uint8_t source) {
   // Keepalives continue for the lifetime of the bus, but confirmation is a
-  // discovery transition rather than a periodic event. In particular, do not
-  // clear and rebuild the diagnostic history for every keepalive after both
-  // the protocol and master have already been confirmed.
+  // discovery transition rather than a periodic event.
   if (protocol_confirmed_ && master_address_confirmed_)
     return;
 
@@ -401,11 +398,6 @@ void ToshibaAbClimate::consider_keepalive_(Protocol protocol, uint8_t source) {
   }
   master_address_ = source;
   master_address_confirmed_ = true;
-  // The scan-start message describes a phase that has now ended. Keeping it
-  // in the published state made every later remote-list update look like it
-  // had restarted discovery, even though update_discovery_ is permanently
-  // disabled after protocol confirmation.
-  diagnostic_history_.clear();
   diagnostic_(std::string("Confirmed ") + protocol_name_(protocol) + " master " + hex_(&source, 1));
 }
 
@@ -453,29 +445,9 @@ void ToshibaAbClimate::set_runtime_parity_(uart::UARTParityOptions parity) {
 }
 
 void ToshibaAbClimate::diagnostic_(const std::string &message) {
-  // The diagnostic sensor contains a short event history. Periodic frames can
-  // produce the same event repeatedly, but consecutive copies carry no extra
-  // information and would crowd useful discovery messages out of the sensor.
-  const size_t last_message = diagnostic_history_.find_last_of('\n');
-  const size_t last_message_start = last_message == std::string::npos ? 0 : last_message + 1;
-  if (!diagnostic_history_.empty() && diagnostic_history_.size() - last_message_start == message.size() &&
-      diagnostic_history_.compare(last_message_start, message.size(), message) == 0)
-    return;
-
   ESP_LOGI(TAG, "%s", message.c_str());
-  if (!diagnostic_history_.empty())
-    diagnostic_history_ += '\n';
-  diagnostic_history_ += message;
-  while (diagnostic_history_.size() > 255) {
-    const size_t newline = diagnostic_history_.find('\n');
-    if (newline == std::string::npos) {
-      diagnostic_history_.erase(0, diagnostic_history_.size() - 255);
-      break;
-    }
-    diagnostic_history_.erase(0, newline + 1);
-  }
   if (diagnostic_sensor_ != nullptr)
-    diagnostic_sensor_->publish_state(diagnostic_history_);
+    diagnostic_sensor_->publish_state(message);
 }
 
 const char *ToshibaAbClimate::protocol_name_(Protocol protocol) {
