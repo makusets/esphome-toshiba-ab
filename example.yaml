@@ -38,3 +38,9 @@ climate:
     esp_address: auto
     format: auto
     system_type: Air
+
+    # Water systems expose DHW and Zone 1 by default. Set either to false to
+    # hide it, or enable the optional second heating/cooling circuit:
+    # dhw: true
+    # zone_1: true
+    # zone_2: false

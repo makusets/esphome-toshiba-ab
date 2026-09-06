@@ -20,17 +20,22 @@ toshiba_ab_ns = cg.esphome_ns.namespace("toshiba_ab")
 ToshibaAbClimate = toshiba_ab_ns.class_(
     "ToshibaAbClimate", climate.Climate, uart.UARTDevice, cg.Component
 )
+ToshibaAbThermostat = toshiba_ab_ns.class_("ToshibaAbThermostat", climate.Climate)
 ResetButton = toshiba_ab_ns.class_("ResetButton", button.Button)
 DiagnosticTextSensor = toshiba_ab_ns.class_(
     "DiagnosticTextSensor", text_sensor.TextSensor
 )
 Protocol = toshiba_ab_ns.enum("Protocol", is_class=True)
 SystemType = toshiba_ab_ns.enum("SystemType", is_class=True)
+WaterCircuit = toshiba_ab_ns.enum("WaterCircuit", is_class=True)
 
 CONF_MASTER_ADDRESS = "master_address"
 CONF_ESP_ADDRESS = "esp_address"
 CONF_FORMAT = "format"
 CONF_SYSTEM_TYPE = "system_type"
+CONF_DHW = "dhw"
+CONF_ZONE_1 = "zone_1"
+CONF_ZONE_2 = "zone_2"
 CONF_DIAGNOSTIC = "diagnostic"
 CONF_HARDWARE_UART_RX_PIN = "hardware_uart_rx_pin"
 CONF_RESET_BUTTON = "reset_button"
@@ -50,6 +55,24 @@ FORMATS = {
     "a0": Protocol.A0,
 }
 SYSTEM_TYPES = {"air": SystemType.AIR, "water": SystemType.WATER}
+WATER_CIRCUITS = {
+    CONF_DHW: WaterCircuit.DHW,
+    CONF_ZONE_1: WaterCircuit.ZONE_1,
+    CONF_ZONE_2: WaterCircuit.ZONE_2,
+}
+
+
+def _water_thermostat(default_name):
+    schema = climate.climate_schema(ToshibaAbThermostat)
+
+    def validate(value):
+        if value is False:
+            return False
+        if value is True:
+            value = {CONF_NAME: default_name}
+        return schema(value)
+
+    return validate
 
 CONFIG_SCHEMA = (
     climate._CLIMATE_SCHEMA.extend(
@@ -68,9 +91,12 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_MASTER_ADDRESS, default="auto"): _address,
             cv.Optional(CONF_ESP_ADDRESS, default="auto"): _address,
             cv.Optional(CONF_FORMAT, default="auto"): cv.enum(FORMATS, lower=True),
-            cv.Optional(CONF_SYSTEM_TYPE, default="Air"): cv.enum(
-                SYSTEM_TYPES, lower=True
+            cv.Optional(CONF_SYSTEM_TYPE, default="air"): cv.one_of(
+                *SYSTEM_TYPES, lower=True
             ),
+            cv.Optional(CONF_DHW, default=True): _water_thermostat("DHW"),
+            cv.Optional(CONF_ZONE_1, default=True): _water_thermostat("Zone 1"),
+            cv.Optional(CONF_ZONE_2, default=False): _water_thermostat("Zone 2"),
         }
     )
     .extend(uart.UART_DEVICE_SCHEMA)
@@ -114,12 +140,23 @@ FINAL_VALIDATE_SCHEMA = _validate_uart
 async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
-    await climate.register_climate(var, config)
+    if config[CONF_SYSTEM_TYPE] == "air":
+        await climate.register_climate(var, config)
     await uart.register_uart_device(var, config)
     cg.add(var.set_master_address(config[CONF_MASTER_ADDRESS]))
     cg.add(var.set_esp_address(config[CONF_ESP_ADDRESS]))
     cg.add(var.set_protocol(config[CONF_FORMAT]))
-    cg.add(var.set_system_type(config[CONF_SYSTEM_TYPE]))
+    cg.add(var.set_system_type(SYSTEM_TYPES[config[CONF_SYSTEM_TYPE]]))
+
+    if config[CONF_SYSTEM_TYPE] == "water":
+        for key, circuit in WATER_CIRCUITS.items():
+            thermostat_config = config[key]
+            if thermostat_config is False:
+                continue
+            thermostat = cg.new_Pvariable(
+                thermostat_config[CONF_ID], var, circuit
+            )
+            await climate.register_climate(thermostat, thermostat_config)
     if CONF_HARDWARE_UART_RX_PIN in config:
         cg.add(var.set_hardware_uart_rx_pin(config[CONF_HARDWARE_UART_RX_PIN]))
 

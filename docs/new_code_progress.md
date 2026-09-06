@@ -160,9 +160,11 @@ behavior and should be revisited if address mismatch recovery is desired.
 ### 6. Climate behavior during this phase
 
 For an air system, the entity advertises the intended modes and controls so API
-clients can retain the eventual entity schema while development continues. For
-a water system, only off mode is currently advertised. The visual temperature
-range is 16–32 °C in 0.5 °C increments for both.
+clients can retain the eventual entity schema while development continues. A
+water system creates separate `DHW` and `Zone 1` thermostats by default, with an
+optional `Zone 2` thermostat. DHW advertises off/heat and a 45–60 °C range;
+both zones advertise off/heat/cool and a 20–65 °C range. All three water
+thermostats offer normal, boost, and eco presets and use 0.5 °C steps.
 
 These capabilities must not be interpreted as functional support yet:
 
@@ -176,6 +178,9 @@ These capabilities must not be interpreted as functional support yet:
 | --- | --- | --- |
 | `format` | `auto` | Select `auto`, `tcc`, `a0`, or `tu2c`. |
 | `system_type` | `air` | Select the currently advertised air or water climate traits. |
+| `dhw` | `true` | Create the water system's domestic-hot-water thermostat; set to `false` to omit it. |
+| `zone_1` | `true` | Create the water system's first heating/cooling thermostat; set to `false` to omit it. |
+| `zone_2` | `false` | Create a second heating/cooling thermostat when enabled. |
 | `master_address` | `auto` (`0xAA` internally) | Learn the master or require an explicit 8-bit address. |
 | `esp_address` | `auto` (`0xAA` internally) | Stores the future local address; it is not yet used to transmit. |
 | `diagnostic` | `Toshiba AB Diagnostic` | Text sensor containing recent discovery events. |

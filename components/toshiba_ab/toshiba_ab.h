@@ -13,8 +13,20 @@ namespace toshiba_ab {
 
 enum class Protocol : uint8_t { AUTO, TCC, TU2C, A0 };
 enum class SystemType : uint8_t { AIR, WATER };
+enum class WaterCircuit : uint8_t { DHW, ZONE_1, ZONE_2 };
 
 class ToshibaAbClimate;
+
+class ToshibaAbThermostat : public climate::Climate {
+ public:
+  ToshibaAbThermostat(ToshibaAbClimate *parent, WaterCircuit circuit);
+  climate::ClimateTraits traits() override;
+  void control(const climate::ClimateCall &call) override;
+
+ protected:
+  ToshibaAbClimate *parent_;
+  WaterCircuit circuit_;
+};
 
 class ResetButton : public button::Button {
  public:
@@ -49,6 +61,7 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   climate::ClimateTraits traits() override;
   void control(const climate::ClimateCall &call) override;
   void reset();
+  void control_water(WaterCircuit circuit, const climate::ClimateCall &call);
 
   void set_master_address(uint8_t address) { master_setting_ = address; }
   void set_esp_address(uint8_t address) { esp_address_ = address; }
