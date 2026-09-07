@@ -3174,40 +3174,19 @@ void ToshibaAbClimate::control(const climate::ClimateCall &call) {
 
   if (this->data_reader.frame_format() == FrameFormat::A0) {
     if (call.get_mode().has_value()) {
-      ESP_LOGD(TAG, "Control: mode=%s", LOG_STR_ARG(climate::climate_mode_to_string(*call.get_mode())));
+      // The climate card's own mode dropdown is no longer the supported way
+      // to change Off/Heat/Cool on this device — that's now the dedicated
+      // estia_mode_select entity (see set_estia_mode() and
+      // ToshibaAbEstiaModeSelect::control()), so that changing the zone
+      // setpoints and changing the mode both live outside the climate card.
+      // Ignore the request here; the next status broadcast will simply
+      // re-publish the real mode, snapping the card's dropdown back.
+      ESP_LOGW(TAG, "Mode change via the climate entity is no longer supported — use the "
+                    "estia_mode_select entity instead (requested: %s)",
+               LOG_STR_ARG(climate::climate_mode_to_string(*call.get_mode())));
     }
     if (call.get_target_temperature().has_value()) {
       ESP_LOGD(TAG, "Control: setpoint zone 1=%.1f°C", *call.get_target_temperature());
-    }
-    if (call.get_mode().has_value()) {
-      auto new_mode = call.get_mode().value();
-      if (new_mode == climate::CLIMATE_MODE_OFF) {
-        this->send_estia_power(false);
-      } else if (this->mode == climate::CLIMATE_MODE_OFF) {
-        if (new_mode != estia_last_active_mode_) {
-          // Mode differs: send mode command first, power on after ACK
-          // Retry mode command up to 3 times if no ACK received
-          estia_pending_mode_cmd_ = (new_mode == climate::CLIMATE_MODE_COOL) ? 0x01 : 0x02;
-          estia_power_on_pending_ = true;
-          estia_mode_retries_ = 0;
-          this->send_estia_mode(estia_pending_mode_cmd_);
-          this->set_timeout("estia_poweron", 3000, [this]() {
-            this->estia_mode_retry_timeout_();
-          });
-        } else {
-          // Same mode: just power on
-          this->send_estia_power(true);
-        }
-      } else {
-        // Already on → switch mode (HEAT↔COOL)
-        if (new_mode == climate::CLIMATE_MODE_HEAT) {
-          this->send_estia_mode(0x02);
-        } else if (new_mode == climate::CLIMATE_MODE_COOL) {
-          this->send_estia_mode(0x01);
-        }
-      }
-    }
-    if (call.get_target_temperature().has_value()) {
       float temp = call.get_target_temperature().value();
       this->send_estia_setpoint(temp);
     }
@@ -3521,6 +3500,38 @@ void ToshibaAbClimate::send_estia_mode(uint8_t mode_cmd) {
   log_raw_data("Estia TX", frame, sizeof(frame));
 
   this->send_estia_tracked_(frame, sizeof(frame), 0x03C0);  // ACK: 00:A1:03:C0
+}
+
+void ToshibaAbClimate::set_estia_mode(climate::ClimateMode new_mode) {
+  // Moved here, unchanged, from what used to be the A0 branch of control()'s
+  // mode handling — the climate card's own mode dropdown now ignores mode
+  // changes (see control()); this is the logic the new estia_mode_select
+  // entity calls instead.
+  if (new_mode == climate::CLIMATE_MODE_OFF) {
+    this->send_estia_power(false);
+  } else if (this->mode == climate::CLIMATE_MODE_OFF) {
+    if (new_mode != estia_last_active_mode_) {
+      // Mode differs: send mode command first, power on after ACK
+      // Retry mode command up to 3 times if no ACK received
+      estia_pending_mode_cmd_ = (new_mode == climate::CLIMATE_MODE_COOL) ? 0x01 : 0x02;
+      estia_power_on_pending_ = true;
+      estia_mode_retries_ = 0;
+      this->send_estia_mode(estia_pending_mode_cmd_);
+      this->set_timeout("estia_poweron", 3000, [this]() {
+        this->estia_mode_retry_timeout_();
+      });
+    } else {
+      // Same mode: just power on
+      this->send_estia_power(true);
+    }
+  } else {
+    // Already on → switch mode (HEAT↔COOL)
+    if (new_mode == climate::CLIMATE_MODE_HEAT) {
+      this->send_estia_mode(0x02);
+    } else if (new_mode == climate::CLIMATE_MODE_COOL) {
+      this->send_estia_mode(0x01);
+    }
+  }
 }
 
 void ToshibaAbClimate::estia_mode_retry_timeout_() {
@@ -3919,6 +3930,34 @@ void ToshibaAbEstiaDhwBoostSwitch::write_state(bool state) {
 
 void ToshibaAbEstiaAntibacteriaSwitch::write_state(bool state) {
   this->climate_->send_estia_first_gen_antibacteria(state);
+}
+
+void ToshibaAbEstiaModeSelect::control(const std::string &value) {
+  // Off/Heat/Cool mode switching (dtype 00:41 power + 03:C1... actually the
+  // mode sub-command, see set_estia_mode()) is A0-only; there's no known
+  // first-generation equivalent (first-gen's climate entity models DHW
+  // on/off instead — see FrameFormat::ESTIA handling in control()).
+  if (this->climate_->is_estia_first_gen()) {
+    ESP_LOGW(TAG, "estia_mode_select is only supported on A0-protocol (Estia) systems");
+    return;
+  }
+  climate::ClimateMode new_mode;
+  if (value == "Off") {
+    new_mode = climate::CLIMATE_MODE_OFF;
+  } else if (value == "Cool") {
+    new_mode = climate::CLIMATE_MODE_COOL;
+  } else if (value == "Heat") {
+    new_mode = climate::CLIMATE_MODE_HEAT;
+  } else {
+    ESP_LOGW(TAG, "estia_mode_select: unknown option '%s'", value.c_str());
+    return;
+  }
+  this->climate_->set_estia_mode(new_mode);
+  // No optimistic publish here — the real mode change involves an ACK'd
+  // command (and, from OFF, a mode-then-power-on sequence with its own
+  // retry timer, see set_estia_mode()), so wait for the next status
+  // broadcast to reflect what actually happened, same as the climate
+  // entity's own mode used to.
 }
 
 void ToshibaAbVentSwitch::write_state(bool state) {

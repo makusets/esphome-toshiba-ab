@@ -2,6 +2,7 @@
 
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/climate/climate.h"
+#include "esphome/components/select/select.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/switch/switch.h"
 #include "esphome/components/text_sensor/text_sensor.h"
@@ -940,6 +941,15 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_zone1_switch(switch_::Switch *zone1_switch) { zone1_switch_ = zone1_switch; }
   void set_dhw_boost_switch(switch_::Switch *dhw_boost_switch) { dhw_boost_switch_ = dhw_boost_switch; }
   void set_antibacteria_switch(switch_::Switch *antibacteria_switch) { antibacteria_switch_ = antibacteria_switch; }
+  void set_estia_mode_select(select::Select *estia_mode_select) { estia_mode_select_ = estia_mode_select; }
+  // Off/Heat/Cool mode switching, factored out of control() so the new
+  // estia_mode_select entity can trigger exactly the same logic (power
+  // on/off, mode-before-power-on sequencing with ACK-based retry, HEAT<->COOL
+  // switching while already on) that the climate card's own mode dropdown
+  // used to. The climate card's mode dropdown itself is now ignored for A0
+  // (see control()) — estia_mode_select is the only supported way to change
+  // mode, per user request.
+  void set_estia_mode(climate::ClimateMode new_mode);
 
   void set_failed_crcs_sensor(sensor::Sensor *failed_crcs_sensor) { this->failed_crcs_sensor_ = failed_crcs_sensor; }
   void set_noise_rate_sensor(sensor::Sensor *sensor) { this->noise_rate_sensor_ = sensor; }
@@ -1072,6 +1082,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   switch_::Switch *zone1_switch_{nullptr};
   switch_::Switch *dhw_boost_switch_{nullptr};
   switch_::Switch *antibacteria_switch_{nullptr};
+  select::Select *estia_mode_select_{nullptr};
   sensor::Sensor *failed_crcs_sensor_{nullptr};
   sensor::Sensor *noise_rate_sensor_{nullptr};
   sensor::Sensor *crc_failures_5min_sensor_{nullptr};
@@ -1289,6 +1300,18 @@ class ToshibaAbEstiaAntibacteriaSwitch : public switch_::Switch, public Componen
   ToshibaAbEstiaAntibacteriaSwitch(ToshibaAbClimate *climate) { climate_ = climate; }
  protected:
   void write_state(bool state) override;
+  ToshibaAbClimate *climate_;
+};
+
+// Off/Heat/Cool as a select entity, replacing the climate card's own mode
+// dropdown (which is now ignored for A0 — see ToshibaAbClimate::control()).
+// Options are fixed as "Off"/"Heat"/"Cool" (see climate.py) and mapped
+// straight onto climate::CLIMATE_MODE_OFF/HEAT/COOL.
+class ToshibaAbEstiaModeSelect : public select::Select, public Component {
+ public:
+  ToshibaAbEstiaModeSelect(ToshibaAbClimate *climate) { climate_ = climate; }
+ protected:
+  void control(const std::string &value) override;
   ToshibaAbClimate *climate_;
 };
 

@@ -2,7 +2,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
 import esphome.final_validate as fv
-from esphome.components import climate, uart, binary_sensor, sensor, switch, text_sensor, template
+from esphome.components import climate, uart, binary_sensor, sensor, switch, text_sensor, template, select
 from esphome.const import (
     CONF_ID,
     CONF_NAME,
@@ -30,7 +30,7 @@ from esphome.const import (
 from esphome.core import CORE
 
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["climate", "binary_sensor", "sensor", "switch", "text_sensor"]
+AUTO_LOAD = ["climate", "binary_sensor", "sensor", "switch", "text_sensor", "select"]
 CODEOWNERS = ["@muxa"]
 
 toshiba_ab_ns = cg.esphome_ns.namespace("toshiba_ab")
@@ -77,6 +77,7 @@ CONF_DEMAND_ENABLED = "demand_enabled"
 CONF_ZONE1_SWITCH = "zone1_switch"
 CONF_DHW_BOOST = "dhw_boost"
 CONF_ANTIBACTERIA = "antibacteria"
+CONF_ESTIA_MODE_SELECT = "estia_mode_select"
 CONF_ZONE1_WATER_TEMPERATURE = "zone1_water_temperature"
 CONF_ZONE1_TARGET_TEMPERATURE = "zone1_target_temperature"
 CONF_DHW_CURRENT_TEMPERATURE = "dhw_current_temperature"
@@ -118,6 +119,9 @@ ToshibaAbEstiaDhwBoostSwitch = toshiba_ab_ns.class_(
 )
 ToshibaAbEstiaAntibacteriaSwitch = toshiba_ab_ns.class_(
     "ToshibaAbEstiaAntibacteriaSwitch", switch.Switch, cg.Component
+)
+ToshibaAbEstiaModeSelect = toshiba_ab_ns.class_(
+    "ToshibaAbEstiaModeSelect", select.Select, cg.Component
 )
 
 ToshibaAbOnDataReceivedTrigger = toshiba_ab_ns.class_(
@@ -258,6 +262,16 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
                     }
                 )
             ),
+            key=CONF_NAME,
+        ),
+        # Off/Heat/Cool as a select entity, replacing the climate card's own
+        # mode dropdown (which no longer does anything for A0 — see
+        # control()'s handling in toshiba_ab.cpp). Setpoints are configured
+        # separately via zone1_setpoint/zone2_setpoint/dhw_setpoint, so this
+        # select is the only thing left controlling on/off/heat/cool.
+        # A0-protocol (Estia) only.
+        cv.Optional(CONF_ESTIA_MODE_SELECT): cv.maybe_simple_value(
+            select.select_schema(ToshibaAbEstiaModeSelect),
             key=CONF_NAME,
         ),
         cv.Optional(CONF_ZONE1_WATER_TEMPERATURE): sensor.sensor_schema(
@@ -536,6 +550,11 @@ async def to_code(config):
     if CONF_ANTIBACTERIA in config:
         sw = await switch.new_switch(config[CONF_ANTIBACTERIA], var)
         cg.add(var.set_antibacteria_switch(sw))
+    if CONF_ESTIA_MODE_SELECT in config:
+        sel = await select.new_select(
+            config[CONF_ESTIA_MODE_SELECT], var, options=["Off", "Heat", "Cool"]
+        )
+        cg.add(var.set_estia_mode_select(sel))
 
     if CONF_ON_DATA_RECEIVED in config:
         for on_data_received in config.get(CONF_ON_DATA_RECEIVED, []):
