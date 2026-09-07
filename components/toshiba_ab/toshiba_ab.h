@@ -86,9 +86,9 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   // and 0x3A is the data type. A0 master heartbeats carry the two-byte data
   // type 00:8A in the corresponding field.
   static constexpr ProtocolValue MASTER_KEEPALIVE_DATA_TYPE{0x8A, 0x3A, 0x008A};
-  static constexpr ProtocolValue REMOTE_PING_OPCODE{0x15, 0x41, 0x55};
+  static constexpr ProtocolValue REMOTE_PING_OPCODE{0x15, 0x41, 0x15};
   static constexpr ProtocolValue REMOTE_PING_LENGTH{0x07, 0x0C, 0x0C};
-  static constexpr ProtocolValue REMOTE_PING_DATA_TYPE{0x0C, 0x5C, 0x009F};
+  static constexpr ProtocolValue REMOTE_PING_DATA_TYPE{0x0C, 0x5C, 0x0C81};
   // First-generation Estia shares the TU2C wire format but uses data type
   // 0x0C for its remote ping instead of the air protocol's 0x5C.
   static constexpr uint16_t TU2C_FIRST_GEN_REMOTE_PING_DATA_TYPE = 0x0C;

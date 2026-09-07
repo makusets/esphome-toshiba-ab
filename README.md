@@ -24,10 +24,11 @@ use a 2400 baud, 8N1 UART (`parity: NONE`). See the
 ### May 2026 — ESTIA R32 and protocol improvements
 
 Thanks to [@7tobias](https://github.com/7tobias), Toshiba R32 ESTIA Series 1
-systems are supported. The component can detect the normal TCC-Link, HM and
-ESTIA R32/A0 formats, and address assignment avoids duplicate-address E09
-errors. Thanks to [@mtthidoteu](https://github.com/mtthidoteu), HM-format support
-and hardware UART operation improve compatibility and stability.
+systems are supported. The component can detect the normal TCC-Link, TU2C and
+A0 formats—the A0 format is shared by HM air systems and ESTIA R32—and address
+assignment avoids duplicate-address E09 errors. Thanks to
+[@mtthidoteu](https://github.com/mtthidoteu), HM-system support and hardware UART
+operation improve compatibility and stability.
 
 ### January 2026 — autonomous mode
 

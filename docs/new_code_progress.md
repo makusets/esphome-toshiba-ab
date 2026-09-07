@@ -120,7 +120,7 @@ when noise or a truncated frame appears immediately before a valid frame.
 #### A0
 
 The A0 reader waits for the unambiguous `A0:00` wrapper. Byte 3 contains the body
-length, making the complete size `length + 6` (wrapper, type, length, body, and
+length, making the complete size `length + 6` (wrapper, opcode, length, body, and
 two CRC bytes). Sizes below 8 or above 132 are rejected. The last two bytes are
 read as a big-endian received CRC and compared with CRC-16/MCRF4XX calculated
 over every preceding byte. After either a valid or checksum-invalid complete
@@ -174,7 +174,7 @@ logging pipeline identifies these existing remote-controller pings:
 | TCC | Length `0x07`, opcode `0x15`, payload prefix `08:0C:81` | `remote ping 0xNN` |
 | TU2C air | Length `0x0C`, payload prefix `41:5C` | `remote ping 0xNN` |
 | TU2C first-generation Estia | Length `0x0C`, payload prefix `E0:41:0C` | `remote ping 0xNN` |
-| A0 demand interface | Length `0x0C`, opcode `0x55`, data type `00:9F` | `remote ping 0xNN` |
+| A0 air and water | Length `0x0C`, opcode `0x15`, data type `0C:81` | `remote ping 0xNN` |
 
 All of these frames are addressed to the master. Classification therefore
 requires that the frame destination equal the confirmed master address. The

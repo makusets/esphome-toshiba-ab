@@ -133,7 +133,7 @@ void ToshibaAbClimate::read_even_byte_(uint8_t byte) {
       if (a0_size_ < a0_.size())
         a0_[a0_size_++] = byte;
       if (a0_size_ == 4) {
-        a0_expected_ = static_cast<size_t>(a0_[3]) + 6;  // wrapper, type, length, body, CRC16
+        a0_expected_ = static_cast<size_t>(a0_[3]) + 6;  // wrapper, opcode, length, body, CRC16
         if (a0_expected_ < 8 || a0_expected_ > a0_.size())
           a0_size_ = a0_expected_ = 0;
       }
@@ -321,8 +321,8 @@ bool ToshibaAbClimate::is_master_keepalive_(Protocol protocol, const uint8_t *da
       source = size > 3 ? data[3] : 0;
       break;
     case Protocol::A0:
-      // A0 water and air units use the same type 0x10 keepalive.
-      // Wire layout is A0:00:TYPE:LEN:00:SRC_MODE:SRC:DST_MODE:DST:...
+      // A0 water and air units use the same opcode 0x10 keepalive.
+      // Wire layout is A0:00:OPCODE:LEN:00:SRC_MODE:SRC:DST_MODE:DST:...
       source = size > 6 ? data[6] : 0;
       break;
     default:

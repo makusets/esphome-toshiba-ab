@@ -3,7 +3,8 @@
 This document describes the three wire protocols understood by the current
 component: **TCC**, **TU2C**, and **A0**. `system_type` (`air` or `water`) is not
 a fourth protocol: it describes the equipment using a protocol. In particular,
-first-generation ESTIA water systems use TU2C, while newer ESTIA systems use A0.
+first-generation ESTIA water systems use TU2C, while newer ESTIA systems and
+HM-range air systems use A0.
 
 The implementation is currently identification-only. It collects and checks all
 frames, but identifies only the two frame types documented below: **master
@@ -50,7 +51,7 @@ parity).
 
 ```text
 byte        0    1     2      3    4      5       6      7       8       9        10    ...  N+4  N+5
-field      A0   00   TYPE    LEN   00  SRC_MODE  SRC  DST_MODE  DST  DTYPE_H  DTYPE_L DATA CRC_H CRC_L
+field      A0   00  OPCODE   LEN   00  SRC_MODE  SRC  DST_MODE  DST  DTYPE_H  DTYPE_L DATA CRC_H CRC_L
 ```
 
 The complete frame is `N + 6` bytes. `LEN` counts the bytes after itself and
@@ -96,7 +97,7 @@ the classifier does not restrict a valid remote ping to these ranges.
 | TU2C | `air` | `0x50` | Conventional U-series remote. Additional controllers may occupy nearby addresses. |
 | TU2C | `water` | `0x60`–`0x69` | First-generation ESTIA supports up to ten remote addresses; `0x60` is the usual first remote. |
 | A0 | `air` | `0x40` | Conventional remote, normally represented by the low source byte. |
-| A0 | `water` | `0x40`; `0x41` for the optional demand interface | The currently identified A0 remote-ping signature is the `0x41` 0–10 V demand-interface ping. |
+| A0 | `water` | `0x40` | Conventional remote, using the same A0 remote-ping signature as air systems. |
 
 The ESP's `esp_address` setting also defaults to automatic. Remote discovery
 currently maintains a presence list only; it does not yet select or change the
@@ -112,11 +113,11 @@ is the conjunction of all columns below, not merely an opcode match.
 The first valid master keepalive confirms the protocol and supplies the master
 source address. Air and water use the same signature within each wire protocol.
 
-| Protocol | `system_type` | Encoded length | Opcode/type | Data type | Field-level signature |
+| Protocol | `system_type` | Encoded length | Opcode | Data type | Field-level signature |
 | --- | --- | ---: | ---: | ---: | --- |
 | TCC | `air`, `water` | `0x02` | `OPCODE = 0x10` | `DATA[1] = 0x8A` | `SRC:*:10:02:*:8A:CRC` |
 | TU2C | `air`, `water` | `TOTAL_LEN = 0x0A` | byte 6 `OPCODE = 0x00` | byte 7 `DTYPE = 0x3A` | `F0:F0:0A:SRC:DST:*:00:3A:SUM:A0` |
-| A0 | `air`, `water` | `LEN = 0x07` | `TYPE = 0x10` | `DTYPE = 00:8A` | `A0:00:10:07:00:SRC_MODE:SRC:DST_MODE:DST:00:8A:CRC16` |
+| A0 | `air`, `water` | `LEN = 0x07` | `OPCODE = 0x10` | `DTYPE = 00:8A` | `A0:00:10:07:00:SRC_MODE:SRC:DST_MODE:DST:00:8A:CRC16` |
 
 For TCC, the unspecified first data byte is still covered by the XOR. For TU2C,
 the family byte and destination are not used to distinguish air from water. For
@@ -128,14 +129,14 @@ though discovery records the low source byte.
 Every remote-ping signature additionally requires `DST` to equal the already
 confirmed master and `SRC` to differ from it.
 
-| Protocol | `system_type` | Encoded length | Opcode/type | Data type | Additional signature detail |
+| Protocol | `system_type` | Encoded length | Opcode | Data type | Additional signature detail |
 | --- | --- | ---: | ---: | ---: | --- |
 | TCC | `air` | `0x07` | `OPCODE = 0x15` | `DATA[1] = 0x0C` | Payload begins `08:0C:81`; canonical shape is `SRC:DST:15:07:08:0C:81:...:CRC`. |
 | TCC | `water` | `0x07` | `OPCODE = 0x15` | `DATA[1] = 0x0C` | The current classifier is system-type agnostic; no separate water signature is known. |
 | TU2C | `air` | `TOTAL_LEN = 0x0C` | byte 6 `OPCODE = 0x41` | byte 7 `DTYPE = 0x5C` | Common family byte `C0`: `F0:F0:0C:SRC:DST:C0:41:5C:...:SUM:A0`. |
 | TU2C | `water` | `TOTAL_LEN = 0x0C` | byte 6 `OPCODE = 0x41` | byte 7 `DTYPE = 0x0C` | First-generation ESTIA commonly uses family byte `E0`. |
-| A0 | `air` | `LEN = 0x0C` | `TYPE = 0x55` | `DTYPE = 00:9F` | The current classifier is system-type agnostic; this is primarily the demand-interface signature. |
-| A0 | `water` | `LEN = 0x0C` | `TYPE = 0x55` | `DTYPE = 00:9F` | Identified for the ESTIA 0–10 V demand interface, normally source `0x41`. |
+| A0 | `air` | `LEN = 0x0C` | `OPCODE = 0x15` | `DTYPE = 0C:81` | Air and water use the same remote-ping signature. |
+| A0 | `water` | `LEN = 0x0C` | `OPCODE = 0x15` | `DTYPE = 0C:81` | Air and water use the same remote-ping signature. |
 
 The TCC implementation's decisive comparison is length/opcode/data type; the
 longer `08:0C:81` prefix shown in the table is the canonical observed ping. The
@@ -219,17 +220,15 @@ F0:F0:0C:60:70:E0:41:0C:90:F3:8C:A0
 Remote `0x60` pings master `0x70`; the water-specific data type is `0x0C` and
 `8C` is the additive checksum.
 
-#### A0 — water demand interface (also accepted for A0 air)
+#### A0 — air and water
 
 ```text
-A0:00:55:0C:00:00:41:08:00:00:9F:00:00:00:00:00:64:78
+A0:00:15:0C:00:00:40:08:00:00:0C:81:00:00:48:00:49:E8
 ```
 
-The demand interface source low byte is `0x41`, the master destination is
-encoded as `08:00`, and the type/data-type signature is `55` / `00:9F`.
-`64:78` is the CRC-16. Because the current A0 classifier does not branch on
-`system_type`, the same complete example is also recognized for an A0 air
-configuration.
+Remote `0x40` pings master `0x00`, encoded as `08:00`, with opcode `0x15` and
+data type `0C:81`. `49:E8` is the CRC-16. Air and water use this same remote-ping
+signature.
 
 ## Configuration names
 
