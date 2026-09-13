@@ -980,7 +980,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_remote_error_binary_sensor(binary_sensor::BinarySensor *sensor) { remote_error_binary_sensor_ = sensor; }
   void set_estia_source_address(uint16_t addr) { estia_source_address_ = addr; }
   void send_estia_setpoint(float target_temp);
+  void send_estia_dhw_setpoint(float target_temp);
   void send_estia_power(bool on);
+  void send_estia_dhw(bool on);
   void send_estia_mode(uint8_t mode_cmd);  // 0x02=heat, 0x01=cool
   void send_estia_demand(uint8_t demand);  // 0-10V demand (0..15)
   void send_estia_demand_heartbeat();      // periodic 0x55 as 0x0041

@@ -220,7 +220,10 @@ but their UART parity and frame-format settings are not interchangeable.
 | **R410A / first generation** | First-generation ESTIA, TU2C-style wrapped frames | R410A ESTIA systems using first-generation wired controllers | 2400 baud, **8N1** (`NONE`) | `estia` (must be explicit) |
 | **R32** | ESTIA A0 protocol | Series 1 `HWT-1101HRW-E` outdoor + `HWT-1101XWHT9W-E` indoor; `HWT-1102S21SM3W-E` is also reported in the repository | 2400 baud, **8E1** (`EVEN`) | `a0` |
 
-R32/A0 provides bidirectional power, heat/cool mode and setpoint control,
+R32/A0 exposes the main climate entity as a DHW thermostat with Heat/Off modes,
+DHW enable/disable and DHW setpoint control. The underlying protocol also has
+whole-system power and heat/cool commands, but those are not represented by the
+DHW thermostat. R32 support also provides
 autonomous temperature/runtime polling, optional 0–10 V demand-interface
 emulation, runtime sensors and command retries. First-generation support includes
 the R410A status, setpoint, Zone 1 and domestic-hot-water controls documented in
