@@ -2365,6 +2365,15 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       bool is_cooling = (flags & 0x20) != 0;
       bool is_heating = (flags & 0x40) != 0;
 
+      // Bit 0x04 of the mode byte (raw[10]) is Automatik/Heizkurve mode —
+      // confirmed from a real capture of the physical remote's own
+      // "Automatik" toggle (dtype 03:C4 command, see send_estia_automatik_mode()):
+      // mode went 0x80 -> 0x84 on activation and back to 0x80 on deactivation.
+      if (this->automatik_select_ != nullptr) {
+        bool automatik_on = (estia_mode & 0x04) != 0;
+        this->automatik_select_->publish_state(automatik_on ? "Automatik" : "Manuell");
+      }
+
       ESP_LOGV(TAG, "Status: power=%s flags=0x%02X %s current=%.1f°C setpoint=%.1f°C outdoor=%.1f°C",
                power_on ? "ON" : "OFF", flags,
                is_cooling ? "COOL" : (is_heating ? "HEAT" : "???"),
@@ -2458,10 +2467,15 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
     // Layout same as 0x58: [9]=flags [12]=current [13]=setpoint [14]=outdoor
     if (frame_type == 0x1C && frame_len >= 15 && frame->raw[7] == 0x03 && frame->raw[8] == 0xC6) {
       uint8_t flags = frame->raw[9];
+      uint8_t estia_mode = frame->raw[10];
       bool power_on = (flags & 0x01) != 0;
       bool is_cooling = (flags & 0x20) != 0;
       bool is_heating = (flags & 0x40) != 0;
       float setpoint = frame->raw[13] / 2.0f - 16.0f;
+      if (this->automatik_select_ != nullptr) {
+        bool automatik_on = (estia_mode & 0x04) != 0;
+        this->automatik_select_->publish_state(automatik_on ? "Automatik" : "Manuell");
+      }
 
       climate::ClimateMode new_mode;
       if (!power_on) {
@@ -3523,6 +3537,48 @@ void ToshibaAbClimate::send_estia_mode(uint8_t mode_cmd) {
   this->send_estia_tracked_(frame, sizeof(frame), 0x03C0);  // ACK: 00:A1:03:C0
 }
 
+void ToshibaAbClimate::send_estia_automatik_mode(bool on) {
+  if (this->read_only_) {
+    ESP_LOGW(TAG, "Read-only mode: not sending Estia Automatik mode command");
+    return;
+  }
+
+  uint16_t src = this->estia_source_address_;
+
+  // Captured directly from the physical wired remote's own "Automatik"
+  // toggle (dtype 03:C4):
+  //   TX: 11:0B:00:00:40:08:00:03:C4:01:01:00:00:CRC  -> ACK 00:A1:03:C4,
+  //       status mode byte (raw[10]) goes 0x80 -> 0x84
+  //   TX: 11:0B:00:00:40:08:00:03:C4:01:00:00:00:CRC  -> ACK 00:A1:03:C4,
+  //       status mode byte goes back to 0x80
+  uint8_t value = on ? 0x01 : 0x00;
+
+  // Command frame: A0:00:11:0B:00:SRC_H:SRC_L:08:00:03:C4:01:VALUE:00:00:CRC
+  uint8_t frame[] = {
+    0xA0, 0x00,
+    0x11,
+    0x0B,
+    0x00,
+    (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),
+    0x08, 0x00,
+    0x03, 0xC4,
+    0x01,   // marker, constant in both captured frames
+    value,  // 0x01 = Automatik on, 0x00 = Automatik off
+    0x00, 0x00,
+    0x00, 0x00  // CRC placeholder
+  };
+
+  size_t crc_len = sizeof(frame) - 2;
+  uint16_t crc = estia_crc16(frame, crc_len);
+  frame[crc_len]     = (crc >> 8) & 0xFF;
+  frame[crc_len + 1] = crc & 0xFF;
+
+  ESP_LOGD(TAG, "TX: Automatik mode=%s", on ? "ON" : "OFF");
+  log_raw_data("Estia TX", frame, sizeof(frame));
+
+  this->send_estia_tracked_(frame, sizeof(frame), 0x03C4);  // ACK: 00:A1:03:C4
+}
+
 void ToshibaAbClimate::estia_mode_retry_timeout_() {
   if (!this->estia_power_on_pending_) return;
 
@@ -3919,6 +3975,23 @@ void ToshibaAbEstiaDhwBoostSwitch::write_state(bool state) {
 
 void ToshibaAbEstiaAntibacteriaSwitch::write_state(bool state) {
   this->climate_->send_estia_first_gen_antibacteria(state);
+}
+
+void ToshibaAbEstiaAutomatikSelect::control(const std::string &value) {
+  // Automatik/Manuell toggle (dtype 03:C4) is an A0-only frame; there's no
+  // known first-generation equivalent, so refuse rather than sending an A0
+  // frame that a first-gen bus wouldn't understand.
+  if (this->climate_->is_estia_first_gen()) {
+    ESP_LOGW(TAG, "automatik_select is only supported on A0-protocol (Estia) systems");
+    return;
+  }
+  if (value == "Automatik") {
+    this->climate_->send_estia_automatik_mode(true);
+  } else if (value == "Manuell") {
+    this->climate_->send_estia_automatik_mode(false);
+  } else {
+    ESP_LOGW(TAG, "automatik_select: unknown option '%s'", value.c_str());
+  }
 }
 
 void ToshibaAbVentSwitch::write_state(bool state) {
