@@ -47,7 +47,9 @@ uart:
 
 climate:
   - platform: toshiba_ab
-    name: "Toshiba Estia"
+    # DHW thermostat: Heat enables hot-water production and Off disables it.
+    # Its target/current temperatures are the DHW setpoint and tank temperature.
+    name: "Toshiba Estia DHW"
     id: toshiba_estia
 
     # A0-protocol (used by some Estia/heat pump models, NOT TCC-Link or TU2C)
