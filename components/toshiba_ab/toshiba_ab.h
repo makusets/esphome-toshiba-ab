@@ -875,6 +875,12 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_zone1_water_temp_sensor(sensor::Sensor *sensor) { zone1_water_temp_sensor_ = sensor; }
   void set_zone1_target_temperature_sensor(sensor::Sensor *sensor) { zone1_target_temperature_sensor_ = sensor; }
   void set_dhw_current_temp_sensor(sensor::Sensor *sensor) { dhw_current_temp_sensor_ = sensor; }
+  void set_compressor_discharge_temp_sensor(sensor::Sensor *sensor) { compressor_discharge_temp_sensor_ = sensor; }
+  void set_condenser_temp_sensor(sensor::Sensor *sensor) { condenser_temp_sensor_ = sensor; }
+  void set_water_inlet_temp_sensor(sensor::Sensor *sensor) { water_inlet_temp_sensor_ = sensor; }
+  void set_water_outlet_temp_sensor(sensor::Sensor *sensor) { water_outlet_temp_sensor_ = sensor; }
+  void set_tank_outlet_temp_sensor(sensor::Sensor *sensor) { tank_outlet_temp_sensor_ = sensor; }
+  void set_zone1_floor_flow_temp_sensor(sensor::Sensor *sensor) { zone1_floor_flow_temp_sensor_ = sensor; }
   void set_hotwater_pump_heating_binary_sensor(binary_sensor::BinarySensor *sensor) { hotwater_pump_heating_binary_sensor_ = sensor; }
   void set_hotwater_resistor_heating_binary_sensor(binary_sensor::BinarySensor *sensor) { hotwater_resistor_heating_binary_sensor_ = sensor; }
   void set_frame_format(FrameFormat format) {
@@ -1110,6 +1116,12 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   sensor::Sensor *zone1_water_temp_sensor_{nullptr};
   sensor::Sensor *zone1_target_temperature_sensor_{nullptr};
   sensor::Sensor *dhw_current_temp_sensor_{nullptr};
+  sensor::Sensor *compressor_discharge_temp_sensor_{nullptr};
+  sensor::Sensor *condenser_temp_sensor_{nullptr};
+  sensor::Sensor *water_inlet_temp_sensor_{nullptr};
+  sensor::Sensor *water_outlet_temp_sensor_{nullptr};
+  sensor::Sensor *tank_outlet_temp_sensor_{nullptr};
+  sensor::Sensor *zone1_floor_flow_temp_sensor_{nullptr};
   binary_sensor::BinarySensor *hotwater_pump_heating_binary_sensor_{nullptr};
   binary_sensor::BinarySensor *hotwater_resistor_heating_binary_sensor_{nullptr};
   binary_sensor::BinarySensor *remote_error_binary_sensor_{nullptr};

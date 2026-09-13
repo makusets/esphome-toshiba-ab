@@ -82,65 +82,22 @@ climate:
     zone2_setpoint:
       name: "Estia Zone 2 Setpoint"
 
-    # Confirmed R32 temperatures. Each address is queried through the regular
-    # service-code mechanism and is also updated from E8:C0 status responses.
-    sensors:
-      - address: 0x62
-        interval: 2min
-        sensor:
-          name: "Estia Compressor Discharge Temperature"
-          unit_of_measurement: "°C"
-          device_class: temperature
-          state_class: measurement
-          accuracy_decimals: 1
-      - address: 0x04
-        interval: 2min
-        sensor:
-          name: "Estia Condenser Temperature"
-          unit_of_measurement: "°C"
-          device_class: temperature
-          state_class: measurement
-          accuracy_decimals: 1
-      - address: 0x06
-        interval: 2min
-        sensor:
-          name: "Estia Water Inlet Temperature"
-          unit_of_measurement: "°C"
-          device_class: temperature
-          state_class: measurement
-          accuracy_decimals: 1
-      - address: 0x07
-        interval: 2min
-        sensor:
-          name: "Estia Water Outlet Temperature"
-          unit_of_measurement: "°C"
-          device_class: temperature
-          state_class: measurement
-          accuracy_decimals: 1
-      - address: 0x08
-        interval: 2min
-        sensor:
-          name: "Estia Tank Outlet Temperature"
-          unit_of_measurement: "°C"
-          device_class: temperature
-          state_class: measurement
-          accuracy_decimals: 1
-      - address: 0x09
-        interval: 2min
-        sensor:
-          name: "Estia Zone 1 Floor Flow Temperature"
-          unit_of_measurement: "°C"
-          device_class: temperature
-          state_class: measurement
-          accuracy_decimals: 1
-      - address: 0x0A
-        interval: 2min
-        sensor:
-          name: "Estia DHW Temperature"
-          unit_of_measurement: "°C"
-          device_class: temperature
-          state_class: measurement
-          accuracy_decimals: 1
+    # Confirmed R32 temperatures reported by the periodic E8:C0 response.
+    # Declaring these sensors does not add separate service-code queries.
+    compressor_discharge_temperature:
+      name: "Estia Compressor Discharge Temperature"
+    condenser_temperature:
+      name: "Estia Condenser Temperature"
+    water_inlet_temperature:
+      name: "Estia Water Inlet Temperature"
+    water_outlet_temperature:
+      name: "Estia Water Outlet Temperature"
+    tank_outlet_temperature:
+      name: "Estia Tank Outlet Temperature"
+    zone1_floor_flow_temperature:
+      name: "Estia Zone 1 Floor Flow Temperature"
+    dhw_current_temperature:
+      name: "Estia DHW Temperature"
 
     # Estia-specific runtime sensors
     compressor_hours:
