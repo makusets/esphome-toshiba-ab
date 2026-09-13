@@ -2311,11 +2311,47 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
           std::string decode;
           char dbuf[32];
           for (size_t i = 12; i < fsz - 2; i++) {
-            float t = frame->raw[i] / 2.0f - 16.0f;
+            float t = frame->raw[i] / 2.0f - 23.5f;
             snprintf(dbuf, sizeof(dbuf), "[%zu]=0x%02X(%.1f°C) ", i, frame->raw[i], t);
             decode += dbuf;
           }
           ESP_LOGV(TAG, "    E8:C0 data: %s", decode.c_str());
+
+          // Publish only the E8:C0 positions that have been cross-checked
+          // against their individual service-code queries on an R32 Estia.
+          // Sensors remain configured through the generic `sensors:` YAML
+          // option, so their service-code query is also the fallback when the
+          // bulk status response is unavailable.
+          if (frame_len >= 26) {
+            struct EstiaTemperaturePosition {
+              uint8_t sensor_id;
+              uint8_t frame_index;
+            };
+            static constexpr EstiaTemperaturePosition TEMPERATURE_POSITIONS[] = {
+                {0x62, 12},  // TD: compressor discharge
+                {0x04, 18},  // TC: condenser
+                {0x06, 20},  // TWI: water inlet
+                {0x07, 21},  // TWO: water outlet
+                {0x08, 22},  // THO: tank outlet
+                {0x09, 23},  // TFI: Zone 1 floor-flow
+                {0x0A, 24},  // TTW: domestic hot water
+            };
+
+            for (const auto &position : TEMPERATURE_POSITIONS) {
+              const uint8_t raw_temperature = frame->raw[position.frame_index];
+              if (raw_temperature == 0x00 || raw_temperature == 0xFF)
+                continue;
+              const float temperature = raw_temperature / 2.0f - 23.5f;
+              if (position.sensor_id == 0x0A)
+                this->publish_dhw_current_temperature_(temperature);
+              for (auto &polled_sensor : this->polled_sensors_) {
+                if (polled_sensor.id == position.sensor_id && polled_sensor.sensor != nullptr) {
+                  polled_sensor.sensor->publish_state(temperature);
+                  break;
+                }
+              }
+            }
+          }
         }
       } else if (frame_type == 0x10) {
         // Heartbeat — just note it
@@ -2352,29 +2388,29 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
     // Layout after A0:00 prefix (raw[]):
     //   [0]=type [1]=len [2]=00 [3:4]=src [5:6]=dst
     //   [7:8]=dtype(03:C6) [9]=flags [10]=mode [11]=???
-    //   [12]=current_temp [13]=setpoint [14]=outdoor_temp
+    //   [12]=DHW setpoint [13]=Zone 1 setpoint [14]=Zone 2 setpoint
     //   [15:17]=repeat of [12:14]
     if (frame_type == 0x58 && frame_len >= 15 && frame->raw[7] == 0x03 && frame->raw[8] == 0xC6) {
       uint8_t flags = frame->raw[9];
       uint8_t estia_mode = frame->raw[10];
-      float current_temp = frame->raw[12] / 2.0f - 16.0f;
-      float setpoint = frame->raw[13] / 2.0f - 16.0f;
-      float outdoor_temp = frame->raw[14] / 2.0f - 16.0f;
+      float dhw_setpoint = frame->raw[12] / 2.0f - 16.0f;
+      float zone1_setpoint = frame->raw[13] / 2.0f - 16.0f;
+      float zone2_setpoint = frame->raw[14] / 2.0f - 16.0f;
 
       bool power_on = (flags & 0x01) != 0;
       bool is_cooling = (flags & 0x20) != 0;
       bool is_heating = (flags & 0x40) != 0;
 
-      ESP_LOGV(TAG, "Status: power=%s flags=0x%02X %s current=%.1f°C setpoint=%.1f°C outdoor=%.1f°C",
+      ESP_LOGV(TAG, "Status: power=%s flags=0x%02X %s DHW=%.1f°C zone1=%.1f°C zone2=%.1f°C",
                power_on ? "ON" : "OFF", flags,
                is_cooling ? "COOL" : (is_heating ? "HEAT" : "???"),
-               current_temp, setpoint, outdoor_temp);
+               dhw_setpoint, zone1_setpoint, zone2_setpoint);
 
       // Initial status on first 0x58 after network is ready
       if (!estia_was_connected_ && network::is_connected()) {
         const char *mode_str = is_cooling ? "COOL" : (is_heating ? "HEAT" : "???");
-        ESP_LOGI(TAG, "Heat pump connected — power: %s, mode: %s, setpoint: %.1f°C, current: %.1f°C, outdoor: %.1f°C",
-                 power_on ? "ON" : "OFF", mode_str, setpoint, current_temp, outdoor_temp);
+        ESP_LOGI(TAG, "Heat pump connected — power: %s, mode: %s, DHW: %.1f°C, zone 1: %.1f°C, zone 2: %.1f°C",
+                 power_on ? "ON" : "OFF", mode_str, dhw_setpoint, zone1_setpoint, zone2_setpoint);
         estia_was_connected_ = true;
       }
 
@@ -2397,16 +2433,10 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
         changes++;
       }
 
-      // Target temperature
-      if (this->target_temperature != setpoint) {
-        ESP_LOGI(TAG, "Status: setpoint zone 1=%.1f°C", setpoint);
-        this->target_temperature = setpoint;
-        changes++;
-      }
-
-      // Current temperature (Vorlauf)
-      if (this->current_temperature != current_temp) {
-        this->current_temperature = current_temp;
+      // The main Estia climate entity represents DHW, so publish its setpoint.
+      if (this->target_temperature != dhw_setpoint) {
+        ESP_LOGI(TAG, "Status: DHW setpoint=%.1f°C", dhw_setpoint);
+        this->target_temperature = dhw_setpoint;
         changes++;
       }
 
@@ -2419,22 +2449,24 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
         this->publish_state();
       }
 
-      // Outdoor temperature sensor
-      if (this->outdoor_temp_sensor_ != nullptr) {
-        this->outdoor_temp_sensor_->publish_state(outdoor_temp);
-      }
+      if (this->dhw_setpoint_sensor_ != nullptr)
+        this->dhw_setpoint_sensor_->publish_state(dhw_setpoint);
+      if (this->zone1_setpoint_sensor_ != nullptr)
+        this->zone1_setpoint_sensor_->publish_state(zone1_setpoint);
+      if (this->zone2_setpoint_sensor_ != nullptr)
+        this->zone2_setpoint_sensor_->publish_state(zone2_setpoint);
 
       // Also expose all six raw status temperatures while their purposes are
       // still being identified. The established climate and outdoor states
       // above remain unchanged.
       if (this->temp1_sensor_ != nullptr) {
-        this->temp1_sensor_->publish_state(current_temp);
+        this->temp1_sensor_->publish_state(dhw_setpoint);
       }
       if (this->temp2_sensor_ != nullptr) {
-        this->temp2_sensor_->publish_state(setpoint);
+        this->temp2_sensor_->publish_state(zone1_setpoint);
       }
       if (this->temp3_sensor_ != nullptr) {
-        this->temp3_sensor_->publish_state(outdoor_temp);
+        this->temp3_sensor_->publish_state(zone2_setpoint);
       }
       if (frame_len >= 18) {
         if (this->temp4_sensor_ != nullptr) {
@@ -2455,13 +2487,15 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
     }
 
     // State change broadcast (0x1C) with dtype 03:C6 — immediate update after power/mode/setpoint change
-    // Layout same as 0x58: [9]=flags [12]=current [13]=setpoint [14]=outdoor
+    // Layout same as 0x58: [9]=flags, then DHW/Zone 1/Zone 2 setpoints.
     if (frame_type == 0x1C && frame_len >= 15 && frame->raw[7] == 0x03 && frame->raw[8] == 0xC6) {
       uint8_t flags = frame->raw[9];
       bool power_on = (flags & 0x01) != 0;
       bool is_cooling = (flags & 0x20) != 0;
       bool is_heating = (flags & 0x40) != 0;
-      float setpoint = frame->raw[13] / 2.0f - 16.0f;
+      float dhw_setpoint = frame->raw[12] / 2.0f - 16.0f;
+      float zone1_setpoint = frame->raw[13] / 2.0f - 16.0f;
+      float zone2_setpoint = frame->raw[14] / 2.0f - 16.0f;
 
       climate::ClimateMode new_mode;
       if (!power_on) {
@@ -2472,9 +2506,10 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
         new_mode = climate::CLIMATE_MODE_HEAT;
       }
 
-      ESP_LOGV(TAG, "State change: flags=0x%02X power=%s %s setpoint=%.1f°C",
+      ESP_LOGV(TAG, "State change: flags=0x%02X power=%s %s DHW=%.1f°C zone1=%.1f°C zone2=%.1f°C",
                flags, power_on ? "ON" : "OFF",
-               is_cooling ? "COOL" : (is_heating ? "HEAT" : "???"), setpoint);
+               is_cooling ? "COOL" : (is_heating ? "HEAT" : "???"),
+               dhw_setpoint, zone1_setpoint, zone2_setpoint);
 
       int changes = 0;
       if (this->mode != new_mode) {
@@ -2484,11 +2519,17 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
         this->mode = new_mode;
         changes++;
       }
-      if (this->target_temperature != setpoint) {
-        ESP_LOGI(TAG, "Status: setpoint zone 1=%.1f°C", setpoint);
-        this->target_temperature = setpoint;
+      if (this->target_temperature != dhw_setpoint) {
+        ESP_LOGI(TAG, "Status: DHW setpoint=%.1f°C", dhw_setpoint);
+        this->target_temperature = dhw_setpoint;
         changes++;
       }
+      if (this->dhw_setpoint_sensor_ != nullptr)
+        this->dhw_setpoint_sensor_->publish_state(dhw_setpoint);
+      if (this->zone1_setpoint_sensor_ != nullptr)
+        this->zone1_setpoint_sensor_->publish_state(zone1_setpoint);
+      if (this->zone2_setpoint_sensor_ != nullptr)
+        this->zone2_setpoint_sensor_->publish_state(zone2_setpoint);
       if (changes > 0) {
         this->publish_state();
       }
