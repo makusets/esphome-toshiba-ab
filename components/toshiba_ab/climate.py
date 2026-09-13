@@ -63,6 +63,9 @@ CONF_PING = "ping"
 
 # Estia-specific sensors
 CONF_OUTDOOR_TEMPERATURE = "outdoor_temperature"
+CONF_DHW_SETPOINT = "dhw_setpoint"
+CONF_ZONE1_SETPOINT = "zone1_setpoint"
+CONF_ZONE2_SETPOINT = "zone2_setpoint"
 CONF_TEMP1 = "temp1"
 CONF_TEMP2 = "temp2"
 CONF_TEMP3 = "temp3"
@@ -320,7 +323,7 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
                cv.GenerateID(CONF_TRIGGER_ID): cv.declare_id(ToshibaAbOnDataReceivedTrigger),
             }
         ),
-        cv.Optional(CONF_AUTONOMOUS, default=False): cv.boolean,
+        cv.Optional(CONF_AUTONOMOUS, default=True): cv.boolean,
         cv.Optional(CONF_READ_ONLY, default=False): cv.boolean,
         cv.Optional(CONF_PING, default=True): cv.boolean,
         cv.Optional(CONF_SENSORS, default=[]): cv.ensure_list(SENSOR_ITEM_SCHEMA),
@@ -328,6 +331,24 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
         cv.Optional(CONF_FILTER_ALERT): binary_sensor.binary_sensor_schema(),
         # Estia sensors
         cv.Optional(CONF_OUTDOOR_TEMPERATURE): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS,
+            accuracy_decimals=1,
+            device_class=DEVICE_CLASS_TEMPERATURE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_DHW_SETPOINT): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS,
+            accuracy_decimals=1,
+            device_class=DEVICE_CLASS_TEMPERATURE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_ZONE1_SETPOINT): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS,
+            accuracy_decimals=1,
+            device_class=DEVICE_CLASS_TEMPERATURE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_ZONE2_SETPOINT): sensor.sensor_schema(
             unit_of_measurement=UNIT_CELSIUS,
             accuracy_decimals=1,
             device_class=DEVICE_CLASS_TEMPERATURE,
@@ -577,6 +598,15 @@ async def to_code(config):
     if CONF_OUTDOOR_TEMPERATURE in config:
         sens = await sensor.new_sensor(config[CONF_OUTDOOR_TEMPERATURE])
         cg.add(var.set_outdoor_temp_sensor(sens))
+    if CONF_DHW_SETPOINT in config:
+        sens = await sensor.new_sensor(config[CONF_DHW_SETPOINT])
+        cg.add(var.set_dhw_setpoint_sensor(sens))
+    if CONF_ZONE1_SETPOINT in config:
+        sens = await sensor.new_sensor(config[CONF_ZONE1_SETPOINT])
+        cg.add(var.set_zone1_setpoint_sensor(sens))
+    if CONF_ZONE2_SETPOINT in config:
+        sens = await sensor.new_sensor(config[CONF_ZONE2_SETPOINT])
+        cg.add(var.set_zone2_setpoint_sensor(sens))
     if CONF_TEMP1 in config:
         sens = await sensor.new_sensor(config[CONF_TEMP1])
         cg.add(var.set_temp1_sensor(sens))

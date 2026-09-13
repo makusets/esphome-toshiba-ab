@@ -64,7 +64,7 @@ climate:
 
     # Autonomous polling: query E8:C0 (temperatures) and E8:C1 (operating hours)
     # without requiring a KNX gateway on the bus
-    autonomous: false
+    autonomous: true
 
     # Diagnostic sensors
     connected:
@@ -74,9 +74,75 @@ climate:
     read_only_switch:
       name: "Estia Read Only"
 
-    # Estia-specific sensors
-    outdoor_temperature:
-      name: "Estia Outdoor Temperature"
+    # Setpoints reported by the periodic 03:C6 status frame.
+    dhw_setpoint:
+      name: "Estia DHW Setpoint"
+    zone1_setpoint:
+      name: "Estia Zone 1 Setpoint"
+    zone2_setpoint:
+      name: "Estia Zone 2 Setpoint"
+
+    # Confirmed R32 temperatures. Each address is queried through the regular
+    # service-code mechanism and is also updated from E8:C0 status responses.
+    sensors:
+      - address: 0x62
+        interval: 2min
+        sensor:
+          name: "Estia Compressor Discharge Temperature"
+          unit_of_measurement: "°C"
+          device_class: temperature
+          state_class: measurement
+          accuracy_decimals: 1
+      - address: 0x04
+        interval: 2min
+        sensor:
+          name: "Estia Condenser Temperature"
+          unit_of_measurement: "°C"
+          device_class: temperature
+          state_class: measurement
+          accuracy_decimals: 1
+      - address: 0x06
+        interval: 2min
+        sensor:
+          name: "Estia Water Inlet Temperature"
+          unit_of_measurement: "°C"
+          device_class: temperature
+          state_class: measurement
+          accuracy_decimals: 1
+      - address: 0x07
+        interval: 2min
+        sensor:
+          name: "Estia Water Outlet Temperature"
+          unit_of_measurement: "°C"
+          device_class: temperature
+          state_class: measurement
+          accuracy_decimals: 1
+      - address: 0x08
+        interval: 2min
+        sensor:
+          name: "Estia Tank Outlet Temperature"
+          unit_of_measurement: "°C"
+          device_class: temperature
+          state_class: measurement
+          accuracy_decimals: 1
+      - address: 0x09
+        interval: 2min
+        sensor:
+          name: "Estia Zone 1 Floor Flow Temperature"
+          unit_of_measurement: "°C"
+          device_class: temperature
+          state_class: measurement
+          accuracy_decimals: 1
+      - address: 0x0A
+        interval: 2min
+        sensor:
+          name: "Estia DHW Temperature"
+          unit_of_measurement: "°C"
+          device_class: temperature
+          state_class: measurement
+          accuracy_decimals: 1
+
+    # Estia-specific runtime sensors
     compressor_hours:
       name: "Estia Compressor Hours"
     waterpump_hours:
@@ -111,7 +177,7 @@ switch:
     name: "Estia Autonomous"
     id: estia_autonomous
     optimistic: true
-    restore_mode: RESTORE_DEFAULT_OFF
+    restore_mode: RESTORE_DEFAULT_ON
     turn_on_action:
       - lambda: id(toshiba_estia).set_autonomous(true);
     turn_off_action:

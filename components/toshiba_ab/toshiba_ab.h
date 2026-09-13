@@ -859,6 +859,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_command_mode_write(uint8_t value) { command_mode_write_ = value; }
   void set_filter_alert_sensor(binary_sensor::BinarySensor *sensor) { filter_alert_sensor_ = sensor; }
   void set_outdoor_temp_sensor(sensor::Sensor *sensor) { outdoor_temp_sensor_ = sensor; }
+  void set_dhw_setpoint_sensor(sensor::Sensor *sensor) { dhw_setpoint_sensor_ = sensor; }
+  void set_zone1_setpoint_sensor(sensor::Sensor *sensor) { zone1_setpoint_sensor_ = sensor; }
+  void set_zone2_setpoint_sensor(sensor::Sensor *sensor) { zone2_setpoint_sensor_ = sensor; }
   void set_temp1_sensor(sensor::Sensor *sensor) { temp1_sensor_ = sensor; }
   void set_temp2_sensor(sensor::Sensor *sensor) { temp2_sensor_ = sensor; }
   void set_temp3_sensor(sensor::Sensor *sensor) { temp3_sensor_ = sensor; }
@@ -1091,6 +1094,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
 
   // Estia sensors
   sensor::Sensor *outdoor_temp_sensor_{nullptr};
+  sensor::Sensor *dhw_setpoint_sensor_{nullptr};
+  sensor::Sensor *zone1_setpoint_sensor_{nullptr};
+  sensor::Sensor *zone2_setpoint_sensor_{nullptr};
   sensor::Sensor *temp1_sensor_{nullptr};
   sensor::Sensor *temp2_sensor_{nullptr};
   sensor::Sensor *temp3_sensor_{nullptr};
@@ -1159,7 +1165,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool autoreset_errors_{false};
 
   //autonomous mode **********************************
-  bool autonomous_ = false;
+  bool autonomous_ = true;
   uint32_t ping_interval_ms_ = 30000;  // default ping interval
   uint32_t read08_interval_ms = 60000;  // interval to send 40:00:15:06:08:E8:00:01:00:9E:2C, not sure what it does, but it is sent every minute by remote in the logs
   uint8_t command_mode_read_{COMMAND_MODE_READ};
