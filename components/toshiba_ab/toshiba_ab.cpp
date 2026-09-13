@@ -2319,37 +2319,27 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
 
           // Publish only the E8:C0 positions that have been cross-checked
           // against their individual service-code queries on an R32 Estia.
-          // Sensors remain configured through the generic `sensors:` YAML
-          // option, so their service-code query is also the fallback when the
-          // bulk status response is unavailable.
           if (frame_len >= 26) {
             struct EstiaTemperaturePosition {
-              uint8_t sensor_id;
               uint8_t frame_index;
+              sensor::Sensor *sensor;
             };
-            static constexpr EstiaTemperaturePosition TEMPERATURE_POSITIONS[] = {
-                {0x62, 12},  // TD: compressor discharge
-                {0x04, 18},  // TC: condenser
-                {0x06, 20},  // TWI: water inlet
-                {0x07, 21},  // TWO: water outlet
-                {0x08, 22},  // THO: tank outlet
-                {0x09, 23},  // TFI: Zone 1 floor-flow
-                {0x0A, 24},  // TTW: domestic hot water
+            const EstiaTemperaturePosition temperature_positions[] = {
+                {12, this->compressor_discharge_temp_sensor_},  // TD: compressor discharge
+                {18, this->condenser_temp_sensor_},             // TC: condenser
+                {20, this->water_inlet_temp_sensor_},           // TWI: water inlet
+                {21, this->water_outlet_temp_sensor_},          // TWO: water outlet
+                {22, this->tank_outlet_temp_sensor_},           // THO: tank outlet
+                {23, this->zone1_floor_flow_temp_sensor_},      // TFI: Zone 1 floor-flow
+                {24, this->dhw_current_temp_sensor_},           // TTW: domestic hot water
             };
 
-            for (const auto &position : TEMPERATURE_POSITIONS) {
+            for (const auto &position : temperature_positions) {
               const uint8_t raw_temperature = frame->raw[position.frame_index];
-              if (raw_temperature == 0x00 || raw_temperature == 0xFF)
+              if (position.sensor == nullptr || raw_temperature == 0x00 || raw_temperature == 0xFF)
                 continue;
               const float temperature = raw_temperature / 2.0f - 23.5f;
-              if (position.sensor_id == 0x0A)
-                this->publish_dhw_current_temperature_(temperature);
-              for (auto &polled_sensor : this->polled_sensors_) {
-                if (polled_sensor.id == position.sensor_id && polled_sensor.sensor != nullptr) {
-                  polled_sensor.sensor->publish_state(temperature);
-                  break;
-                }
-              }
+              position.sensor->publish_state(temperature);
             }
           }
         }
