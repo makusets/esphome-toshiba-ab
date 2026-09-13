@@ -2331,7 +2331,6 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
                 {21, this->water_outlet_temp_sensor_},          // TWO: water outlet
                 {22, this->tank_outlet_temp_sensor_},           // THO: tank outlet
                 {23, this->zone1_floor_flow_temp_sensor_},      // TFI: Zone 1 floor-flow
-                {24, this->dhw_current_temp_sensor_},           // TTW: domestic hot water
             };
 
             for (const auto &position : temperature_positions) {
@@ -2340,6 +2339,13 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
                 continue;
               const float temperature = raw_temperature / 2.0f - 23.5f;
               position.sensor->publish_state(temperature);
+            }
+
+            // The main Estia climate entity represents DHW. Publish TTW as its
+            // current temperature as well as through the optional standalone sensor.
+            const uint8_t raw_dhw_temperature = frame->raw[24];
+            if (raw_dhw_temperature != 0x00 && raw_dhw_temperature != 0xFF) {
+              this->publish_dhw_current_temperature_(raw_dhw_temperature / 2.0f - 23.5f);
             }
           }
         }
