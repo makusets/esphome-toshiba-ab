@@ -15,6 +15,18 @@
 namespace esphome {
 namespace toshiba_ab {
 
+class ToshibaAbClimate;
+
+class ToshibaAbEstiaZone1Climate : public climate::Climate {
+ public:
+  explicit ToshibaAbEstiaZone1Climate(ToshibaAbClimate *parent) : parent_(parent) {}
+  climate::ClimateTraits traits() override;
+  void control(const climate::ClimateCall &call) override;
+
+ protected:
+  ToshibaAbClimate *parent_;
+};
+
 const uint32_t ALIVE_MESSAGE_PERIOD_MILLIS = 5000;
 const uint32_t LAST_ALIVE_TIMEOUT_MILLIS = ALIVE_MESSAGE_PERIOD_MILLIS * 3 +1000;
 
@@ -881,6 +893,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_water_outlet_temp_sensor(sensor::Sensor *sensor) { water_outlet_temp_sensor_ = sensor; }
   void set_tank_outlet_temp_sensor(sensor::Sensor *sensor) { tank_outlet_temp_sensor_ = sensor; }
   void set_zone1_floor_flow_temp_sensor(sensor::Sensor *sensor) { zone1_floor_flow_temp_sensor_ = sensor; }
+  void set_zone1_climate(ToshibaAbEstiaZone1Climate *zone1_climate) { zone1_climate_ = zone1_climate; }
   void set_hotwater_pump_heating_binary_sensor(binary_sensor::BinarySensor *sensor) { hotwater_pump_heating_binary_sensor_ = sensor; }
   void set_hotwater_resistor_heating_binary_sensor(binary_sensor::BinarySensor *sensor) { hotwater_resistor_heating_binary_sensor_ = sensor; }
   void set_frame_format(FrameFormat format) {
@@ -979,11 +992,15 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_autoreset_errors(bool en) { autoreset_errors_ = en; }
   void set_remote_error_binary_sensor(binary_sensor::BinarySensor *sensor) { remote_error_binary_sensor_ = sensor; }
   void set_estia_source_address(uint16_t addr) { estia_source_address_ = addr; }
-  void send_estia_setpoint(float target_temp);
+  void send_estia_setpoint(float target_temp, climate::ClimateMode mode);
+  void control_estia_zone1(const climate::ClimateCall &call);
   void send_estia_dhw_setpoint(float target_temp);
-  void send_estia_power(bool on);
+  // A0 heating/cooling operation switch (00:41, 23/22). This is independent
+  // from the DHW switch (00:41, 2C/28), so turning Zone 1 off leaves DHW on.
+  void send_estia_zone1_operation(bool on);
   void send_estia_dhw(bool on);
   void send_estia_mode(uint8_t mode_cmd);  // 0x02=heat, 0x01=cool
+  void send_estia_automatik_mode(bool on);
   void send_estia_demand(uint8_t demand);  // 0-10V demand (0..15)
   void send_estia_demand_heartbeat();      // periodic 0x55 as 0x0041
   void set_demand_enabled(bool en) { demand_enabled_ = en; }
@@ -1124,6 +1141,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   sensor::Sensor *water_outlet_temp_sensor_{nullptr};
   sensor::Sensor *tank_outlet_temp_sensor_{nullptr};
   sensor::Sensor *zone1_floor_flow_temp_sensor_{nullptr};
+  ToshibaAbEstiaZone1Climate *zone1_climate_{nullptr};
   binary_sensor::BinarySensor *hotwater_pump_heating_binary_sensor_{nullptr};
   binary_sensor::BinarySensor *hotwater_resistor_heating_binary_sensor_{nullptr};
   binary_sensor::BinarySensor *remote_error_binary_sensor_{nullptr};
@@ -1134,6 +1152,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   // rx handler for 0x1A (sensor) replies (called from process_received_data)
   void process_sensor_value_(const DataFrame *frame);
   void publish_dhw_current_temperature_(float temperature);
+  void publish_estia_zone1_state_(bool zone1_on, bool is_cooling, bool is_heating, bool automatik,
+                                  float setpoint);
   std::vector<PolledSensor> polled_sensors_;
 
 
@@ -1240,10 +1260,12 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   uint16_t estia_source_address_{0x0040};  // default: mimic remote controller
   uint16_t estia_master_address_{0x0800};  // A0 master mode byte 0x08 + YAML master address
   climate::ClimateMode estia_last_active_mode_{climate::CLIMATE_MODE_HEAT};  // last known mode while powered on
-  bool estia_power_on_pending_{false};  // waiting for mode ACK before sending power on
+  bool estia_zone1_on_pending_{false};  // waiting for mode ACK before enabling Zone 1 operation
   uint8_t estia_pending_mode_cmd_{0};   // mode command to retry (0x01=cool, 0x02=heat)
   uint8_t estia_mode_retries_{0};       // retry counter for mode command
   void estia_mode_retry_timeout_();
+  void set_estia_zone1_operating_mode_(climate::ClimateMode mode);
+  optional<climate::ClimateMode> estia_mode_after_automatik_;
   uint32_t estia_last_e8c0_ms_{0};
   uint32_t estia_last_e8c1_ms_{0};
   static const uint32_t ESTIA_E8C0_INTERVAL_MS = 30000;

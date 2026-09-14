@@ -221,9 +221,15 @@ but their UART parity and frame-format settings are not interchangeable.
 | **R32** | ESTIA A0 protocol | Series 1 `HWT-1101HRW-E` outdoor + `HWT-1101XWHT9W-E` indoor; `HWT-1102S21SM3W-E` is also reported in the repository | 2400 baud, **8E1** (`EVEN`) | `a0` |
 
 R32/A0 exposes the main climate entity as a DHW thermostat with Heat/Off modes,
-DHW enable/disable and DHW setpoint control. The underlying protocol also has
-whole-system power and heat/cool commands, but those are not represented by the
-DHW thermostat. R32 support also provides
+DHW enable/disable and DHW setpoint control. It also creates a Zone 1 water
+thermostat by default. The Zone 1 entity supports Heat/Cool/Auto/Off, uses the
+Zone 1 setpoint as its target in fixed Heat/Cool operation and the confirmed
+floor-flow (TFI) reading as its current temperature. Auto enables Toshiba's
+heating-only Automatik/heating-curve function; the machine calculates the water
+target in that mode, so the thermostat does not publish a target temperature.
+Turning the Zone 1 thermostat off sends the A0 heating/cooling-operation command;
+it does not send a whole-system power-off or change the independent DHW switch.
+R32 support also provides
 autonomous temperature/runtime polling, optional 0–10 V demand-interface
 emulation, runtime sensors and command retries. First-generation support includes
 the R410A status, setpoint, Zone 1 and domestic-hot-water controls documented in
