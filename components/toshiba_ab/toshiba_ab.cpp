@@ -1280,6 +1280,21 @@ ToshibaAbClimate::ToshibaAbClimate() {
 
 climate::ClimateTraits ToshibaAbClimate::traits() { return traits_; }
 
+climate::ClimateTraits ToshibaAbEstiaZone1Climate::traits() {
+  climate::ClimateTraits traits;
+  traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
+  traits.set_supported_modes(
+      {climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_COOL, climate::CLIMATE_MODE_AUTO});
+  traits.set_visual_min_temperature(20);
+  traits.set_visual_max_temperature(65);
+  traits.set_visual_temperature_step(0.5);
+  return traits;
+}
+
+void ToshibaAbEstiaZone1Climate::control(const climate::ClimateCall &call) {
+  this->parent_->control_estia_zone1(call);
+}
+
 void ToshibaAbClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "Toshiba AB:");
 #ifdef LOG_UART_DEVICE
@@ -2343,6 +2358,16 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
               position.sensor->publish_state(temperature);
             }
 
+            const uint8_t raw_zone1_temperature = frame->raw[23];
+            if (this->zone1_climate_ != nullptr && raw_zone1_temperature != 0x00 &&
+                raw_zone1_temperature != 0xFF) {
+              const float temperature = raw_zone1_temperature / 2.0f - 23.5f;
+              if (this->zone1_climate_->current_temperature != temperature) {
+                this->zone1_climate_->current_temperature = temperature;
+                this->zone1_climate_->publish_state();
+              }
+            }
+
             // The main Estia climate entity represents DHW. Publish TTW as its
             // current temperature as well as through the optional standalone sensor.
             const uint8_t raw_dhw_temperature = frame->raw[24];
@@ -2394,13 +2419,17 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       float zone1_setpoint = frame->raw[13] / 2.0f - 16.0f;
       float zone2_setpoint = frame->raw[14] / 2.0f - 16.0f;
 
-      bool power_on = (flags & 0x01) != 0;
+      // Bit 0 is the heating/cooling operation switch. DHW has its own bit 1,
+      // and its own 2C/28 command, so this is not whole-system power.
+      bool zone1_on = (flags & 0x01) != 0;
       bool dhw_active = (flags & 0x02) != 0;
       bool is_cooling = (flags & 0x20) != 0;
       bool is_heating = (flags & 0x40) != 0;
+      bool automatik = (frame->raw[10] & 0x04) != 0;
+      this->publish_estia_zone1_state_(zone1_on, is_cooling, is_heating, automatik, zone1_setpoint);
 
       ESP_LOGV(TAG, "Status: power=%s flags=0x%02X %s DHW=%.1f°C zone1=%.1f°C zone2=%.1f°C",
-               power_on ? "ON" : "OFF", flags,
+               zone1_on ? "ON" : "OFF", flags,
                is_cooling ? "COOL" : (is_heating ? "HEAT" : "???"),
                dhw_setpoint, zone1_setpoint, zone2_setpoint);
 
@@ -2408,14 +2437,14 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       if (!estia_was_connected_ && network::is_connected()) {
         const char *mode_str = is_cooling ? "COOL" : (is_heating ? "HEAT" : "???");
         ESP_LOGI(TAG, "Heat pump connected — power: %s, mode: %s, DHW: %.1f°C, zone 1: %.1f°C, zone 2: %.1f°C",
-                 power_on ? "ON" : "OFF", mode_str, dhw_setpoint, zone1_setpoint, zone2_setpoint);
+                 zone1_on ? "ON" : "OFF", mode_str, dhw_setpoint, zone1_setpoint, zone2_setpoint);
         estia_was_connected_ = true;
       }
 
       int changes = 0;
 
       // The main climate entity is DHW-only. Bit 0x02 reports whether DHW
-      // production is enabled independently of whole-system power/mode.
+      // production is enabled independently of the heating/cooling operation switch.
       climate::ClimateMode new_mode = dhw_active ? climate::CLIMATE_MODE_HEAT : climate::CLIMATE_MODE_OFF;
       if (this->mode != new_mode) {
         ESP_LOGI(TAG, "Status: DHW=%s", dhw_active ? "ON" : "OFF");
@@ -2475,18 +2504,21 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
     // Layout same as 0x58: [9]=flags, then DHW/Zone 1/Zone 2 setpoints.
     if (frame_type == 0x1C && frame_len >= 15 && frame->raw[7] == 0x03 && frame->raw[8] == 0xC6) {
       uint8_t flags = frame->raw[9];
-      bool power_on = (flags & 0x01) != 0;
+      bool zone1_on = (flags & 0x01) != 0;
       bool dhw_active = (flags & 0x02) != 0;
       bool is_cooling = (flags & 0x20) != 0;
       bool is_heating = (flags & 0x40) != 0;
+      bool automatik = (frame->raw[10] & 0x04) != 0;
       float dhw_setpoint = frame->raw[12] / 2.0f - 16.0f;
       float zone1_setpoint = frame->raw[13] / 2.0f - 16.0f;
       float zone2_setpoint = frame->raw[14] / 2.0f - 16.0f;
 
+      this->publish_estia_zone1_state_(zone1_on, is_cooling, is_heating, automatik, zone1_setpoint);
+
       climate::ClimateMode new_mode = dhw_active ? climate::CLIMATE_MODE_HEAT : climate::CLIMATE_MODE_OFF;
 
       ESP_LOGV(TAG, "State change: flags=0x%02X power=%s %s DHW=%.1f°C zone1=%.1f°C zone2=%.1f°C",
-               flags, power_on ? "ON" : "OFF",
+               flags, zone1_on ? "ON" : "OFF",
                is_cooling ? "COOL" : (is_heating ? "HEAT" : "???"),
                dhw_setpoint, zone1_setpoint, zone2_setpoint);
 
@@ -2563,11 +2595,16 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       }
 
       // Mode ACK triggers deferred power on
-      if (acked_dtype == 0x03C0 && this->estia_power_on_pending_) {
-        ESP_LOGD(TAG, "Mode ACK received, sending power on");
-        this->estia_power_on_pending_ = false;
+      if (acked_dtype == 0x03C0 && this->estia_zone1_on_pending_) {
+        ESP_LOGD(TAG, "Mode ACK received, enabling Zone 1 heating/cooling operation");
+        this->estia_zone1_on_pending_ = false;
         this->cancel_timeout("estia_poweron");
-        this->send_estia_power(true);
+        this->send_estia_zone1_operation(true);
+      }
+      if (acked_dtype == 0x03C4 && this->estia_mode_after_automatik_.has_value()) {
+        const climate::ClimateMode mode = *this->estia_mode_after_automatik_;
+        this->estia_mode_after_automatik_.reset();
+        this->set_estia_zone1_operating_mode_(mode);
       }
     }
 
@@ -3259,6 +3296,66 @@ void ToshibaAbClimate::control(const climate::ClimateCall &call) {
   }
 }
 
+void ToshibaAbClimate::control_estia_zone1(const climate::ClimateCall &call) {
+  if (this->read_only_) {
+    ESP_LOGW(TAG, "Read-only mode: not controlling Estia Zone 1 thermostat");
+    return;
+  }
+  if (call.get_mode().has_value()) {
+    const climate::ClimateMode requested_mode = *call.get_mode();
+    // Supersede any older deferred transition so a late ACK cannot turn the
+    // system back on after a newer Off request.
+    this->estia_mode_after_automatik_.reset();
+    this->estia_zone1_on_pending_ = false;
+    this->cancel_timeout("estia_poweron");
+    if (requested_mode == climate::CLIMATE_MODE_OFF) {
+      this->send_estia_zone1_operation(false);
+    } else if (requested_mode == climate::CLIMATE_MODE_AUTO) {
+      // Toshiba's Automatik is a heating-curve mode, not generic heat/cool.
+      // Enable it first, then select heating and power on after its ACK.
+      this->estia_mode_after_automatik_ = climate::CLIMATE_MODE_HEAT;
+      this->send_estia_automatik_mode(true);
+    } else if (requested_mode == climate::CLIMATE_MODE_HEAT || requested_mode == climate::CLIMATE_MODE_COOL) {
+      // Fixed-temperature modes require Automatik to be disabled first.
+      this->estia_mode_after_automatik_ = requested_mode;
+      this->send_estia_automatik_mode(false);
+    }
+  }
+
+  if (call.get_target_temperature().has_value()) {
+    const climate::ClimateMode setpoint_mode = call.get_mode().value_or(
+        this->zone1_climate_ != nullptr ? this->zone1_climate_->mode : climate::CLIMATE_MODE_HEAT);
+    if (setpoint_mode == climate::CLIMATE_MODE_AUTO) {
+      ESP_LOGD(TAG, "Ignoring Zone 1 target temperature in Automatik mode; the heat pump calculates it");
+    } else {
+      this->send_estia_setpoint(*call.get_target_temperature(), setpoint_mode);
+    }
+  }
+}
+
+void ToshibaAbClimate::publish_estia_zone1_state_(bool zone1_on, bool is_cooling, bool is_heating, bool automatik,
+                                                  float setpoint) {
+  if (this->zone1_climate_ == nullptr)
+    return;
+  climate::ClimateMode mode = climate::CLIMATE_MODE_OFF;
+  if (zone1_on) {
+    mode = automatik ? climate::CLIMATE_MODE_AUTO
+                     : (is_cooling ? climate::CLIMATE_MODE_COOL : climate::CLIMATE_MODE_HEAT);
+    this->estia_last_active_mode_ = is_cooling ? climate::CLIMATE_MODE_COOL : climate::CLIMATE_MODE_HEAT;
+    if (!is_cooling && !is_heating)
+      ESP_LOGV(TAG, "Zone 1 is powered without an explicit heat/cool status; retaining heat mode");
+  }
+  const float published_setpoint = mode == climate::CLIMATE_MODE_AUTO ? NAN : setpoint;
+  const bool setpoint_changed = (std::isnan(published_setpoint) && !std::isnan(this->zone1_climate_->target_temperature)) ||
+                                (!std::isnan(published_setpoint) &&
+                                 this->zone1_climate_->target_temperature != published_setpoint);
+  if (this->zone1_climate_->mode != mode || setpoint_changed) {
+    this->zone1_climate_->mode = mode;
+    this->zone1_climate_->target_temperature = published_setpoint;
+    this->zone1_climate_->publish_state();
+  }
+}
+
 bool ToshibaAbClimate::enqueue_command_(const DataFrame &command) {
   std::queue<DataFrame> queued = this->write_queue_;
   const size_t command_size = command.size();
@@ -3412,7 +3509,7 @@ void ToshibaAbClimate::send_estia_tracked_(const uint8_t *frame, size_t len, uin
   }
 }
 
-void ToshibaAbClimate::send_estia_setpoint(float target_temp) {
+void ToshibaAbClimate::send_estia_setpoint(float target_temp, climate::ClimateMode mode) {
   if (this->read_only_) {
     ESP_LOGW(TAG, "Read-only mode: not sending Estia setpoint");
     return;
@@ -3424,7 +3521,7 @@ void ToshibaAbClimate::send_estia_setpoint(float target_temp) {
   uint16_t dst = this->estia_master_address_;
 
   // Sub-command: 0x02 = heating setpoint, 0x01 = cooling setpoint
-  uint8_t subcmd = (this->mode == climate::CLIMATE_MODE_COOL) ? 0x01 : 0x02;
+  uint8_t subcmd = (mode == climate::CLIMATE_MODE_COOL) ? 0x01 : 0x02;
 
   // Command frame: A0:00:11:0C:00:SRC_H:SRC_L:08:00:03:C1:SUBCMD:TEMP:00:00:00
   uint8_t frame[] = {
@@ -3479,18 +3576,19 @@ void ToshibaAbClimate::send_estia_dhw_setpoint(float target_temp) {
   this->send_estia_tracked_(frame, sizeof(frame), 0x03C1);  // ACK: 00:A1:03:C1
 }
 
-void ToshibaAbClimate::send_estia_power(bool on) {
+void ToshibaAbClimate::send_estia_zone1_operation(bool on) {
   if (this->read_only_) {
-    ESP_LOGW(TAG, "Read-only mode: not sending Estia power command");
+    ESP_LOGW(TAG, "Read-only mode: not sending Estia Zone 1 operation command");
     return;
   }
 
   uint16_t src = this->estia_source_address_;
   uint16_t dst = this->estia_master_address_;
-  uint8_t power_cmd = on ? 0x23 : 0x22;
+  uint8_t operation_cmd = on ? 0x23 : 0x22;
 
-  // Power command: A0:00:11:08:00:SRC:08:00:00:41:CMD:CRC
-  // Captured: 11:08:00:00:40:08:00:00:41:22 (power off from remote)
+  // Heating/cooling operation command, captured from the wired remote. This
+  // toggles status bit 0 only. DHW is controlled independently by commands
+  // 2C/28 and status bit 1, and is therefore left unchanged here.
   uint8_t frame[] = {
     0xA0, 0x00,                         // prefix
     0x11,                               // type: command
@@ -3498,8 +3596,8 @@ void ToshibaAbClimate::send_estia_power(bool on) {
     0x00,                               // fixed
     (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),  // source
     (uint8_t)(dst >> 8), (uint8_t)(dst & 0xFF),  // dest: master
-    0x00, 0x41,                         // dtype: power control
-    power_cmd,                          // 0x23=ON, 0x22=OFF
+    0x00, 0x41,                         // dtype: operation switches
+    operation_cmd,                      // 0x23=Zone 1 ON, 0x22=Zone 1 OFF
     0x00, 0x00                          // CRC placeholder
   };
 
@@ -3508,7 +3606,7 @@ void ToshibaAbClimate::send_estia_power(bool on) {
   frame[crc_len]     = (crc >> 8) & 0xFF;
   frame[crc_len + 1] = crc & 0xFF;
 
-  ESP_LOGD(TAG, "TX: power %s (cmd=0x%02X)", on ? "ON" : "OFF", power_cmd);
+  ESP_LOGD(TAG, "TX: Zone 1 operation %s (cmd=0x%02X; DHW unchanged)", on ? "ON" : "OFF", operation_cmd);
   log_raw_data("Estia TX", frame, sizeof(frame));
 
   this->send_estia_tracked_(frame, sizeof(frame), 0x0041);  // ACK: 00:A1:00:41
@@ -3574,8 +3672,49 @@ void ToshibaAbClimate::send_estia_mode(uint8_t mode_cmd) {
   this->send_estia_tracked_(frame, sizeof(frame), 0x03C0);  // ACK: 00:A1:03:C0
 }
 
+void ToshibaAbClimate::send_estia_automatik_mode(bool on) {
+  if (this->read_only_) {
+    ESP_LOGW(TAG, "Read-only mode: not sending Estia Automatik mode command");
+    return;
+  }
+
+  const uint16_t src = this->estia_source_address_;
+  // Captured from the wired remote's Automatik button. Dtype 03:C4 with
+  // payload 01:01:00:00 enables heating-curve control; 01:00:00:00 disables it.
+  uint8_t frame[] = {
+    0xA0, 0x00, 0x11, 0x0B, 0x00,
+    (uint8_t) (src >> 8), (uint8_t) (src & 0xFF),
+    0x08, 0x00, 0x03, 0xC4, 0x01, on ? (uint8_t) 0x01 : (uint8_t) 0x00,
+    0x00, 0x00, 0x00, 0x00
+  };
+  const size_t crc_len = sizeof(frame) - 2;
+  const uint16_t crc = estia_crc16(frame, crc_len);
+  frame[crc_len] = (crc >> 8) & 0xFF;
+  frame[crc_len + 1] = crc & 0xFF;
+  ESP_LOGD(TAG, "TX: Automatik mode=%s", on ? "ON" : "OFF");
+  log_raw_data("Estia TX", frame, sizeof(frame));
+  this->send_estia_tracked_(frame, sizeof(frame), 0x03C4);
+}
+
+void ToshibaAbClimate::set_estia_zone1_operating_mode_(climate::ClimateMode mode) {
+  if (this->zone1_climate_ != nullptr && this->zone1_climate_->mode == climate::CLIMATE_MODE_OFF) {
+    const climate::ClimateMode last_mode = this->estia_last_active_mode_;
+    if (mode != last_mode) {
+      this->estia_pending_mode_cmd_ = mode == climate::CLIMATE_MODE_COOL ? 0x01 : 0x02;
+      this->estia_zone1_on_pending_ = true;
+      this->estia_mode_retries_ = 0;
+      this->send_estia_mode(this->estia_pending_mode_cmd_);
+      this->set_timeout("estia_poweron", 3000, [this]() { this->estia_mode_retry_timeout_(); });
+    } else {
+      this->send_estia_zone1_operation(true);
+    }
+  } else {
+    this->send_estia_mode(mode == climate::CLIMATE_MODE_COOL ? 0x01 : 0x02);
+  }
+}
+
 void ToshibaAbClimate::estia_mode_retry_timeout_() {
-  if (!this->estia_power_on_pending_) return;
+  if (!this->estia_zone1_on_pending_) return;
 
   estia_mode_retries_++;
   if (estia_mode_retries_ < 3) {
@@ -3586,8 +3725,8 @@ void ToshibaAbClimate::estia_mode_retry_timeout_() {
     });
   } else {
     ESP_LOGW(TAG, "No mode ACK after 3 retries, sending power on anyway");
-    this->estia_power_on_pending_ = false;
-    this->send_estia_power(true);
+    this->estia_zone1_on_pending_ = false;
+    this->send_estia_zone1_operation(true);
   }
 }
 

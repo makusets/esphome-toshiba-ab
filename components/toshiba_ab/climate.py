@@ -89,6 +89,7 @@ CONF_WATER_INLET_TEMPERATURE = "water_inlet_temperature"
 CONF_WATER_OUTLET_TEMPERATURE = "water_outlet_temperature"
 CONF_TANK_OUTLET_TEMPERATURE = "tank_outlet_temperature"
 CONF_ZONE1_FLOOR_FLOW_TEMPERATURE = "zone1_floor_flow_temperature"
+CONF_ZONE1_CLIMATE = "zone1_climate"
 CONF_HOTWATER_PUMP_HEATING = "hotwater_pump_heating"
 CONF_HOTWATER_RESISTOR_HEATING = "hotwater_resistor_heating"
 CONF_REMOTE_ERROR = "remote_error"
@@ -110,6 +111,9 @@ SENSOR_ITEM_SCHEMA = cv.Schema({
 
 ToshibaAbClimate =  toshiba_ab_ns.class_(
     "ToshibaAbClimate", climate.Climate, uart.UARTDevice, cg.Component
+)
+ToshibaAbEstiaZone1Climate = toshiba_ab_ns.class_(
+    "ToshibaAbEstiaZone1Climate", climate.Climate
 )
 
 ToshibaAbVentSwitch =  toshiba_ab_ns.class_(
@@ -199,7 +203,17 @@ def _hardware_uart_rx_pin(value):
     return num
 
 
-CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
+def _add_default_estia_zone1_climate(config):
+    if str(config.get(CONF_FRAME_FORMAT, "auto")).lower() == "a0":
+        config.setdefault(
+            CONF_ZONE1_CLIMATE, {CONF_NAME: "Toshiba Estia Zone 1 Water"}
+        )
+    return config
+
+
+CONFIG_SCHEMA = cv.All(
+    _add_default_estia_zone1_climate,
+    climate._CLIMATE_SCHEMA.extend(
     {
         cv.Optional(CONF_MASTER): cv.uint8_t,
         cv.Optional(CONF_REMOTE): cv.uint8_t,
@@ -322,6 +336,9 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
             accuracy_decimals=1,
             device_class=DEVICE_CLASS_TEMPERATURE,
             state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_ZONE1_CLIMATE): climate.climate_schema(
+            ToshibaAbEstiaZone1Climate
         ),
         cv.Optional(CONF_HOTWATER_PUMP_HEATING): binary_sensor.binary_sensor_schema(),
         cv.Optional(CONF_HOTWATER_RESISTOR_HEATING): binary_sensor.binary_sensor_schema(),
@@ -459,7 +476,8 @@ CONFIG_SCHEMA = climate._CLIMATE_SCHEMA.extend(
             state_class=STATE_CLASS_MEASUREMENT,
         ),
     }
-).extend(uart.UART_DEVICE_SCHEMA).extend(cv.COMPONENT_SCHEMA)
+    ).extend(uart.UART_DEVICE_SCHEMA).extend(cv.COMPONENT_SCHEMA),
+)
 
 
 def _pin_number(config):
@@ -537,6 +555,11 @@ async def to_code(config):
     await cg.register_component(var, config)
     await climate.register_climate(var, config)
     await uart.register_uart_device(var, config)
+
+    if CONF_ZONE1_CLIMATE in config:
+        zone1_climate = cg.new_Pvariable(config[CONF_ZONE1_CLIMATE][CONF_ID], var)
+        await climate.register_climate(zone1_climate, config[CONF_ZONE1_CLIMATE])
+        cg.add(var.set_zone1_climate(zone1_climate))
 
     if CONF_MASTER in config:
         cg.add(var.set_master_address(config[CONF_MASTER]))
