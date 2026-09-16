@@ -229,6 +229,10 @@ heating-only Automatik/heating-curve function; the machine calculates the water
 target in that mode, so the thermostat does not publish a target temperature.
 Turning the Zone 1 thermostat off sends the A0 heating/cooling-operation command;
 it does not send a whole-system power-off or change the independent DHW switch.
+The optional `outdoor_temperature` sensor is decoded from the outdoor ambient
+(TO) field in the periodic R32 `E8:C0` temperature response. The three values in
+the `03:C6` status frame are DHW, Zone 1 and Zone 2 setpoints; they are not
+current, target and outdoor temperatures.
 R32 support also provides
 autonomous temperature/runtime polling, optional 0–10 V demand-interface
 emulation, runtime sensors and command retries. First-generation support includes

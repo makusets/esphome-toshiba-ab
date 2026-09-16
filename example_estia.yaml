@@ -93,6 +93,8 @@ climate:
     # Declaring these sensors does not add separate service-code queries.
     compressor_discharge_temperature:
       name: "Estia Compressor Discharge Temperature"
+    outdoor_temperature:
+      name: "Estia Outdoor Temperature"
     condenser_temperature:
       name: "Estia Condenser Temperature"
     water_inlet_temperature:
