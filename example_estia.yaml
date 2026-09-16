@@ -47,37 +47,35 @@ uart:
 
 climate:
   - platform: toshiba_ab
+  
     # DHW thermostat: Heat enables hot-water production and Off disables it.
     # Its target/current temperatures are the DHW setpoint and tank temperature.
     name: "Toshiba Estia DHW"
     id: toshiba_estia
 
-    # A second climate entity named "Toshiba Estia Zone 1 Water" is created
+    # When a0 frame_format is selected, a second thermostat named "Toshiba Estia Zone 1 Water" is created
     # automatically for Zone 1 heat/cool/auto/off and water-outlet temperature.
     # Auto uses Toshiba's heating curve, so it intentionally has no target temperature.
     # Off disables heating/cooling operation only; it leaves DHW enabled.
 
-    # A0-protocol (used by some Estia/heat pump models, NOT TCC-Link or TU2C)
+    # A0-protocol (used by R32 Estia/heat pump models, NOT TCC-Link or TU2C)
     frame_format: a0
     filter_frames: false
 
-    # Optional one-byte addresses. For A0 these become source 0x0040 and
-    # destination 0x0800 on the wire; the defaults below may be omitted.
+    # Optional one-byte addresses, the defaults below may be omitted.
     # remote: 0x40
     # master: 0x00
 
-    # Read-only mode: needs to be set to false to allow sending commands
-    read_only: false
-
     # Autonomous polling: query E8:C0 (temperatures) and E8:C1 (operating hours)
-    # without requiring a KNX gateway on the bus
-    autonomous: true
+    # This is the default setting and can be omitted, uncomment and change to false if you need it for some reason
+    # autonomous: true
 
     # Diagnostic sensors
     connected:
       name: "Estia Connected"
     failed_crcs:
       name: "Estia Failed CRCs"
+      #read-only switch enable putting the esp in read-only mode for experimentation or diagnosing, with no comms being sent
     read_only_switch:
       name: "Estia Read Only"
 
@@ -91,6 +89,8 @@ climate:
 
     # Confirmed R32 temperatures reported by the periodic E8:C0 response.
     # Declaring these sensors does not add separate service-code queries.
+    # This will not fill if autonomous is set to false
+    
     compressor_discharge_temperature:  # TD
       name: "Estia Compressor Discharge Temperature"
     outdoor_temperature:  # TO
@@ -109,6 +109,7 @@ climate:
       name: "Estia DHW Temperature"
 
     # Estia-specific runtime sensors
+    # This will not fill if autonomous is set to false
     compressor_hours:
       name: "Estia Compressor Hours"
     waterpump_hours:
