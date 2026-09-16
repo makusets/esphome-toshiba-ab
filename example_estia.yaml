@@ -91,21 +91,23 @@ climate:
 
     # Confirmed R32 temperatures reported by the periodic E8:C0 response.
     # Declaring these sensors does not add separate service-code queries.
-    compressor_discharge_temperature:
+    compressor_discharge_temperature:  # TD
       name: "Estia Compressor Discharge Temperature"
-    outdoor_temperature:
+    outdoor_temperature:  # TO
       name: "Estia Outdoor Temperature"
-    condenser_temperature:
+    condenser_temperature:  # TC
       name: "Estia Condenser Temperature"
-    water_inlet_temperature:
+    water_inlet_temperature:  # TWI
       name: "Estia Water Inlet Temperature"
-    water_outlet_temperature:
+    water_outlet_temperature:  # TWO; also used by the Zone 1 climate entity
       name: "Estia Water Outlet Temperature"
-    tank_outlet_temperature:
-      name: "Estia Tank Outlet Temperature"
-    zone1_floor_flow_temperature:
-      name: "Estia Zone 1 Floor Flow Temperature"
-    dhw_current_temperature:
+    tank_outlet_temperature:  # THO
+      name: "Estia Water Heater Outlet Temperature"
+    # The configuration key is retained for compatibility; TFI belongs to the
+    # optional mixed Zone 2 circuit, not the direct Zone 1 circuit.
+    zone1_floor_flow_temperature:  # TFI
+      name: "Estia Zone 2 Floor Inlet Temperature"
+    dhw_current_temperature:  # TTW; also used by the DHW climate entity
       name: "Estia DHW Temperature"
 
     # Estia-specific runtime sensors
