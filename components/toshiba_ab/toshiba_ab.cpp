@@ -2273,20 +2273,27 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
                    r15, frame->raw[15], r16, frame->raw[16], r17, frame->raw[17]);
         }
       } else if (dtype == 0x03C1 && frame_len >= 10) {
-        // Setpoint command
+        // Setpoint command. Zone 1 heat/cool put the encoded temperature
+        // directly after the selector, while DHW (selector 0x08) puts it in
+        // the fourth value slot.
         uint8_t subcmd = frame->raw[9];
-        uint8_t temp_enc = frame->raw[10];
+        uint8_t temp_enc = subcmd == 0x08 && frame_len >= 12 ? frame->raw[12] : frame->raw[10];
         float temp = temp_enc / 2.0f - 16.0f;
         ESP_LOGV(TAG, "    SETPOINT %s temp=%.1f°C(0x%02X)",
-                 subcmd == 0x01 ? "COOL" : "HEAT", temp, temp_enc);
+                 subcmd == 0x01 ? "ZONE1 COOL" : (subcmd == 0x02 ? "ZONE1 HEAT" : (subcmd == 0x08 ? "DHW" : "UNKNOWN")),
+                 temp, temp_enc);
       } else if (dtype == 0x03C0) {
         // Mode command
         uint8_t cmd = frame->raw[9];
         ESP_LOGV(TAG, "    MODE %s(0x%02X)", cmd == 0x01 ? "COOL" : (cmd == 0x02 ? "HEAT" : "???"), cmd);
       } else if (dtype == 0x0041) {
-        // Power command
+        // Independent operation switches sharing one dtype.
         uint8_t cmd = frame->raw[9];
-        ESP_LOGV(TAG, "    POWER %s(0x%02X)", cmd == 0x23 ? "ON" : (cmd == 0x22 ? "OFF" : "???"), cmd);
+        const char *operation =
+            cmd == 0x23
+                ? "ZONE1 ON"
+                : (cmd == 0x22 ? "ZONE1 OFF" : (cmd == 0x2C ? "DHW ON" : (cmd == 0x28 ? "DHW OFF" : "UNKNOWN")));
+        ESP_LOGV(TAG, "    OPERATION %s(0x%02X)", operation, cmd);
       } else if (dtype == 0x00A1) {
         // ACK — decode what was acknowledged
         uint8_t ack_d1 = frame->raw[9];
