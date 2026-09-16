@@ -2347,7 +2347,7 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
                 {20, this->water_inlet_temp_sensor_},           // TWI: water inlet
                 {21, this->water_outlet_temp_sensor_},          // TWO: water outlet
                 {22, this->tank_outlet_temp_sensor_},           // THO: tank outlet
-                {23, this->zone1_floor_flow_temp_sensor_},      // TFI: Zone 1 floor-flow
+                {23, this->zone1_floor_flow_temp_sensor_},      // TFI: floor inlet (only present with Zone 2)
             };
 
             for (const auto &position : temperature_positions) {
@@ -2358,7 +2358,10 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
               position.sensor->publish_state(temperature);
             }
 
-            const uint8_t raw_zone1_temperature = frame->raw[23];
+            // Zone 1 is the direct circuit, so the controller displays its
+            // outlet-water temperature (TWO). TFI belongs to the optional
+            // mixed Zone 2 circuit and is absent (0x00) on single-zone units.
+            const uint8_t raw_zone1_temperature = frame->raw[21];
             if (this->zone1_climate_ != nullptr && raw_zone1_temperature != 0x00 &&
                 raw_zone1_temperature != 0xFF) {
               const float temperature = raw_zone1_temperature / 2.0f - 23.5f;
