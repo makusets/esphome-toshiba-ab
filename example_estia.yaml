@@ -101,12 +101,10 @@ climate:
       name: "Estia Water Inlet Temperature"
     water_outlet_temperature:  # TWO; also used by the Zone 1 climate entity
       name: "Estia Water Outlet Temperature"
-    tank_outlet_temperature:  # THO
+    water_heater_outlet_temperature:  # THO
       name: "Estia Water Heater Outlet Temperature"
-    # The configuration key is retained for compatibility; TFI belongs to the
-    # optional mixed Zone 2 circuit, not the direct Zone 1 circuit.
-    zone1_floor_flow_temperature:  # TFI
-      name: "Estia Zone 2 Floor Inlet Temperature"
+    zone2_water_temperature:  # TFI; optional Zone 2 circuit
+      name: "Estia Zone 2 Water Temperature"
     dhw_current_temperature:  # TTW; also used by the DHW climate entity
       name: "Estia DHW Temperature"
 

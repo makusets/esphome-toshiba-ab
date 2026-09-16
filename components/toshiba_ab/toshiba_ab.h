@@ -891,8 +891,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_condenser_temp_sensor(sensor::Sensor *sensor) { condenser_temp_sensor_ = sensor; }
   void set_water_inlet_temp_sensor(sensor::Sensor *sensor) { water_inlet_temp_sensor_ = sensor; }
   void set_water_outlet_temp_sensor(sensor::Sensor *sensor) { water_outlet_temp_sensor_ = sensor; }
-  void set_tank_outlet_temp_sensor(sensor::Sensor *sensor) { tank_outlet_temp_sensor_ = sensor; }
-  void set_zone1_floor_flow_temp_sensor(sensor::Sensor *sensor) { zone1_floor_flow_temp_sensor_ = sensor; }
+  void set_water_heater_outlet_temp_sensor(sensor::Sensor *sensor) { water_heater_outlet_temp_sensor_ = sensor; }
+  void set_zone2_water_temp_sensor(sensor::Sensor *sensor) { zone2_water_temp_sensor_ = sensor; }
   void set_zone1_climate(ToshibaAbEstiaZone1Climate *zone1_climate) { zone1_climate_ = zone1_climate; }
   void set_hotwater_pump_heating_binary_sensor(binary_sensor::BinarySensor *sensor) { hotwater_pump_heating_binary_sensor_ = sensor; }
   void set_hotwater_resistor_heating_binary_sensor(binary_sensor::BinarySensor *sensor) { hotwater_resistor_heating_binary_sensor_ = sensor; }
@@ -1139,8 +1139,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   sensor::Sensor *condenser_temp_sensor_{nullptr};
   sensor::Sensor *water_inlet_temp_sensor_{nullptr};
   sensor::Sensor *water_outlet_temp_sensor_{nullptr};
-  sensor::Sensor *tank_outlet_temp_sensor_{nullptr};
-  sensor::Sensor *zone1_floor_flow_temp_sensor_{nullptr};
+  sensor::Sensor *water_heater_outlet_temp_sensor_{nullptr};
+  sensor::Sensor *zone2_water_temp_sensor_{nullptr};
   ToshibaAbEstiaZone1Climate *zone1_climate_{nullptr};
   binary_sensor::BinarySensor *hotwater_pump_heating_binary_sensor_{nullptr};
   binary_sensor::BinarySensor *hotwater_resistor_heating_binary_sensor_{nullptr};
