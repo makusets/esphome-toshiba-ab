@@ -224,7 +224,7 @@ R32/A0 exposes the main climate entity as a DHW thermostat with Heat/Off modes,
 DHW enable/disable and DHW setpoint control. It also creates a Zone 1 water
 thermostat by default. The Zone 1 entity supports Heat/Cool/Auto/Off, uses the
 Zone 1 setpoint as its target in fixed Heat/Cool operation and the confirmed
-floor-flow (TFI) reading as its current temperature. Auto enables Toshiba's
+water-outlet (TWO) reading as its current temperature. Auto enables Toshiba's
 heating-only Automatik/heating-curve function; the machine calculates the water
 target in that mode, so the thermostat does not publish a target temperature.
 Turning the Zone 1 thermostat off sends the A0 heating/cooling-operation command;

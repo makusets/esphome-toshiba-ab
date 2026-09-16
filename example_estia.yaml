@@ -53,7 +53,7 @@ climate:
     id: toshiba_estia
 
     # A second climate entity named "Toshiba Estia Zone 1 Water" is created
-    # automatically for Zone 1 heat/cool/auto/off and floor-flow temperature.
+    # automatically for Zone 1 heat/cool/auto/off and water-outlet temperature.
     # Auto uses Toshiba's heating curve, so it intentionally has no target temperature.
     # Off disables heating/cooling operation only; it leaves DHW enabled.
 
