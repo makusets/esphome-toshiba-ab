@@ -2250,24 +2250,26 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
 
       // Decode known dtype payloads
       if (dtype == 0x03C6 && frame_len >= 15) {
-        // Status/state change with temperatures
+        // Status/state change with DHW, Zone 1 and Zone 2 setpoints. These
+        // bytes were previously logged as current/setpoint/outdoor, but the
+        // setpoint changes in issue #197 show that interpretation is wrong.
         uint8_t flags = frame->raw[9];
-        float current = frame->raw[12] / 2.0f - 16.0f;
-        float setpoint = frame->raw[13] / 2.0f - 16.0f;
-        float outdoor = frame->raw[14] / 2.0f - 16.0f;
+        float dhw_setpoint = frame->raw[12] / 2.0f - 16.0f;
+        float zone1_setpoint = frame->raw[13] / 2.0f - 16.0f;
+        float zone2_setpoint = frame->raw[14] / 2.0f - 16.0f;
         ESP_LOGV(TAG, "    flags=0x%02X [%s%s%s] mode=0x%02X unknown=0x%02X",
                  flags,
                  (flags & 0x01) ? "POWER " : "",
                  (flags & 0x20) ? "COOL " : "",
                  (flags & 0x40) ? "HEAT " : "",
                  frame->raw[10], frame->raw[11]);
-        ESP_LOGV(TAG, "    current=%.1f°C(0x%02X) setpoint=%.1f°C(0x%02X) outdoor=%.1f°C(0x%02X)",
-                 current, frame->raw[12], setpoint, frame->raw[13], outdoor, frame->raw[14]);
+        ESP_LOGV(TAG, "    DHW=%.1f°C(0x%02X) zone1=%.1f°C(0x%02X) zone2=%.1f°C(0x%02X)",
+                 dhw_setpoint, frame->raw[12], zone1_setpoint, frame->raw[13], zone2_setpoint, frame->raw[14]);
         if (frame_len >= 18) {
           float r15 = frame->raw[15] / 2.0f - 16.0f;
           float r16 = frame->raw[16] / 2.0f - 16.0f;
           float r17 = frame->raw[17] / 2.0f - 16.0f;
-          ESP_LOGV(TAG, "    repeat: [15]=%.1f°C(0x%02X) [16]=%.1f°C(0x%02X) [17]=%.1f°C(0x%02X)",
+          ESP_LOGV(TAG, "    repeated setpoints: DHW=%.1f°C(0x%02X) zone1=%.1f°C(0x%02X) zone2=%.1f°C(0x%02X)",
                    r15, frame->raw[15], r16, frame->raw[16], r17, frame->raw[17]);
         }
       } else if (dtype == 0x03C1 && frame_len >= 10) {
@@ -2343,6 +2345,7 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
             };
             const EstiaTemperaturePosition temperature_positions[] = {
                 {12, this->compressor_discharge_temp_sensor_},  // TD: compressor discharge
+                {15, this->outdoor_temp_sensor_},               // TO: outdoor ambient
                 {18, this->condenser_temp_sensor_},             // TC: condenser
                 {20, this->water_inlet_temp_sensor_},           // TWI: water inlet
                 {21, this->water_outlet_temp_sensor_},          // TWO: water outlet
