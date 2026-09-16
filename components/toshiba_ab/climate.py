@@ -87,8 +87,8 @@ CONF_COMPRESSOR_DISCHARGE_TEMPERATURE = "compressor_discharge_temperature"
 CONF_CONDENSER_TEMPERATURE = "condenser_temperature"
 CONF_WATER_INLET_TEMPERATURE = "water_inlet_temperature"
 CONF_WATER_OUTLET_TEMPERATURE = "water_outlet_temperature"
-CONF_TANK_OUTLET_TEMPERATURE = "tank_outlet_temperature"
-CONF_ZONE1_FLOOR_FLOW_TEMPERATURE = "zone1_floor_flow_temperature"
+CONF_WATER_HEATER_OUTLET_TEMPERATURE = "water_heater_outlet_temperature"
+CONF_ZONE2_WATER_TEMPERATURE = "zone2_water_temperature"
 CONF_ZONE1_CLIMATE = "zone1_climate"
 CONF_HOTWATER_PUMP_HEATING = "hotwater_pump_heating"
 CONF_HOTWATER_RESISTOR_HEATING = "hotwater_resistor_heating"
@@ -325,13 +325,13 @@ CONFIG_SCHEMA = cv.All(
             device_class=DEVICE_CLASS_TEMPERATURE,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
-        cv.Optional(CONF_TANK_OUTLET_TEMPERATURE): sensor.sensor_schema(
+        cv.Optional(CONF_WATER_HEATER_OUTLET_TEMPERATURE): sensor.sensor_schema(
             unit_of_measurement=UNIT_CELSIUS,
             accuracy_decimals=1,
             device_class=DEVICE_CLASS_TEMPERATURE,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
-        cv.Optional(CONF_ZONE1_FLOOR_FLOW_TEMPERATURE): sensor.sensor_schema(
+        cv.Optional(CONF_ZONE2_WATER_TEMPERATURE): sensor.sensor_schema(
             unit_of_measurement=UNIT_CELSIUS,
             accuracy_decimals=1,
             device_class=DEVICE_CLASS_TEMPERATURE,
@@ -656,8 +656,8 @@ async def to_code(config):
         (CONF_CONDENSER_TEMPERATURE, var.set_condenser_temp_sensor),
         (CONF_WATER_INLET_TEMPERATURE, var.set_water_inlet_temp_sensor),
         (CONF_WATER_OUTLET_TEMPERATURE, var.set_water_outlet_temp_sensor),
-        (CONF_TANK_OUTLET_TEMPERATURE, var.set_tank_outlet_temp_sensor),
-        (CONF_ZONE1_FLOOR_FLOW_TEMPERATURE, var.set_zone1_floor_flow_temp_sensor),
+        (CONF_WATER_HEATER_OUTLET_TEMPERATURE, var.set_water_heater_outlet_temp_sensor),
+        (CONF_ZONE2_WATER_TEMPERATURE, var.set_zone2_water_temp_sensor),
     ):
         if config_key in config:
             sens = await sensor.new_sensor(config[config_key])
