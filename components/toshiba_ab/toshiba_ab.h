@@ -999,6 +999,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   // from the DHW switch (00:41, 2C/28), so turning Zone 1 off leaves DHW on.
   void send_estia_zone1_operation(bool on);
   void send_estia_dhw(bool on);
+  void send_estia_dhw_boost(bool on);
   void send_estia_mode(uint8_t mode_cmd);  // 0x02=heat, 0x01=cool
   void send_estia_automatik_mode(bool on);
   void send_estia_demand(uint8_t demand);  // 0-10V demand (0..15)
