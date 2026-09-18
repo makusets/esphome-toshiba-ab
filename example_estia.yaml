@@ -119,6 +119,43 @@ climate:
     backup_heater_hours:
       name: "Estia Backup Heater Hours"
 
+    sensors:
+      - address: 0x6A           # Required for every sensor added, in this case, electrical current sensor of the external unit
+        scale: 0.1              # default 1.0; here we decode raw/10 as current is reported in deciAmps
+        interval: 30s           # default 5min
+        sensor:
+          name: "Estia System Current"  #required
+
+          #all other available options of sensor in esphome:
+
+          unit_of_measurement: "A"  #optional, defaults none
+          accuracy_decimals: 2  #optional
+          device_class: current  #optional but recommended for HA
+          state_class: measurement  #optional but recommended for HA
+
+
+################# Available Sensors for ESTIA R32 ##################################
+#
+#  Address            Description
+#
+#  0x0B	            	Mixing-valve position	
+#  0x70	              Compressor frequency	
+#  0x6A	            	Compressor electrical current	
+#  0x72	        	   	Fan speed 1	
+#  0x73	        	  	2nd fan speed 
+#  0x74	            	Expansion-valve position	
+#  0x7A	            	High pressure	
+#  0x0E	            	Low pressure	
+#  0xC0	            	Water flow
+#  0x0F	          		Software version 
+#
+#
+#  Use the logs to determine which sensors report valid data for your unit
+#  everytime a sensor response is received, it is logged,
+#  an invalid response means sensor is not available
+###########################################################################
+
+
     # 0-10V demand sensor (shows current demand value 0..15)
     # demand:
     #   name: "Estia 0-10V Demand"
