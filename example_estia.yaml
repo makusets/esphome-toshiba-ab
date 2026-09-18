@@ -50,6 +50,8 @@ climate:
   
     # DHW thermostat: Heat enables hot-water production and Off disables it.
     # Its target/current temperatures are the DHW setpoint and tank temperature.
+    # The Boost preset controls the wired controller's Hot Water Boost setting;
+    # select None/Normal to turn boost off.
     name: "Toshiba Estia DHW"
     id: toshiba_estia
 

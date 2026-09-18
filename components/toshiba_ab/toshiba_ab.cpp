@@ -1389,6 +1389,7 @@ void ToshibaAbClimate::setup() {
       // The R32/A0 climate entity represents domestic hot water, not the
       // heat pump's space-heating/cooling operating mode.
       this->traits_.set_supported_modes({climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT});
+      this->traits_.set_supported_presets({climate::CLIMATE_PRESET_NONE, climate::CLIMATE_PRESET_BOOST});
     }
     this->traits_.set_supported_fan_modes({});
     this->traits_.set_supported_swing_modes({});
@@ -2286,6 +2287,10 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
         // Mode command
         uint8_t cmd = frame->raw[9];
         ESP_LOGV(TAG, "    MODE %s(0x%02X)", cmd == 0x01 ? "COOL" : (cmd == 0x02 ? "HEAT" : "???"), cmd);
+      } else if (dtype == 0x03C4 && frame_len >= 11) {
+        // DHW boost command: selector 0x10 followed by 0x10=on or 0x00=off.
+        ESP_LOGV(TAG, "    DHW BOOST %s (selector=0x%02X value=0x%02X)",
+                 frame->raw[10] == 0x10 ? "ON" : "OFF", frame->raw[9], frame->raw[10]);
       } else if (dtype == 0x0041) {
         // Independent operation switches sharing one dtype.
         uint8_t cmd = frame->raw[9];
@@ -2301,6 +2306,7 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
         const char *ack_what = "???";
         if (ack_d1 == 0x03 && ack_d2 == 0xC0) ack_what = "MODE";
         else if (ack_d1 == 0x03 && ack_d2 == 0xC1) ack_what = "SETPOINT";
+        else if (ack_d1 == 0x03 && ack_d2 == 0xC4) ack_what = "DHW BOOST";
         else if (ack_d1 == 0x00 && ack_d2 == 0x41) ack_what = "POWER";
         else if (ack_d1 == 0x00 && ack_d2 == 0x5F) ack_what = "DEMAND";
         ESP_LOGV(TAG, "    ACK for %s(%02X:%02X)", ack_what, ack_d1, ack_d2);
@@ -2439,6 +2445,7 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       bool is_cooling = (flags & 0x20) != 0;
       bool is_heating = (flags & 0x40) != 0;
       bool automatik = (frame->raw[10] & 0x04) != 0;
+      bool dhw_boost = (frame->raw[10] & 0x40) != 0;
       this->publish_estia_zone1_state_(zone1_on, is_cooling, is_heating, automatik, zone1_setpoint);
 
       ESP_LOGV(TAG, "Status: power=%s flags=0x%02X %s DHW=%.1f°C zone1=%.1f°C zone2=%.1f°C",
@@ -2469,6 +2476,14 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       if (this->target_temperature != dhw_setpoint) {
         ESP_LOGI(TAG, "Status: DHW setpoint=%.1f°C", dhw_setpoint);
         this->target_temperature = dhw_setpoint;
+        changes++;
+      }
+
+      climate::ClimatePreset new_preset =
+          dhw_boost ? climate::CLIMATE_PRESET_BOOST : climate::CLIMATE_PRESET_NONE;
+      if (!this->preset.has_value() || this->preset.value() != new_preset) {
+        ESP_LOGI(TAG, "Status: DHW boost=%s", dhw_boost ? "ON" : "OFF");
+        this->preset = new_preset;
         changes++;
       }
 
@@ -2522,6 +2537,7 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       bool is_cooling = (flags & 0x20) != 0;
       bool is_heating = (flags & 0x40) != 0;
       bool automatik = (frame->raw[10] & 0x04) != 0;
+      bool dhw_boost = (frame->raw[10] & 0x40) != 0;
       float dhw_setpoint = frame->raw[12] / 2.0f - 16.0f;
       float zone1_setpoint = frame->raw[13] / 2.0f - 16.0f;
       float zone2_setpoint = frame->raw[14] / 2.0f - 16.0f;
@@ -2544,6 +2560,13 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       if (this->target_temperature != dhw_setpoint) {
         ESP_LOGI(TAG, "Status: DHW setpoint=%.1f°C", dhw_setpoint);
         this->target_temperature = dhw_setpoint;
+        changes++;
+      }
+      climate::ClimatePreset new_preset =
+          dhw_boost ? climate::CLIMATE_PRESET_BOOST : climate::CLIMATE_PRESET_NONE;
+      if (!this->preset.has_value() || this->preset.value() != new_preset) {
+        ESP_LOGI(TAG, "Status: DHW boost=%s", dhw_boost ? "ON" : "OFF");
+        this->preset = new_preset;
         changes++;
       }
       if (this->dhw_setpoint_sensor_ != nullptr)
@@ -3259,6 +3282,19 @@ void ToshibaAbClimate::control(const climate::ClimateCall &call) {
       float temp = call.get_target_temperature().value();
       this->send_estia_dhw_setpoint(temp);
     }
+    if (call.get_preset().has_value()) {
+      switch (call.get_preset().value()) {
+        case climate::CLIMATE_PRESET_NONE:
+          this->send_estia_dhw_boost(false);
+          break;
+        case climate::CLIMATE_PRESET_BOOST:
+          this->send_estia_dhw_boost(true);
+          break;
+        default:
+          ESP_LOGW(TAG, "Unsupported Estia DHW climate preset requested");
+          break;
+      }
+    }
     return;
   }
 
@@ -3649,6 +3685,32 @@ void ToshibaAbClimate::send_estia_dhw(bool on) {
   ESP_LOGD(TAG, "TX: DHW %s (cmd=0x%02X)", on ? "ON" : "OFF", command);
   log_raw_data("Estia TX", frame, sizeof(frame));
   this->send_estia_tracked_(frame, sizeof(frame), 0x0041);  // ACK: 00:A1:00:41
+}
+
+void ToshibaAbClimate::send_estia_dhw_boost(bool on) {
+  if (this->read_only_) {
+    ESP_LOGW(TAG, "Read-only mode: not sending Estia DHW boost command");
+    return;
+  }
+
+  // Captured from the R32 wired remote in issue #197. The first payload byte
+  // selects DHW boost and the second enables (0x10) or disables (0x00) it.
+  uint16_t src = this->estia_source_address_;
+  uint16_t dst = this->estia_master_address_;
+  uint8_t frame[] = {
+    0xA0, 0x00, 0x11, 0x0B, 0x00,
+    (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),
+    (uint8_t)(dst >> 8), (uint8_t)(dst & 0xFF),
+    0x03, 0xC4, 0x10, on ? (uint8_t) 0x10 : (uint8_t) 0x00, 0x00, 0x00,
+    0x00, 0x00
+  };
+  size_t crc_len = sizeof(frame) - 2;
+  uint16_t crc = estia_crc16(frame, crc_len);
+  frame[crc_len] = (crc >> 8) & 0xFF;
+  frame[crc_len + 1] = crc & 0xFF;
+  ESP_LOGD(TAG, "TX: DHW boost %s", on ? "ON" : "OFF");
+  log_raw_data("Estia TX", frame, sizeof(frame));
+  this->send_estia_tracked_(frame, sizeof(frame), 0x03C4);  // ACK: 00:A1:03:C4
 }
 
 void ToshibaAbClimate::send_estia_mode(uint8_t mode_cmd) {
