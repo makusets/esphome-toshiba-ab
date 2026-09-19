@@ -21,6 +21,7 @@ from esphome.const import (
     DEVICE_CLASS_DURATION,
     DEVICE_CLASS_PROBLEM,
     DEVICE_CLASS_TEMPERATURE,
+    ENTITY_CATEGORY_CONFIG,
     ENTITY_CATEGORY_DIAGNOSTIC,
     STATE_CLASS_MEASUREMENT,
     STATE_CLASS_TOTAL_INCREASING,
@@ -223,7 +224,10 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_REMOTE): cv.uint8_t,
         cv.Optional(
             CONF_REMOTE_ADDRESS_SELECT, default={"name": "Toshiba Remote Address"}
-        ): select.select_schema(ToshibaAbRemoteAddressSelect),
+        ): select.select_schema(
+            ToshibaAbRemoteAddressSelect,
+            entity_category=ENTITY_CATEGORY_CONFIG,
+        ),
         cv.Optional(CONF_COMMAND_MODE_READ, default=0x08): cv.uint8_t,
         cv.Optional(CONF_COMMAND_MODE_WRITE, default=0x80): cv.uint8_t,
         cv.Optional(CONF_FRAME_FORMAT, default="auto"): cv.one_of(*FRAME_FORMATS, lower=True),
