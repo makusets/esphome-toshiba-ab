@@ -197,26 +197,6 @@ addresses, temperature reporting, diagnostic sensors, power estimation and all
 other air-to-air options. [`example.yaml`](example.yaml) is a ready-to-edit,
 smaller device configuration.
 
-### Runtime remote address
-
-The component creates a **Toshiba Remote Address** select by default. In Home
-Assistant it appears in the device page's **Configuration** section (not under
-Controls or Diagnostic), because changing the address changes how the device
-communicates on the AB bus. The select offers `0x40` and `0x41` and does not
-require an extra YAML entry. After updating this external component, compile
-and install the new ESPHome firmware and reload the device integration in Home
-Assistant so the new entity is discovered.
-
-The name can be customized in the climate configuration when desired:
-
-```yaml
-climate:
-  - platform: toshiba_ab
-    name: "Toshiba AC"
-    remote_address_select:
-      name: "Toshiba Remote Address"
-```
-
 ### Optional BME280
 
 The boards expose I²C so a BME280 can publish local temperature, humidity and

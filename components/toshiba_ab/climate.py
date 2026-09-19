@@ -208,7 +208,15 @@ def _hardware_uart_rx_pin(value):
     return num
 
 
-def _add_default_estia_zone1_climate(config):
+def _add_automatic_entities(config):
+    # Insert this before the component schema is evaluated rather than relying
+    # on a dictionary-valued cv.Optional default. This makes creation explicit
+    # and also supports ESPHome releases that do not materialize complex
+    # defaults for nested entity schemas.
+    config.setdefault(
+        CONF_REMOTE_ADDRESS_SELECT, {CONF_NAME: "Toshiba Remote Address"}
+    )
+
     if str(config.get(CONF_FRAME_FORMAT, "auto")).lower() == "a0":
         config.setdefault(
             CONF_ZONE1_CLIMATE, {CONF_NAME: "Toshiba Estia Zone 1 Water"}
@@ -217,14 +225,12 @@ def _add_default_estia_zone1_climate(config):
 
 
 CONFIG_SCHEMA = cv.All(
-    _add_default_estia_zone1_climate,
+    _add_automatic_entities,
     climate._CLIMATE_SCHEMA.extend(
     {
         cv.Optional(CONF_MASTER): cv.uint8_t,
         cv.Optional(CONF_REMOTE): cv.uint8_t,
-        cv.Optional(
-            CONF_REMOTE_ADDRESS_SELECT, default={"name": "Toshiba Remote Address"}
-        ): select.select_schema(
+        cv.Optional(CONF_REMOTE_ADDRESS_SELECT): select.select_schema(
             ToshibaAbRemoteAddressSelect,
             entity_category=ENTITY_CATEGORY_CONFIG,
         ),
