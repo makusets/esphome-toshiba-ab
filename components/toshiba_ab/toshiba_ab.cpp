@@ -1280,6 +1280,13 @@ ToshibaAbClimate::ToshibaAbClimate() {
 
 climate::ClimateTraits ToshibaAbClimate::traits() { return traits_; }
 
+void ToshibaAbRemoteAddressSelect::control(const std::string &value) {
+  const uint8_t address = value == "0x41" ? 0x41 : 0x40;
+  this->parent_->set_remote_address(address);
+  this->publish_state(value);
+  ESP_LOGI(TAG, "Remote address changed at runtime to %s", value.c_str());
+}
+
 climate::ClimateTraits ToshibaAbEstiaZone1Climate::traits() {
   climate::ClimateTraits traits;
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
@@ -1360,6 +1367,10 @@ void ToshibaAbClimate::dump_config() {
 
 void ToshibaAbClimate::setup() {
   this->boot_millis_ = millis();
+  if (this->remote_address_select_ != nullptr &&
+      (this->remote_address_ == 0x40 || this->remote_address_ == 0x41)) {
+    this->remote_address_select_->publish_state(this->remote_address_ == 0x41 ? "0x41" : "0x40");
+  }
   if (this->failed_crcs_sensor_ != nullptr) {
     this->failed_crcs_sensor_->publish_state(0);
   }
