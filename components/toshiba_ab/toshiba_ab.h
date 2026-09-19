@@ -3,6 +3,7 @@
 #include "esphome/components/binary_sensor/binary_sensor.h"
 #include "esphome/components/climate/climate.h"
 #include "esphome/components/sensor/sensor.h"
+#include "esphome/components/select/select.h"
 #include "esphome/components/switch/switch.h"
 #include "esphome/components/text_sensor/text_sensor.h"
 #include "esphome/components/uart/uart.h"
@@ -16,6 +17,15 @@ namespace esphome {
 namespace toshiba_ab {
 
 class ToshibaAbClimate;
+
+class ToshibaAbRemoteAddressSelect : public select::Select {
+ public:
+  explicit ToshibaAbRemoteAddressSelect(ToshibaAbClimate *parent) : parent_(parent) {}
+
+ protected:
+  void control(const std::string &value) override;
+  ToshibaAbClimate *parent_;
+};
 
 class ToshibaAbEstiaZone1Climate : public climate::Climate {
  public:
@@ -860,6 +870,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
     estia_source_address_ = remote_address_;
     remote_address_auto_ = false;
   }
+  void set_remote_address_select(ToshibaAbRemoteAddressSelect *address_select) {
+    remote_address_select_ = address_select;
+  }
   bool get_master_address_auto() const { return master_address_auto_; }
   void set_filter_frames(bool filter_frames) {
     filter_frames_ = filter_frames;
@@ -970,6 +983,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_indoor_units_text_sensor(text_sensor::TextSensor *sensor) { this->indoor_units_text_sensor_ = sensor; }
   void set_remote_count_text_sensor(text_sensor::TextSensor *sensor) { this->remote_count_text_sensor_ = sensor; }
   void set_remote_addresses_text_sensor(text_sensor::TextSensor *sensor) { this->remote_addresses_text_sensor_ = sensor; }
+
+  ToshibaAbRemoteAddressSelect *remote_address_select_{nullptr};
 
   void send_command(struct DataFrame command);
   bool send_raw_frame_from_text(const std::string &frame_text);
