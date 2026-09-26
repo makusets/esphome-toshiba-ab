@@ -1815,13 +1815,14 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         case OPCODE_STATUS: {
           // sync power, mode, fan and target temp from the unit to the climate
           // component
-          // Sanity-guard: the AC's 0x81 marker byte lives at a format-dependent
-          // offset. Classic TCC-Link puts it at raw[5] (data[1]); HM puts it at
-          // raw[4] (data[0]). Reject any STATUS frame missing the marker, but
-          // check the right offset per variant — otherwise every HM STATUS
-          // gets dropped and the climate component never syncs from the AC.
-          const uint8_t marker_off = (this->data_reader.frame_format() == FrameFormat::HM) ? 4 : 5;
-          if (frame->size() <= marker_off || frame->raw[marker_off] != 0x81) {
+          // Wrapped HM frames are normalised with the 0x81 marker at raw[4].
+          // Some HM units also emit classic-shaped STATUS frames, which pass
+          // through the reader unchanged and retain the marker at raw[5].
+          // Accept both HM representations; requiring raw[4] for every HM
+          // frame caused valid classic-shaped broadcasts to be discarded.
+          const bool marker_at_normal_offset = frame->size() > 5 && frame->raw[5] == 0x81;
+          const bool marker_at_hm_offset = this->is_hm_variant() && frame->size() > 4 && frame->raw[4] == 0x81;
+          if (!marker_at_normal_offset && !marker_at_hm_offset) {
             log_data_frame("STATUS ignored (marker != 0x81)", frame);
             break;
           }
@@ -1842,7 +1843,6 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           ESP_LOGD(TAG, "Power: %d, Mode: %02X, Fan: %02X, Vent: %02X, Target Temp: %.1f",
                    tcc_state.power, tcc_state.mode, tcc_state.fan, tcc_state.vent, tcc_state.target_temp);
 
-
           sync_from_received_state();
 
           break;
@@ -1850,10 +1850,11 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         case OPCODE_EXTENDED_STATUS: {
           // sync power, mode, fan and target temp from the unit to the climate
           // component
-          // See OPCODE_STATUS above for the rationale: 0x81 marker is at
-          // raw[4] on HM, raw[5] on classic.
-          const uint8_t marker_off_ext = (this->data_reader.frame_format() == FrameFormat::HM) ? 4 : 5;
-          if (frame->size() <= marker_off_ext || frame->raw[marker_off_ext] != 0x81) {
+          // See OPCODE_STATUS above: HM buses may carry both the normalised
+          // wrapped representation and an unchanged classic-shaped frame.
+          const bool marker_at_normal_offset = frame->size() > 5 && frame->raw[5] == 0x81;
+          const bool marker_at_hm_offset = this->is_hm_variant() && frame->size() > 4 && frame->raw[4] == 0x81;
+          if (!marker_at_normal_offset && !marker_at_hm_offset) {
             log_data_frame("EXTENDED STATUS ignored (marker != 0x81)", frame);
             break;
           }
