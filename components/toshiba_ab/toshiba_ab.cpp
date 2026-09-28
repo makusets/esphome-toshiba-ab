@@ -2606,13 +2606,13 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
         const uint8_t sensor_id = this->last_sensor_query_id_;
         if (frame->raw[11] == 0x00 && frame->raw[12] == 0xA2) {
           ESP_LOGW(TAG, "0x1A: sensor id=0x%02X returned A2 (undefined/not supported)", sensor_id);
-        } else if (frame_len >= 15 && frame->raw[11] == 0x00 && frame->raw[12] == 0x2C) {
-          const uint8_t value = frame->raw[14];
+        } else if (frame_len >= 13 && frame->raw[11] == 0x00 && frame->raw[12] == 0x2C) {
+          const uint16_t value = (static_cast<uint16_t>(frame->raw[13]) << 8) | frame->raw[14];
           for (auto &polled_sensor : this->polled_sensors_) {
             if (polled_sensor.id == sensor_id && polled_sensor.sensor != nullptr) {
               const float scaled = static_cast<float>(value) * polled_sensor.scale;
               polled_sensor.sensor->publish_state(scaled);
-              ESP_LOGD(TAG, "0x1A sensor: id=0x%02X raw=%u -> %.3f", sensor_id, value, scaled);
+              ESP_LOGD(TAG, "0x1A sensor: id=0x%02X raw=0x%04X -> %.3f", sensor_id, value, scaled);
               break;
             }
           }
