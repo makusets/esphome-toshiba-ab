@@ -809,7 +809,18 @@ void ToshibaAbClimate::handle_remote_address_collision_(uint8_t address, const c
     next++;
   }
   this->remote_address_ = std::min(next, TOSHIBA_REMOTE_MAX);
-  ESP_LOGI(TAG, "%s at 0x%02X; switching to remote address 0x%02X", reason, old, this->remote_address_);
+  this->announce_ack_received_ = false;
+  this->remote_reannounce_pending_ = true;
+  this->remote_reannounce_started_ms_ = millis();
+  this->update_frame_validation_();
+  ESP_LOGI(TAG, "%s at 0x%02X; switching to remote address 0x%02X and re-registering", reason, old,
+           this->remote_address_);
+
+  // A collision is commonly discovered only when the physical controller
+  // sends its first periodic frame, after the finite boot announce window has
+  // closed. Announce the replacement address immediately; the setup interval
+  // retries it until the master acknowledges that address.
+  this->remote_announce();
 }
 
 void ToshibaAbClimate::remote_announce() {
@@ -1528,8 +1539,14 @@ void ToshibaAbClimate::setup() {
       return;
     }
     const uint32_t now = millis();
+    if (this->remote_reannounce_pending_ &&
+        (now - this->remote_reannounce_started_ms_) >= REMOTE_REANNOUNCE_TIMEOUT_MILLIS) {
+      this->remote_reannounce_pending_ = false;
+      ESP_LOGW(TAG, "Remote address 0x%02X was not registered within %us; stopping re-registration announces",
+               this->remote_address_, REMOTE_REANNOUNCE_TIMEOUT_MILLIS / 1000);
+    }
     if (this->announce_ack_received_ || now < INITIAL_FRAME_SEND_BLOCK_MILLIS ||
-        now >= INITIAL_FRAME_SEND_BLOCK_MILLIS * 2) {
+        (now >= INITIAL_FRAME_SEND_BLOCK_MILLIS * 2 && !this->remote_reannounce_pending_)) {
       return;
     }
     ESP_LOGV(TAG, "Remote announce: sending broadcast announce");
@@ -1782,6 +1799,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
                      frame->source, frame->dest, this->remote_address_);
           } else {
             this->announce_ack_received_ = true;
+            this->remote_reannounce_pending_ = false;
             this->update_frame_validation_();
             ESP_LOGI(TAG, "Received announce ACK (0x0D) from 0x%02X, stopping announce", frame->source);
           }
@@ -2023,6 +2041,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           this->master_address_ = frame->source;
           // Mark that we've received the announce ACK so we don't repeatedly auto-update
           this->announce_ack_received_ = true;
+          this->remote_reannounce_pending_ = false;
           this->update_frame_validation_();
         } else {
           ESP_LOGV(TAG, "Announce ACK from 0x%02X ignored; announce_ack_received_ already true", frame->source);

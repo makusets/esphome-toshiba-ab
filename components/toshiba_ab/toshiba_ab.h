@@ -44,6 +44,7 @@ const uint32_t PACKET_MIN_WAIT_MILLIS = 200;
 const uint32_t FRAME_SEND_MILLIS_FROM_LAST_RECEIVE = 500;
 const uint32_t FRAME_SEND_MILLIS_FROM_LAST_SEND = 500;
 const uint32_t INITIAL_FRAME_SEND_BLOCK_MILLIS = 30000;
+const uint32_t REMOTE_REANNOUNCE_TIMEOUT_MILLIS = 30000;
 const uint32_t BUS_DISCOVERY_PERIOD_MILLIS = 180000;
 
 // const uint8_t TOSHIBA_MASTER = 0x00;  replaced by master_address_ which is set up in yaml
@@ -1208,6 +1209,11 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool ext_temp_enabled_{false};
   // Flag set when a broadcast announce ACK containing 0x0D is received
   bool announce_ack_received_{false};
+  // Keep announcing after an automatic address change until the newly selected
+  // address is registered. The normal boot-time announce window may already
+  // have elapsed by the time an existing wall remote is first observed.
+  bool remote_reannounce_pending_{false};
+  uint32_t remote_reannounce_started_ms_{0};
   // If true, component will not send any commands to the central unit
   // (useful for read-only deployments). Default: false
   bool read_only_{false};
