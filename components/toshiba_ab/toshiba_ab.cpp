@@ -1815,14 +1815,12 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         case OPCODE_STATUS: {
           // sync power, mode, fan and target temp from the unit to the climate
           // component
-          // Wrapped HM frames are normalised with the 0x81 marker at raw[4].
-          // Some HM units also emit classic-shaped STATUS frames, which pass
-          // through the reader unchanged and retain the marker at raw[5].
-          // Accept both HM representations; requiring raw[4] for every HM
-          // frame caused valid classic-shaped broadcasts to be discarded.
-          const bool marker_at_normal_offset = frame->size() > 5 && frame->raw[5] == 0x81;
-          const bool marker_at_hm_offset = this->is_hm_variant() && frame->size() > 4 && frame->raw[4] == 0x81;
-          if (!marker_at_normal_offset && !marker_at_hm_offset) {
+          // HM frames are canonicalised with the 0x81 marker at raw[4], while
+          // classic TCC-Link frames retain it at raw[5]. Checking the offset
+          // for the selected format prevents a forced HM configuration from
+          // making classic traffic look like valid HM traffic.
+          const uint8_t marker_offset = this->is_hm_variant() ? 4 : 5;
+          if (frame->size() <= marker_offset || frame->raw[marker_offset] != 0x81) {
             log_data_frame("STATUS ignored (marker != 0x81)", frame);
             break;
           }
@@ -1850,11 +1848,10 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         case OPCODE_EXTENDED_STATUS: {
           // sync power, mode, fan and target temp from the unit to the climate
           // component
-          // See OPCODE_STATUS above: HM buses may carry both the normalised
-          // wrapped representation and an unchanged classic-shaped frame.
-          const bool marker_at_normal_offset = frame->size() > 5 && frame->raw[5] == 0x81;
-          const bool marker_at_hm_offset = this->is_hm_variant() && frame->size() > 4 && frame->raw[4] == 0x81;
-          if (!marker_at_normal_offset && !marker_at_hm_offset) {
+          // See OPCODE_STATUS above: require the marker at the offset for the
+          // selected frame format rather than accepting the other dialect.
+          const uint8_t marker_offset = this->is_hm_variant() ? 4 : 5;
+          if (frame->size() <= marker_offset || frame->raw[marker_offset] != 0x81) {
             log_data_frame("EXTENDED STATUS ignored (marker != 0x81)", frame);
             break;
           }
