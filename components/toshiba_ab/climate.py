@@ -760,6 +760,7 @@ async def to_code(config):
             cv.Required(CONF_FRAME): cv.templatable(cv.string_strict),
         }
     ),
+    synchronous=True,
 )
 async def to_code_send_raw_frame(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg, await cg.get_variable(config[CONF_ID]))
