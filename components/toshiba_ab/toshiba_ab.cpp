@@ -2765,14 +2765,19 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
     }
   }
 
-  if (!frame->is_tu2c() && frame->crc() != frame->calculate_crc()) {
+  const uint8_t received_crc = frame->crc();
+  const uint8_t calculated_crc = frame->calculate_crc();
+  if (!frame->is_tu2c() && received_crc != calculated_crc) {
     // Classic TCC-Link: the XOR CRC is the unit's actual algorithm, so a
     // mismatch means the frame is corrupt — drop it. The HM variant uses
     // a different (still-undecoded) CRC algorithm, so every frame fails
     // the XOR check by design; tolerate the mismatch and process anyway.
     if (!this->is_hm_variant()) {
       this->record_crc_failure_();
-      ESP_LOGW(TAG, "CRC check failed");
+      // The XOR syndrome helps distinguish a recurring flipped bit from
+      // broader line noise, although it cannot identify the affected byte.
+      ESP_LOGW(TAG, "CRC check failed (received=0x%02X calculated=0x%02X syndrome=0x%02X)",
+               received_crc, calculated_crc, received_crc ^ calculated_crc);
       log_data_frame("Failed frame", frame);
       return false;
     }

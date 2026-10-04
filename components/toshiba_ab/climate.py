@@ -1,3 +1,5 @@
+import inspect
+
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
@@ -144,6 +146,14 @@ ToshibaAbOnDataReceivedTrigger = toshiba_ab_ns.class_(
 
 ToshibaAbSendRawFrameAction = toshiba_ab_ns.class_(
     "ToshibaAbSendRawFrameAction", automation.Action
+)
+
+# ESPHome added the ``synchronous`` registration flag after the 2025.11
+# release. Pass it when supported, while remaining loadable by older versions.
+RAW_FRAME_ACTION_OPTIONS = (
+    {"synchronous": True}
+    if "synchronous" in inspect.signature(automation.register_action).parameters
+    else {}
 )
 
 FrameFormat = toshiba_ab_ns.enum("FrameFormat")
@@ -760,7 +770,7 @@ async def to_code(config):
             cv.Required(CONF_FRAME): cv.templatable(cv.string_strict),
         }
     ),
-    synchronous=True,
+    **RAW_FRAME_ACTION_OPTIONS,
 )
 async def to_code_send_raw_frame(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg, await cg.get_variable(config[CONF_ID]))
