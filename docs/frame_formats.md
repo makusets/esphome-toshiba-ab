@@ -64,7 +64,13 @@ SRC:DST:OPCODE1:LEN:DATA...:CRC
 The reader takes the fourth byte as `LEN`, expects `4 + LEN + 1` total bytes,
 and validates the one-byte CRC. With the default frame filter enabled it ignores
 obvious invalid normal frames whose first byte is greater than `0xA0`, which is
-usually caused by electrical noise in the line, unless `filter_frames` is set to `false`
+usually caused by electrical noise in the line, unless `filter_frames` is set to `false`.
+
+CRC failure logs include the received checksum, the checksum calculated from the
+captured bytes, and their XOR `syndrome`. A syndrome with one bit set is consistent
+with a single-bit error somewhere in the frame (the XOR checksum cannot identify
+which byte); a stable syndrome suggests a repeatable bit error, while changing
+syndromes suggest broader signal-integrity or sampling problems.
 
 ### Auto-detection
 
