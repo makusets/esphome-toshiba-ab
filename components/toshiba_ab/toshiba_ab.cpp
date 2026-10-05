@@ -2268,7 +2268,9 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
         case 0x10: type_name = "HEARTBEAT"; break;
         case 0x11: type_name = "COMMAND"; break;
         case 0x15: type_name = "DATA_REQ"; break;
+        case 0x17: type_name = "SENSOR_REQ"; break;
         case 0x18: type_name = "ACK/DATA_RESP"; break;
+        case 0x1A: type_name = "SENSOR_RESP"; break;
         case 0x1C: type_name = "STATE_CHANGE"; break;
         case 0x55: type_name = "STATUS_SHORT"; break;
         case 0x58: type_name = "STATUS"; break;
