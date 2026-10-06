@@ -1,5 +1,9 @@
 ########################################################################################################################################
-#   This is an example of the ESPHome yaml file needed to work with Home Assistant. Make sure you use your own network settings.       #
+#   This is an example of the ESPHome yaml file needed to work with Home Assistant. Make sure you use your own network settings.
+#
+#   This example contain a lot of optional settings that are not needed for the system to work and options that do not apply to all
+#    systems or protocols
+#
 ########################################################################################################################################
 
 esphome:
@@ -47,7 +51,7 @@ uart:
   tx_pin: GPIO12 # GPIO10 for v3 or GPIO15 for v1 board
   rx_pin: GPIO13
   baud_rate: 2400
-  parity: EVEN # EVEN for TCC-Link or NONE if your unit use the TU2C protocol, protocol is selected below in climate section
+  parity: EVEN            # EVEN for TCC-Link and HM protocols // NONE for TU2C protocol, protocol is selected below in climate section
   rx_buffer_size: 2048    # optionally increase buffer to avoid dropped bytes
 
 
@@ -61,47 +65,47 @@ external_components:
 climate:
   - platform: toshiba_ab
     name: "My AC System"
-
-
     id: my_ac_system      # Required
 
-    autonomous: false           # Optional, default false
-                                # Needed if you want to operate the AC whithout a wall remote controller
-                                # In autonomous mode, the ESP will always report a temperature to AC unit, either from a sensor configured below (recommended) or will fake it
+    autonomous: true            # Optional, defaults to true, sends regular pings to master and reports temp if setup as header remote
 
-    # --- Address of the AC master ---
     master: 0x00                # optional, will autodetect if omitted (recommended)
-    remote: 0x40                # optional, will autodetect if omitted (recommended)
-    # --- Command mode bytes (optional) ---
+    remote: 0x40                # optional, will autoassign if omitted (recommended)
+    
     command_mode_read: 0x08     # optional, defaults to 0x08 if omitted; use 0x0D for some commercial systems
     command_mode_write: 0x80    # optional, defaults to 0x80 if omitted; use 0xD0 for some commercial systems
     
-    frame_format: N             # optional, defaults to autodetect; force "n" for TCC-Link, "hm" for its HM variation, or "U" for TU2C; check UART parity too
-    filter_frames: true         # optional, default true; reject normal TCC-Link frames with source > 0xA0
+    frame_format: tcc-link      # optional, defaults to autodetect; force "tcc-link" for TCC-Link, "hm" for its HM variation, or "tu2c" for TU2C; check UART parity too
+                                # further info on protocols settings is found in docs/frame_formats.md
+                                
+    filter_frames: true         # optional, default true; reject normal TCC-Link frames with source > 0xA0, helps discarding ghost data created by voltage noise in the AB line
 
-    # --- Bus collision guard ---
+    
     packet_min_wait: 200ms      # optional, default 200ms; minimum idle time after received bytes before the next packet is parsed
-                                # Increase if you still see bus/data collisions; lower only if your bus needs faster packet processing
+    
+    read_only: true             # optional, defaults to false; used for debugging to listen to the traffic on the bus without sending
+    read_only_switch:
+      name: "Read only"         # optional switch to turn on and off read only mode while the esp is running
 
-    ###### Optional settings  #######
 
     filter_alert:               # Optional binary sensor to report filter alert status if available
       name: "Filter Alert"
+
 
     # --- Forward a temperature sensor data to AC  ---
     # The temperature sensor with the given id below will be passed to the thermostat and used to report room temperature to the AC unit
     # If "enabled: true" this will override the temperature reported by the remote controller or the internal sensor of the AC unit,
     # regardless of settings in the AC system
     # If "enabled: false" or enabled is omitted, the AC unit will use its internal sensor or the remote controller temperature, depending on settings
-    # In autonomous mode, a sensor should always be configured here, regardless of enabled setting. 
+    # If the esp is the only remote or setup as header, a sensor should ideally be configured here, regardless of enabled setting.
 
-    report_sensor_temp:
+    report_sensor_temp:         # optional
       enabled: true             # default false, when "true" forces AC unit to use this temperature as room temperature control regardless of AC unit settings
       sensor: bme280_temp       # must match an existing temp sensor id in this yaml file
                                 # it can be any temperature sensor supported, including other HA sensors configured here
       interval: 1min            # default 5min if omitted
 
-    # --- Query additional internal AC sensors ---
+    # --- Optional queries for additional internal AC sensors ---
     sensors:
       - address: 0x6A           # Required for every sensor added, in this case, AC current sensor of the external unit
         scale: 0.1              # default 1.0; here we decode raw/10 as current is reported in deciAmps
@@ -122,8 +126,8 @@ climate:
           name: "AC System Outdoor Temperature" #required
           unit_of_measurement: "°C" 
 
-################# Available Sensors ##################################
-#
+################# Available Sensors ##############
+
 ######### indoor unit data #######################
 #
 #       0x00 //Room Temp as reported by master (Control Temp) (°C) 
