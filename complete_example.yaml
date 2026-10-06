@@ -87,6 +87,8 @@ climate:
     read_only_switch:
       name: "Read only"         # optional switch to turn on and off read only mode while the esp is running
 
+    sensor_polling_switch:      # optional switch to temporarily disable sensor polling (default: enabled)
+      name: "Sensor Polling"    # Turn this OFF to stop sensor queries and reduce log spam when debugging AB-bus traffic
 
     filter_alert:               # Optional binary sensor to report filter alert status if available
       name: "Filter Alert"

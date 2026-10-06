@@ -10,6 +10,18 @@ ESTIA hydronic heat-pump systems that communicate over the two-wire **AB bus**.
 
 ## Changelog
 
+### October 2026 — New Estia R32 features
+
+Added support for four additional Estia R32 (Series 1 and later) features:
+
+- **Night Setback** - Energy-saving night temperature reduction
+- **Silent Mode** - Reduced operational noise
+- **Anti Bacteria** - Antibacterial function activation
+- **Frost Mode** - Frost prevention protection
+
+These features are available as ESPHome switches when using `frame_format: a0` for R32 Estia systems.
+See the [new features documentation](docs/new_features.md) for details and examples.
+
 ### July 2026 — TU2C and ESTIA R410A support
 
 The TU2C protocol is now fully functional, thanks to contributions from
@@ -167,7 +179,7 @@ For byte-level differences, aliases and detection behavior, read
 
 ### Minimal ESPHome configuration
 
-This is the complete component-specific portion for TCC-Link/HM. Add your normal
+This is the complete component-specific portion for TCC-Link and HM. Add your normal
 ESPHome device, Wi-Fi, API and OTA sections. For TU2C, change both highlighted
 settings to `parity: NONE` and `frame_format: tu2c`.
 
@@ -189,7 +201,7 @@ climate:
   - platform: toshiba_ab
     name: "Toshiba AC"
     id: toshiba_ac
-    frame_format: auto # use tu2c for TU2C systems
+    frame_format: auto # use tu2c for TU2C systems or hm for HM systems
 ```
 
 See [`complete_example.yaml`](complete_example.yaml) for autonomous operation,
