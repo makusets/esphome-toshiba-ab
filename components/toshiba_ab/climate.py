@@ -318,7 +318,7 @@ CONFIG_SCHEMA = cv.All(
                 )
             ),
             key=CONF_NAME,
-            default={"name": "Sensor Polling", "restore_mode": "DEFAULT_ON"},
+            default={"name": "Disable sensor polling", "restore_mode": "DEFAULT_OFF"},
         ),
 
         cv.Optional(CONF_ZONE1_SWITCH): cv.maybe_simple_value(

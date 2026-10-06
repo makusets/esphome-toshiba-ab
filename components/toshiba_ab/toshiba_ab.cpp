@@ -1686,11 +1686,11 @@ void ToshibaAbClimate::setup() {
   if (this->read_only_switch_)
     this->read_only_switch_->publish_state(this->read_only_);
   
-  // Ensure the sensor polling switch reports its initial state on startup (default ON)
+  // Ensure the sensor polling switch reports its initial state on startup (default OFF = polling enabled)
   if (this->sensor_polling_switch_) {
-    this->sensor_polling_switch_->state = true;
-    this->sensor_polling_switch_->publish_state(true);
-    this->sensor_polling_enabled_ = true;
+    this->sensor_polling_switch_->state = false;
+    this->sensor_polling_switch_->publish_state(false);
+    this->sensor_polling_enabled_ = true;  // polling enabled by default
   }
 
 }
@@ -4473,15 +4473,16 @@ void ToshibaAbReadOnlySwitch::write_state(bool state) {
 }
 
 void ToshibaAbSensorPollingSwitch::write_state(bool state) {
-  // Update the sensor polling flag in the parent climate component
-  this->climate_->set_sensor_polling_enabled(state);
+  // Inverted logic: state=true means DISABLE polling, state=false means ENABLE polling
+  bool polling_enabled = !state;
+  this->climate_->set_sensor_polling_enabled(polling_enabled);
   
   if (state) {
-    ESP_LOGI(TAG, "Sensor polling enabled");
-  } else {
-    ESP_LOGI(TAG, "Sensor polling disabled - useful for debugging AB-bus traffic");
+    ESP_LOGI(TAG, "Sensor polling DISABLED - useful for debugging AB-bus traffic");
     // Flush any pending queries to prevent queue full warnings
     this->climate_->flush_sensor_query_queue_();
+  } else {
+    ESP_LOGI(TAG, "Sensor polling ENABLED");
   }
   
   // Always publish the state we just set (respecting user's toggle)
