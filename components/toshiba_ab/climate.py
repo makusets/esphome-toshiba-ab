@@ -39,6 +39,7 @@ CODEOWNERS = ["@muxa"]
 toshiba_ab_ns = cg.esphome_ns.namespace("toshiba_ab")
 
 CONF_CONNECTED = "connected"
+CONF_WALL_MOUNTED_LOUVRE = "wall_mounted_louvre"
 CONF_VENT = "vent"
 CONF_READ_ONLY_SWITCH = "read_only_switch"
 CONF_FAILED_CRCS = "failed_crcs"
@@ -156,6 +157,10 @@ RAW_FRAME_ACTION_OPTIONS = (
     else {}
 )
 
+ToshibaAbWallMountedLouvreSelect = toshiba_ab_ns.class_(
+    "ToshibaAbWallMountedLouvreSelect", select.Select
+)
+
 FrameFormat = toshiba_ab_ns.enum("FrameFormat")
 FRAME_FORMATS = {
     "auto": None,
@@ -234,10 +239,19 @@ def _add_automatic_entities(config):
     return config
 
 
+def _validate_wall_mounted_louvre(config):
+    if CONF_WALL_MOUNTED_LOUVRE in config and config[CONF_FRAME_FORMAT] not in (
+        "auto", "n", "normal", "tcc-link"
+    ):
+        raise cv.Invalid("wall_mounted_louvre requires classic TCC-Link (auto or normal frame_format)")
+    return config
+
+
 CONFIG_SCHEMA = cv.All(
     _add_automatic_entities,
     climate._CLIMATE_SCHEMA.extend(
     {
+        cv.Optional(CONF_WALL_MOUNTED_LOUVRE): select.select_schema(ToshibaAbWallMountedLouvreSelect),
         cv.Optional(CONF_MASTER): cv.uint8_t,
         cv.Optional(CONF_REMOTE): cv.uint8_t,
         cv.Optional(CONF_REMOTE_ADDRESS_SELECT): select.select_schema(
@@ -504,6 +518,7 @@ CONFIG_SCHEMA = cv.All(
         ),
     }
     ).extend(uart.UART_DEVICE_SCHEMA).extend(cv.COMPONENT_SCHEMA),
+    _validate_wall_mounted_louvre,
 )
 
 
@@ -587,6 +602,12 @@ async def to_code(config):
         zone1_climate = cg.new_Pvariable(config[CONF_ZONE1_CLIMATE][CONF_ID], var)
         await climate.register_climate(zone1_climate, config[CONF_ZONE1_CLIMATE])
         cg.add(var.set_zone1_climate(zone1_climate))
+
+    if CONF_WALL_MOUNTED_LOUVRE in config:
+        louvre = await select.new_select(
+            config[CONF_WALL_MOUNTED_LOUVRE], var, options=["Swing", "Top", "Middle", "Bottom"]
+        )
+        cg.add(var.set_wall_mounted_louvre_select(louvre))
 
     if CONF_MASTER in config:
         cg.add(var.set_master_address(config[CONF_MASTER]))
