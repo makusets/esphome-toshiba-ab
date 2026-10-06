@@ -1325,14 +1325,6 @@ bool ToshibaAbClimate::control_wall_mounted_louvre(uint8_t position) {
     ESP_LOGW(TAG, "Wall-mounted louvre requires classic TCC-Link framing");
     return false;
   }
-  if (this->read_only_) {
-    ESP_LOGW(TAG, "Read-only mode: not controlling wall-mounted louvre");
-    return false;
-  }
-  if (!this->announce_ack_received_ && millis() < INITIAL_FRAME_SEND_BLOCK_MILLIS * 2) {
-    ESP_LOGW(TAG, "Wall-mounted louvre unavailable during boot grace period");
-    return false;
-  }
   if (!this->wall_mounted_louvre_mode_.has_value() || *this->wall_mounted_louvre_mode_ < MODE_HEAT ||
       *this->wall_mounted_louvre_mode_ > MODE_AUTO ||
       !std::isfinite(this->tcc_state.target_temp)) {
