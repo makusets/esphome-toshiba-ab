@@ -98,6 +98,7 @@ climate:
       name: "Estia Zone 2 Setpoint"
 
     # System temperatures reported by the periodic E8:C0 response from master
+    # These do not need to be queried individually as separate sensors
     # This will not fill if autonomous is set to false
     
     compressor_discharge_temperature:  # TD
@@ -112,13 +113,14 @@ climate:
       name: "Estia Water Outlet Temperature"
     water_heater_outlet_temperature:  # THO
       name: "Estia Water Heater Outlet Temperature"
-    zone2_water_temperature:  # TFI; optional Zone 2 circuit
+    zone2_water_temperature:  # TFI; optional Zone 2 circuit, floor inlet temperature
       name: "Estia Zone 2 Water Temperature"
     dhw_current_temperature:  # TTW; also used by the DHW climate entity
       name: "Estia DHW Temperature"
 
     # Estia-specific runtime sensors
     # This will not fill if autonomous is set to false
+    
     compressor_hours:
       name: "Estia Compressor Hours"
     waterpump_hours:
@@ -146,16 +148,26 @@ climate:
 #  Address            Description
 #
 #  0x0B	            	Mixing-valve position	
-#  0x70	              Compressor frequency	
-#  0x6A	            	Compressor electrical current	
-#  0x72	        	   	Fan speed 1	
-#  0x73	        	  	2nd fan speed 
+#  0x0E	            	Low pressure
+#  0x0F	          		Software version 
+#  0x60               Heat exchanger temperature
+#  0x63               Compressor Suction Temperature TS
+#  0x65               Heat Sink Temperature
+#  0x6A	            	Compressor electrical current
+#  0x6D               Heat Exchanger Coil Temperature
+#  0x70	              Compressor frequency
+#  0x72	        	   	Outdoor Fan 1 speed	
+#  0x73	        	  	Outdoor Fan 2 speed 
 #  0x74	            	Expansion-valve position	
 #  0x7A	            	High pressure	
-#  0x0E	            	Low pressure	
 #  0xC0	            	Water flow
-#  0x0F	          		Software version 
-#
+#  0xF0               Micro Computer Energized hours
+#  0xF1               Hot Water Compressor hours (might be the same as compressor_hours from E8:C1 response)
+#  0XF2               Cooling Compressor hours
+#  0xF3               Heating Compressor hours
+#  0XF5               Hot Water E Heater hours?? not sure what it means
+#  0xF6               Back Up Heater hours
+#  0xF7               Booster Heater On hours
 #
 #  Use the logs to determine which sensors report valid data for your unit
 #  everytime a sensor response is received, it is logged,
