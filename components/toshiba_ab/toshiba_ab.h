@@ -18,6 +18,15 @@ namespace toshiba_ab {
 
 class ToshibaAbClimate;
 
+class ToshibaAbWallMountedLouvreSelect : public select::Select {
+ public:
+  explicit ToshibaAbWallMountedLouvreSelect(ToshibaAbClimate *parent) : parent_(parent) {}
+
+ protected:
+  void control(const std::string &value) override;
+  ToshibaAbClimate *parent_;
+};
+
 class ToshibaAbRemoteAddressSelect : public select::Select {
  public:
   explicit ToshibaAbRemoteAddressSelect(ToshibaAbClimate *parent) : parent_(parent) {}
@@ -851,6 +860,12 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
  public:
   ToshibaAbClimate();
 
+  void set_wall_mounted_louvre_select(ToshibaAbWallMountedLouvreSelect *louvre) {
+    wall_mounted_louvre_select_ = louvre;
+  }
+  bool control_wall_mounted_louvre(uint8_t position);
+  void decode_wall_mounted_louvre_(const DataFrame *frame);
+
   void dump_config() override;
   void setup() override;
   void loop() override;
@@ -1112,6 +1127,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   binary_sensor::BinarySensor *filter_alert_sensor_{nullptr};
   bool filter_alert_state_{false}; 
   binary_sensor::BinarySensor *connected_binary_sensor_{nullptr};
+  ToshibaAbWallMountedLouvreSelect *wall_mounted_louvre_select_{nullptr};
+  optional<uint8_t> wall_mounted_louvre_mode_;
   switch_::Switch *vent_switch_{nullptr};
   switch_::Switch *read_only_switch_{nullptr};
   switch_::Switch *zone1_switch_{nullptr};
