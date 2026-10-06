@@ -103,7 +103,7 @@ climate:
       name: "Frost Mode"
 
     sensor_polling_switch:
-      name: "Sensor Polling Active"
+      name: "Sensor Polling Disabled"
 
     # Setpoints reported by the periodic 03:C6 status frame.
     dhw_setpoint:
