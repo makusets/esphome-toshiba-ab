@@ -197,6 +197,37 @@ addresses, temperature reporting, diagnostic sensors, power estimation and all
 other air-to-air options. [`example.yaml`](example.yaml) is a ready-to-edit,
 smaller device configuration.
 
+### Optional wall-mounted louvre control
+
+For wall-mounted air-to-air units using classic TCC-Link, add an optional select
+inside the `toshiba_ab` climate configuration:
+
+```yaml
+climate:
+  - platform: toshiba_ab
+    name: "Toshiba AC"
+    frame_format: auto
+    wall_mounted_louvre:
+      name: "Toshiba AC Louvre"
+      id: ac_louvre
+```
+
+Options are **Swing**, **Top**, **Middle**, and **Bottom**. The select updates
+from received STATUS and EXTENDED STATUS frames, including changes made using
+another controller. Commands require a received status with a known operating
+mode and target temperature; the select waits for the unit to report the result.
+Commands use the configured remote address as source and master address as
+destination, with a calculated checksum. ACKs must come from that master and
+be addressed to that remote. Read-only mode and the existing boot grace period
+also block commands.
+
+This command format was captured and tested in COOL mode on a RAV-HM561KRTP-E
+using classic TCC-Link (see [issue #221](https://github.com/makusets/esphome-toshiba-ab/issues/221)).
+Other operating modes and units need hardware verification. Use `frame_format:
+auto` or `normal`; HM framing, TU2C and ESTIA are unsupported. With `auto`, the
+control is blocked if the detected format is not classic TCC-Link. Positions
+5–7 are not exposed because their meanings have not been verified.
+
 ### Optional BME280
 
 The boards expose I²C so a BME280 can publish local temperature, humidity and

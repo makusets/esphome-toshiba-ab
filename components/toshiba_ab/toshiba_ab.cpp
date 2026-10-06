@@ -1,4 +1,5 @@
 #include "toshiba_ab.h"
+#include "wall_mounted_louvre.h"
 #include "esphome.h"
 #include "esphome/components/network/util.h"
 #include <inttypes.h>
@@ -1291,6 +1292,65 @@ ToshibaAbClimate::ToshibaAbClimate() {
 
 climate::ClimateTraits ToshibaAbClimate::traits() { return traits_; }
 
+void ToshibaAbWallMountedLouvreSelect::control(const std::string &value) {
+  const auto index = this->index_of(value);
+  if (index.has_value()) {
+    this->parent_->control_wall_mounted_louvre(static_cast<uint8_t>(*index + 1));
+  }
+  // Wait for the unit's status rather than publishing the requested position.
+}
+
+void ToshibaAbClimate::decode_wall_mounted_louvre_(const DataFrame *frame) {
+  if (this->wall_mounted_louvre_select_ == nullptr || this->data_reader.frame_format() != FrameFormat::NORMAL ||
+      frame->data_length <= STATUS_DATA_TARGET_TEMP_BYTE) {
+    return;
+  }
+  this->wall_mounted_louvre_mode_ =
+      (frame->data[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_MODE_MASK) >> STATUS_DATA_MODE_SHIFT_BITS;
+  const uint8_t position = decode_wall_mounted_louvre_position(frame->data[STATUS_DATA_MODEPOWER_BYTE]);
+  if (position >= 1 && position <= 4) {
+    const size_t index = position - 1;
+    if (this->wall_mounted_louvre_select_->active_index() != index) {
+      this->wall_mounted_louvre_select_->publish_state(index);
+    }
+  } else {
+    ESP_LOGV(TAG, "Unsupported wall-mounted louvre position: %u", static_cast<unsigned>(position));
+  }
+}
+
+bool ToshibaAbClimate::control_wall_mounted_louvre(uint8_t position) {
+  if (this->wall_mounted_louvre_select_ == nullptr || position < 1 || position > 4) {
+    return false;
+  }
+  if (this->data_reader.frame_format() != FrameFormat::NORMAL) {
+    ESP_LOGW(TAG, "Wall-mounted louvre requires classic TCC-Link framing");
+    return false;
+  }
+  if (this->read_only_) {
+    ESP_LOGW(TAG, "Read-only mode: not controlling wall-mounted louvre");
+    return false;
+  }
+  if (!this->announce_ack_received_ && millis() < INITIAL_FRAME_SEND_BLOCK_MILLIS * 2) {
+    ESP_LOGW(TAG, "Wall-mounted louvre unavailable during boot grace period");
+    return false;
+  }
+  if (!this->wall_mounted_louvre_mode_.has_value() || *this->wall_mounted_louvre_mode_ < MODE_HEAT ||
+      *this->wall_mounted_louvre_mode_ > MODE_AUTO ||
+      !std::isfinite(this->tcc_state.target_temp)) {
+    ESP_LOGW(TAG, "Wall-mounted louvre requires a received unit status with a known mode and target");
+    return false;
+  }
+  // Captured on RAV-HM561KRTP-E, issue #221. Only the louvre flag is set;
+  // the trailing temperature and low fan bits are not requests to change them.
+  DataFrame command{};
+  const auto raw = encode_wall_mounted_louvre_command(this->remote_address_, this->master_address_,
+                                                       *this->wall_mounted_louvre_mode_,
+                                                       position, temp_celcius_to_payload(this->tcc_state.target_temp));
+  std::copy(raw.begin(), raw.end(), command.raw);
+  this->send_command(command);
+  return true;
+}
+
 void ToshibaAbRemoteAddressSelect::control(const std::string &value) {
   const uint8_t address = value == "0x41" ? 0x41 : 0x40;
   this->parent_->set_remote_address(address);
@@ -1372,6 +1432,7 @@ void ToshibaAbClimate::dump_config() {
   LOG_SENSOR("  ", "CRC Failure Rate", this->crc_failures_5min_sensor_);
   ESP_LOGCONFIG(TAG, "  Reader diagnostics: enabled (30s updates)");
   ESP_LOGCONFIG(TAG, "  Filter alert sensor: %s", this->filter_alert_sensor_ ? "yes" : "no");
+  LOG_SELECT("  ", "Wall-mounted louvre", this->wall_mounted_louvre_select_);
   ESP_LOGCONFIG(TAG, "  Vent switch: %s", this->vent_switch_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Read-only switch: %s", this->read_only_switch_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Remote address select: %s", this->remote_address_select_ ? "yes" : "no");
@@ -1844,6 +1905,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           }
 
           log_data_frame("STATUS", frame);
+          this->decode_wall_mounted_louvre_(frame);
 
           tcc_state.power = (frame->data[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_POWER_MASK);
           tcc_state.mode =
@@ -1875,6 +1937,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           }
 
           log_data_frame("EXTENDED STATUS", frame);
+          this->decode_wall_mounted_louvre_(frame);
 
           constexpr uint8_t rt_off = STATUS_DATA_TARGET_TEMP_BYTE + 1;
 
