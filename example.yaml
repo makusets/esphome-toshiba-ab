@@ -16,8 +16,8 @@ esp8266:
 
 # Enable logging
 logger:
-  baud_rate: 0  #disable hardware UART log, necessary to use the pins for UART communication with the AC unit 
-  level: DEBUG
+  baud_rate: 0  # required to disable hardware UART to use the pins for UART communication with the AC unit 
+  level: DEBUG  # Optional, defaults to DEBUG, set to VERBOSE if trying to diagnose problems
 
 # Enable Home Assistant API
 api:
