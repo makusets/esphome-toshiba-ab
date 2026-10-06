@@ -3168,13 +3168,13 @@ void ToshibaAbClimate::loop() {
       if (millis_since_last_read >= this->packet_min_wait_millis_) {
         // can start reading packet
 
-        if (!data_reader.complete && data_reader.data_index_ > 0) {
-          // ESP_LOGW(TAG, "Reset pending frame buffer (%d)",
-          // data_reader.data_index_); log_raw_data("Pending: ",
-          // data_reader.frame.raw, data_reader.data_index_);
+        const bool incomplete_frame = !data_reader.complete && data_reader.data_index_ > 0;
+        if (incomplete_frame) {
+          ESP_LOGV(TAG, "Discarding incomplete frame (%u buffered bytes) after %" PRIu32 "ms idle",
+                   static_cast<unsigned>(data_reader.data_index_), millis_since_last_read);
+          log_raw_data("Discarded incomplete frame", data_reader.frame.raw, data_reader.data_index_);
         }
         can_read_packet = true;
-        const bool incomplete_frame = !data_reader.complete && data_reader.data_index_ > 0;
         data_reader.reset(incomplete_frame);
         last_read_millis_ = 0;
       }
