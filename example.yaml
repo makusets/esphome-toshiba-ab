@@ -40,11 +40,7 @@ wifi:
 
 captive_portal:
 
-#I2C bus for optional temperature sensor
-i2c:
-  sda: GPIO4  # GPIO2 for v3 and v1 boards
-  scl: GPIO14
-  scan: True
+
 
 external_components:
   - source:
@@ -81,24 +77,7 @@ climate:
     # more options can be found in the complete_example yaml and the estia specific yaml examples
 
 
-sensor:                        # needed for the bme temp sensor to work if installed
-  - platform: bme280_i2c
-    temperature:
-      name: "Indoor Temperature"
-      id: bme_temp
-      oversampling: 1x
-    pressure:
-      name: "Indoor Pressure"
-      id: bme_pressure
-      accuracy_decimals: 0
-      oversampling: 1x
-    humidity:
-      name: "Indoor Humidity"
-      id: bme_humidity
-      accuracy_decimals: 0
-      oversampling: 2x
-    address: 0x76
-    update_interval: 30s
+
 
     
 
