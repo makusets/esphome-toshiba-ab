@@ -3830,8 +3830,6 @@ void ToshibaAbClimate::send_estia_dhw_boost(bool on) {
   frame[crc_len + 1] = crc & 0xFF;
   ESP_LOGD(TAG, "TX: DHW boost %s", on ? "ON" : "OFF");
   log_raw_data("Estia TX", frame, sizeof(frame));
-  this->estia_dhw_boost_ = on;  // Track state optimistically
-  if (this->dhw_boost_switch_) this->dhw_boost_switch_->publish_state(on);
   this->send_estia_tracked_(frame, sizeof(frame), 0x03C4);  // ACK: 00:A1:03:C4
 }
 
@@ -3841,8 +3839,8 @@ void ToshibaAbClimate::send_estia_night_setback(bool on) {
     return;
   }
 
-  // Night Setback: selector 0x88, value 0x08=on or 0x00=off
-  // Captured from R32 Estia external remote (0x40)
+  // R32 Estia A0 protocol: Night Setback (selector 0x88, value 0x08=on or 0x00=off)
+  // NOT using make_estia_first_gen_frame() - this is A0 protocol, not R410A first-gen
   uint16_t src = this->estia_source_address_;
   uint16_t dst = this->estia_master_address_;
   uint8_t frame[] = {
