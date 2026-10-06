@@ -9,7 +9,7 @@ traffic. Not all protocols are automatically identified.
 
 | `frame_format` value | Format | Typical use | UART parity | Auto-detected? | Notes |
 | --- | --- | --- | --- | --- | --- |
-| `auto` | Automatic | Recommended first try for most installs | See target format | N/A | Default. Starts as normal TCC-Link and confirms `normal`, `hm`, or `a0` from traffic. |
+| `auto` | Automatic | Recommended first try for most installs | See target format | N/A | Default. Starts as normal TCC-Link and confirms `normal` from traffic. |
 | `n`, `normal`, `tcc-link` | Classic TCC-Link | Most central HVAC systems using the AB bus | `EVEN` | Yes | The component confirms this when it sees a valid master keepalive. |
 | `hm` | HM / newer RAV-RM  | Newer HM-range/RAV-RM indoor units | `EVEN` | Yes | Uses an `A0:00` prefix and different source/destination byte positions, then is normalised internally. |
 | `a0`, `estia_a0` | Estia R32 protocol | R32 Estia heat pumps | `EVEN` | Yes | Very similar to HM, Uses two-byte CRC-16. |
