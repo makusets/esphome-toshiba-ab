@@ -39,7 +39,7 @@ external_components:
 
 # AB-Bus UART
 uart:
-  tx_pin: GPIO15    # Adjust for your board variant
+  tx_pin: GPIO15    # Adjust for your board variant if different
   rx_pin: GPIO13
   baud_rate: 2400
   parity: EVEN
@@ -47,39 +47,47 @@ uart:
 
 climate:
   - platform: toshiba_ab
-  
+    
     # DHW thermostat: Heat enables hot-water production and Off disables it.
     # Its target/current temperatures are the DHW setpoint and tank temperature.
-    # The Boost preset controls the wired controller's Hot Water Boost setting;
-    # select None/Normal to turn boost off.
+    # The Boost preset in the thermostat controls the Hot Water Boost setting;
+    # select None/Normal preset in the thermostat to turn boost off.
+    
     name: "Toshiba Estia DHW"
     id: toshiba_estia
 
-    # When a0 frame_format is selected, a second thermostat named "Toshiba Estia Zone 1 Water" is created
-    # automatically for Zone 1 heat/cool/auto/off and water-outlet temperature.
+
+    # A second thermostat is created automatically for Zone 1 heat/cool/auto/off and water-outlet temperature.
     # Auto uses Toshiba's heating curve, so it intentionally has no target temperature.
     # Off disables heating/cooling operation only; it leaves DHW enabled.
+    # Optionally the name and id can be overriden
+
+    zone1_climate:      # Optionally override thermostat naming and id
+      name: "Toshiba Estia Zone 1"
+      id: estia_zone1
 
     # A0-protocol (used by R32 Estia/heat pump models, NOT TCC-Link or TU2C)
-    frame_format: a0
-    filter_frames: false
+
+    frame_format: a0  #required
 
     # Optional one-byte addresses, the defaults below may be omitted.
     # remote: 0x40
     # master: 0x00
 
-    # Autonomous polling: query E8:C0 (temperatures) and E8:C1 (operating hours)
+    # Autonomous polling: query E8:C0 (temperatures) and E8:C1 (operating hours) regularly
     # This is the default setting and can be omitted, uncomment and change to false if you need it for some reason
     # autonomous: true
 
-    # Diagnostic sensors
+    # Optional Diagnostic sensors
     connected:
-      name: "Estia Connected"
+      name: "Estia Connected"  #sensor that monitors the connection to the master is alive
     failed_crcs:
-      name: "Estia Failed CRCs"
-      #read-only switch enable putting the esp in read-only mode for experimentation or diagnosing, with no comms being sent
+      name: "Estia Failed CRCs"  #sensor that counts failed frames
+      
+    #read-only enables putting the esp in read-only mode for experimentation or diagnosing, with no comms being sent
+    read_only: true             # optional, defaults to false; used for debugging to listen to the traffic on the bus without sending
     read_only_switch:
-      name: "Estia Read Only"
+      name: "Read only"         # optional switch to turn on and off read only mode while the esp is running
 
     # Setpoints reported by the periodic 03:C6 status frame.
     dhw_setpoint:
@@ -89,8 +97,7 @@ climate:
     zone2_setpoint:
       name: "Estia Zone 2 Setpoint"
 
-    # Confirmed R32 temperatures reported by the periodic E8:C0 response.
-    # Declaring these sensors does not add separate service-code queries.
+    # System temperatures reported by the periodic E8:C0 response from master
     # This will not fill if autonomous is set to false
     
     compressor_discharge_temperature:  # TD
@@ -177,17 +184,7 @@ climate:
 #     set_action:
 #       - lambda: id(toshiba_estia).send_estia_demand((uint8_t)x);
 
-# Optional: switches for runtime control
-switch:
-  - platform: template
-    name: "Estia Autonomous"
-    id: estia_autonomous
-    optimistic: true
-    restore_mode: RESTORE_DEFAULT_ON
-    turn_on_action:
-      - lambda: id(toshiba_estia).set_autonomous(true);
-    turn_off_action:
-      - lambda: id(toshiba_estia).set_autonomous(false);
+
   # - platform: template
   #   name: "Estia Demand Enable"
   #   id: estia_demand_enable
