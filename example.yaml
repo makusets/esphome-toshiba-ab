@@ -8,7 +8,7 @@ esp8266:
 
 # Optional logging. Disable serial logging to keep UART0 free for the AB bus.
 logger:
-  baud_rate: 0
+  baud_rate: 0                # Required to be set to 0 in order to use the UART for the Toshiba system
   level: DEBUG                # Optional; DEBUG is the logger's default.
 
 api:                         # Optional; enables the Home Assistant native API.
@@ -46,7 +46,7 @@ climate:
     # master_address: auto   # Default: auto. Or require a specific address, e.g. 0x00.
     # esp_address: auto      # Default: auto. Or keep a fixed address, e.g. 0x40.
     # name: Toshiba AC       # Default: Toshiba AC for air; Estia DHW for water.
-                             # With water, this names DHW; dhw.name takes precedence.
+                             # With water, this names DHW.
 
     # Water-only thermostats (ignored for air):
     # dhw: true              # Default: true; default name: Estia DHW.
@@ -62,11 +62,6 @@ climate:
     # zone_2:
     #   name: Upstairs
 
-    # Optional diagnostic entities, created automatically with these names:
-    # diagnostic:
-    #   name: Toshiba AB Diagnostic
-    # reset_button:
-    #   name: Toshiba AB Reset
 
 # This branch currently identifies the bus and selects a local address;
 # thermostat control and bus registration/transmission are not implemented yet.
