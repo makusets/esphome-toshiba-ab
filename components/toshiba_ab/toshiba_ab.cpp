@@ -63,6 +63,36 @@ static const char *air_mode_name(uint8_t mode) {
     default: return "unknown";
   }
 }
+static const char *air_fan_name(uint8_t fan) {
+  switch (fan) {
+    case 2: return "auto";
+    case 5: return "low";
+    case 4: return "medium";
+    case 3: return "high";
+    default: return "unknown";
+  }
+}
+
+static const char *air_preset_name(uint8_t preset) {
+  switch (preset) {
+    case 0x00: return "none";
+    case 0x01: return "boost";
+    case 0x03: return "eco";
+    case 0x10: return "sleep";
+    default: return "unknown";
+  }
+}
+
+static const char *air_louvre_name(uint8_t position) {
+  switch (position) {
+    case 1: return "swing";
+    case 2: return "top";
+    case 3: return "middle";
+    case 4: return "bottom";
+    default: return "unknown";
+  }
+}
+
 constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_OPCODE;
 constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_LENGTH;
 constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_DATA_TYPE;
@@ -474,10 +504,11 @@ void ToshibaAbClimate::process_master_status_(Protocol protocol, const uint8_t *
 
 void ToshibaAbClimate::log_decoded_status_(Protocol protocol, const DecodedStatus &status) {
   std::string fields;
-  const auto integer = [&fields](const char *name, unsigned value) {
-    char field[64];
-    std::snprintf(field, sizeof(field), "%s=%u ", name, value);
-    fields += field;
+  const auto setting = [&fields](const char *name, const char *value) {
+    fields += std::string(name) + "=" + value + " ";
+  };
+  const auto flag = [&setting](const char *name, bool value) {
+    setting(name, value ? "on" : "off");
   };
   const auto temperature = [&fields](const char *name, float value) {
     if (std::isnan(value))
@@ -488,40 +519,35 @@ void ToshibaAbClimate::log_decoded_status_(Protocol protocol, const DecodedStatu
   };
   if (!status.water) {
     if (status.has_air_state) {
-      integer("power", status.power);
-      fields += std::string("mode=") + air_mode_name(status.mode) + " ";
-      integer("mode_code", status.mode);
-      integer("fan_code", status.fan);
-      integer("ventilation", status.ventilation);
+      flag("power", status.power);
+      setting("mode", air_mode_name(status.mode));
+      setting("fan", air_fan_name(status.fan));
+      flag("ventilation", status.ventilation);
     }
     if (status.has_air_flags) {
-      integer("flags", status.flags);
-      integer("preheating", status.preheating);
-      integer("filter_alert", status.filter_alert);
+      flag("preheating", status.preheating);
+      flag("filter_alert", status.filter_alert);
     }
     if (status.has_louvre)
-      integer("louvre_position", status.louvre);
+      setting("louvre_position", air_louvre_name(status.louvre));
     if (status.has_preset)
-      integer("preset_code", status.preset);
+      setting("preset", air_preset_name(status.preset));
     temperature("target", status.target[0]);
     temperature("room", status.current[0]);
   } else {
     if (status.has_water_flags) {
-      integer("flags", status.flags);
-      integer("mode_flags", status.mode_flags);
-      integer("dhw_enabled", status.dhw_enabled);
-      integer("zone1_enabled", status.zone1_enabled);
-      integer("heating", status.heating);
-      integer("cooling", status.cooling);
-      integer("auto", status.automatic);
-      integer("dhw_boost", status.boost);
+      flag("dhw_enabled", status.dhw_enabled);
+      flag("zone1_enabled", status.zone1_enabled);
+      flag("heating", status.heating);
+      flag("cooling", status.cooling);
+      flag("auto", status.automatic);
+      flag("dhw_boost", status.boost);
     }
     if (status.has_antibacteria)
-      integer("antibacteria", status.antibacteria);
+      flag("antibacteria", status.antibacteria);
     if (status.has_heater_flags) {
-      integer("heater_flags", status.heater_flags);
-      integer("dhw_heat_pump", status.heat_pump);
-      integer("dhw_resistor", status.resistor);
+      flag("dhw_heat_pump", status.heat_pump);
+      flag("dhw_resistor", status.resistor);
     }
     temperature("dhw_target", status.target[0]);
     temperature("zone1_target", status.target[1]);

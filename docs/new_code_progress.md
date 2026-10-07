@@ -398,7 +398,7 @@ thermostat state is published.
 Air decoding includes power, mode, fan, ventilation, target/current temperature,
 preheating and filter flags, TCC louvre code and TU2C preset code when present.
 Main's temperature conversions and plausibility bounds are retained. Unsupported
-raw fan/preset codes remain visible in logs without replacing known entity state.
+fan/preset values are logged as `unknown` without replacing known entity state.
 
 Water decoding includes DHW/Zone 1 enable flags, heating/cooling, Auto, boost,
 setpoints, TU2C anti-bacteria and DHW pump/resistor flags, and known TU2C current
@@ -423,3 +423,12 @@ five protocol/system combinations, including Auto setpoint suppression, short
 frames, DHW independence, main's tank mapping and duplicate-state suppression.
 Address and identification regression suites also passed. Generated ESPHome
 2026.9.1 host component and main translation units compiled; no live bus test.
+
+### Readable decoded logs
+
+Decoded status logs use names for modes, fans, presets and known TCC louvre
+positions, and `on`/`off` for every boolean flag across all protocols. For example:
+`power=on mode=cool fan=medium ventilation=off preheating=off filter_alert=on`.
+Raw numeric setting codes and flag bytes are omitted from this decoded line;
+unrecognized setting values are shown as `unknown`. Numeric temperatures remain.
+The existing raw RX frame log still contains the original bytes.
