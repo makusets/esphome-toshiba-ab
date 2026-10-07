@@ -74,7 +74,29 @@ def _water_thermostat(default_name):
 
     return validate
 
-CONFIG_SCHEMA = (
+
+def _default_thermostat_name(config):
+    config = dict(config)
+    system_type = config.get(CONF_SYSTEM_TYPE, "air")
+    is_water = isinstance(system_type, str) and system_type.lower() == "water"
+    if not is_water:
+        config.setdefault(CONF_NAME, "Toshiba AC")
+
+    # The water parent is not registered as a climate entity. Apply its name
+    # to DHW unless that child has its own explicit name.
+    if is_water:
+        main_name = config.pop(CONF_NAME, "Estia DHW")
+        dhw = config.get(CONF_DHW, True)
+        if dhw is True:
+            config[CONF_DHW] = {CONF_NAME: main_name}
+        elif isinstance(dhw, dict):
+            dhw = dict(dhw)
+            dhw.setdefault(CONF_NAME, main_name)
+            config[CONF_DHW] = dhw
+    return config
+
+
+_CONFIG_SCHEMA = (
     climate._CLIMATE_SCHEMA.extend(
         {
             cv.GenerateID(): cv.declare_id(ToshibaAbClimate),
@@ -94,7 +116,7 @@ CONFIG_SCHEMA = (
             cv.Optional(CONF_SYSTEM_TYPE, default="air"): cv.one_of(
                 *SYSTEM_TYPES, lower=True
             ),
-            cv.Optional(CONF_DHW, default=True): _water_thermostat("DHW"),
+            cv.Optional(CONF_DHW, default=True): _water_thermostat("Estia DHW"),
             cv.Optional(CONF_ZONE_1, default=True): _water_thermostat("Zone 1"),
             cv.Optional(CONF_ZONE_2, default=False): _water_thermostat("Zone 2"),
         }
@@ -102,6 +124,23 @@ CONFIG_SCHEMA = (
     .extend(uart.UART_DEVICE_SCHEMA)
     .extend(cv.COMPONENT_SCHEMA)
 )
+
+
+# The water parent is a UART component, not a registered climate entity. Keep
+# its field validation but omit the root entity-name/duplicate checks; the DHW
+# and zone children retain their full climate schemas.
+_WATER_CONFIG_SCHEMA = cv.Schema(_CONFIG_SCHEMA.schema)
+
+
+def _validate_config(config):
+    config = _default_thermostat_name(config)
+    system_type = config.get(CONF_SYSTEM_TYPE, "air")
+    if isinstance(system_type, str) and system_type.lower() == "water":
+        return _WATER_CONFIG_SCHEMA(config)
+    return _CONFIG_SCHEMA(config)
+
+
+CONFIG_SCHEMA = _validate_config
 
 
 def _pin_number(pin):

@@ -33,7 +33,7 @@ uart:
 
 climate:
   - platform: toshiba_ab
-    name: Toshiba Thermostat
+    # name: Toshiba AC  # Optional; water defaults to Estia DHW.
     master_address: auto
     esp_address: auto
     format: auto
@@ -44,3 +44,4 @@ climate:
     # dhw: true
     # zone_1: true
     # zone_2: false
+

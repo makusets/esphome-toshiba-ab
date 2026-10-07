@@ -247,6 +247,13 @@ also distinguish locally echoed pings from other participants.
 
 ### 7. Climate behavior during this phase
 
+The main thermostat name is optional. Air defaults to `Toshiba AC`; water
+defaults its DHW entity to `Estia DHW`. An explicit top-level `name` overrides
+that default, and an explicit `dhw.name` takes precedence for water. The water
+parent remains an unregistered UART component, so only its DHW and zone
+children undergo climate entity-name and duplicate validation. `dhw: false`
+still disables DHW rather than creating a default entity.
+
 For an air system, the entity advertises the intended modes and controls so API
 clients can retain the eventual entity schema while development continues. A
 water system creates separate `DHW` and `Zone 1` thermostats by default, with an
@@ -265,6 +272,7 @@ These capabilities must not be interpreted as functional support yet:
 | Option/entity | Default | Purpose |
 | --- | --- | --- |
 | `format` | `auto` | Select `auto`, `tcc`, `a0`, or `tu2c`. |
+| `name` | `Toshiba AC` / `Estia DHW` | Optional main thermostat name; for water it names DHW unless `dhw.name` is supplied. |
 | `system_type` | `air` | Select the currently advertised air or water climate traits. |
 | `dhw` | `true` | Create the water system's domestic-hot-water thermostat; set to `false` to omit it. |
 | `zone_1` | `true` | Create the water system's first heating/cooling thermostat; set to `false` to omit it. |
@@ -308,6 +316,7 @@ hardware-specific behavior visible.
 | Date | Revision | Environment/system | Protocol/path | Result | Evidence or notes |
 | --- | --- | --- | --- | --- | --- |
 | 2026-10-07 | ESP address assignment change | Linux host, C++11 with AddressSanitizer/UndefinedBehaviorSanitizer (leak detection disabled for sandbox) | TCC air, TU2C air/water, A0 water | Passed synthetic bus-fixture tests | All candidate ranges, exhaustion/recovery, lower-address reclaim, explicit collision warning once, reset, filtering, master mismatch, and timer wraparound. ESPHome 2026.9.1 generated all four supported combinations and auto/fixed configuration; generated component/main C++ compiled against actual host headers. No live AB-bus validation. |
+| 2026-10-07 | Default thermostat names | ESPHome 2026.9.1 host configuration/C++ generation | Air/water | Passed | Eight configurations verify omitted/default/custom main names, explicit DHW name precedence, empty DHW config, and disabled DHW. Generated entity registration names checked; no live device test. |
 | 2026-09-06 | Initial tracking document | Source review only | All | Documentation baseline | No new hardware or parser test was performed for this entry. |
 
 ## How to update this document
@@ -325,4 +334,5 @@ For each development change:
 Keep the description tied to the current source. Protocol background and stable
 wire-format reference material belong in `frame_formats.md`; this page should
 remain focused on implementation status, decision flow, and verified progress.
+
 
