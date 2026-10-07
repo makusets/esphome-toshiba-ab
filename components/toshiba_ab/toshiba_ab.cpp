@@ -133,9 +133,9 @@ climate::ClimateTraits ToshibaAbThermostat::traits() {
   } else {
     traits.set_supported_modes({climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_COOL,
                                 climate::CLIMATE_MODE_AUTO});
-    // HA receives one fixed display range. Cover heating (20–65 C) and cooling (7–25 C).
-    traits.set_visual_min_temperature(7);
-    traits.set_visual_max_temperature(65);
+    // Heating-oriented display defaults; visual YAML can override either zone.
+    traits.set_visual_min_temperature(20);
+    traits.set_visual_max_temperature(circuit_ == WaterCircuit::ZONE_1 ? 65 : 40);
   }
   traits.set_visual_temperature_step(0.5);
   return traits;

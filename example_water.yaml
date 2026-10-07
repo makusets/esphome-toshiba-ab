@@ -69,29 +69,34 @@ climate:
     #     max_temperature: 65
     #     temperature_step: 0.5
     #
-    # Zones display default range: 7–65 °C, in 0.5 °C steps (combined range).
+    # Default display ranges: Zone 1 20–65 °C; Zone 2 20–40 °C.
+    # Both use 0.5 °C steps. No visual block is needed to use these defaults.
     # Toshiba Typical Operating ranges: heating 20–65 °C; cooling 7–25 °C.
     # Heating installations can choose a lower maximum for their emitters;
     # underfloor heating is often limited to 40–45 °C.
     # Underfloor cooling is typically limited to a minimum of 18-20 °C to help
     # avoid condensation.
-    # If only using heating mode, a higher minimum display range is recommended
+    # The optional visual blocks below repeat the heating-oriented defaults.
     # 
     # zone_1:
     #   name: Estia Zone 1
-    #   visual:                    # Optional; apply to either zone.
-    #     min_temperature: 20      # 20-65 is a typical range for heating only
-    #     max_temperature: 65      # installations that use emitters
+    #   visual:                    # Optional; omit to keep Zone 1 defaults.
+    #     min_temperature: 20      # Zone 1 default; typical heating range.
+    #     max_temperature: 65
     #     temperature_step: 0.5
     #
     # 
     # zone_2:
     #   name: Estia Zone 2         # This mapping enables Zone 2.
-    #   visual:                    # 20-40 is a typical range for heating only
-    #     min_temperature: 20      # underfloor system.
+    #   visual:                    # Optional; omit to keep Zone 2 defaults.
+    #     min_temperature: 20      # Zone 2 default; typical underfloor heating.
     #     max_temperature: 40
     #     temperature_step: 0.5
     #
+    #
+    # Cooling-only override for either zone: min_temperature: 7,
+    # max_temperature: 25. For underfloor cooling, typically use a minimum
+    # of 18–20 °C instead to help avoid condensation.
     #
     # For a zone used for both heating and cooling, a single combined visual
     # range is 7–65 °C (or 18–65 °C for underfloor cooling). It does not switch
