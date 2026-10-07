@@ -16,6 +16,35 @@ enum class Protocol : uint8_t { AUTO, TCC, TU2C, A0 };
 enum class SystemType : uint8_t { AIR, WATER };
 enum class WaterCircuit : uint8_t { DHW, ZONE_1, ZONE_2 };
 
+// Ordered from most to least preferred. An empty list means that automatic
+// assignment is not supported for this protocol/system combination.
+struct EspAddressCandidates {
+  const uint8_t *data;
+  size_t size;
+};
+
+static constexpr std::array<uint8_t, 9> TCC_AIR_ESP_ADDRESSES{
+    {0x40, 0x41, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49}};
+static constexpr std::array<uint8_t, 9> TU2C_AIR_ESP_ADDRESSES{
+    {0x50, 0x51, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59}};
+static constexpr std::array<uint8_t, 10> TU2C_WATER_ESP_ADDRESSES{
+    {0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69}};
+// A0 addresses use a zero mode byte on the wire (for example 00:40).
+static constexpr std::array<uint8_t, 10> A0_WATER_ESP_ADDRESSES{
+    {0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49}};
+
+inline EspAddressCandidates esp_address_candidates(Protocol protocol, SystemType system_type) {
+  if (protocol == Protocol::TCC && system_type == SystemType::AIR)
+    return {TCC_AIR_ESP_ADDRESSES.data(), TCC_AIR_ESP_ADDRESSES.size()};
+  if (protocol == Protocol::TU2C && system_type == SystemType::AIR)
+    return {TU2C_AIR_ESP_ADDRESSES.data(), TU2C_AIR_ESP_ADDRESSES.size()};
+  if (protocol == Protocol::TU2C && system_type == SystemType::WATER)
+    return {TU2C_WATER_ESP_ADDRESSES.data(), TU2C_WATER_ESP_ADDRESSES.size()};
+  if (protocol == Protocol::A0 && system_type == SystemType::WATER)
+    return {A0_WATER_ESP_ADDRESSES.data(), A0_WATER_ESP_ADDRESSES.size()};
+  return {nullptr, 0};
+}
+
 class ToshibaAbClimate;
 
 class ToshibaAbThermostat : public climate::Climate {
@@ -65,7 +94,10 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   void control_water(WaterCircuit circuit, const climate::ClimateCall &call);
 
   void set_master_address(uint8_t address) { master_setting_ = address; }
-  void set_esp_address(uint8_t address) { esp_address_ = address; }
+  void set_esp_address(uint8_t address) {
+    esp_address_ = address;
+    esp_address_auto_ = address == AUTO_ADDRESS;
+  }
   void set_protocol(Protocol protocol) { protocol_setting_ = protocol; }
   void set_system_type(SystemType type) { system_type_ = type; }
   void set_diagnostic_sensor(text_sensor::TextSensor *sensor) { diagnostic_sensor_ = sensor; }
@@ -106,6 +138,7 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   void consider_keepalive_(Protocol protocol, uint8_t source);
   void observe_remote_(uint8_t address, uint32_t now);
   void expire_remotes_(uint32_t now);
+  void update_esp_address_();
   void set_runtime_parity_(uart::UARTParityOptions parity);
   void diagnostic_(const std::string &message);
   static const char *protocol_name_(Protocol protocol);
@@ -122,6 +155,9 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   uint8_t master_setting_{AUTO_ADDRESS};
   uint8_t master_address_{AUTO_ADDRESS};
   uint8_t esp_address_{AUTO_ADDRESS};
+  bool esp_address_auto_{true};
+  bool esp_address_collision_reported_{false};
+  bool esp_address_unavailable_reported_{false};
   bool master_address_confirmed_{false};
   bool protocol_confirmed_{false};
   Protocol scan_protocol_{Protocol::AUTO};
