@@ -30,7 +30,6 @@ external_components:
 
 # Required AB-bus UART settings. Choose pins to match your hardware.
 uart:
-  id: ab_bus                 # Optional when there is only one UART.
   rx_pin: GPIO13             # Required receive connection.
   tx_pin: GPIO12             # Optional in the current receive-only implementation.
   baud_rate: 2400            # Required; must be 2400.
@@ -42,10 +41,9 @@ climate:
   - platform: toshiba_ab       # Required.
     system_type: water        # Required for Estia; default is air.
 
-    # Optional bus settings; uncomment to override defaults.
-    # uart_id: ab_bus          # Required only if multiple UARTs need disambiguation.
-    # format: auto             # Default: auto. Use tu2c for first-generation Estia,
-                              # or a0 for A0 water systems (including R32 Estia).
+    # Optional settings; uncomment to override defaults.
+    # format: auto             # Default: auto (recommended). Use tu2c for older R410A Estia Systems,
+                               # or a0 for Newer R32 Estia systems.
     # master_address: auto     # Default: auto; or require an address, e.g. 0x00.
     # esp_address: auto        # Default: auto; or keep a protocol-appropriate address.
     # name: Estia DHW          # Optional main name; used for DHW unless dhw.name is set.
@@ -54,11 +52,11 @@ climate:
     # dhw: true                # Default: true; default name: Estia DHW.
     # zone_1: true             # Default: true; default name: Estia Zone 1.
     # zone_2: false            # Default: false; name when enabled: Estia Zone 2.
-                              # Set any circuit to false to omit its thermostat.
+                               # Set any circuit to false to omit its thermostat.
 
     # Optional names and display ranges:
-    # Use a mapping instead of true/false for that circuit. Uncomment ONLY one
-    # definition per circuit. A mapping enables it, including Zone 2.
+    # Youc can use a mapping instead of true/false above for that circuit. Uncomment ONLY one
+    # definition per circuit. A mapping enables the circuit.
     # The visual values below are the component defaults, not required settings.
     # visual changes the Home Assistant display, not the system's operating limits.
     # Rebuild and upload after changing YAML; the standard HA card cannot edit
@@ -75,15 +73,15 @@ climate:
     # zone_1:
     #   name: Estia Zone 1     # Optional; omit to keep the default name.
     #   visual:
-    #     min_temperature: 20
-    #     max_temperature: 65
+    #     min_temperature: 20     # Temperature limits make sense if the zone operates
+    #     max_temperature: 65     # floor heating, often limited to 40-45 degrees
     #     temperature_step: 0.5
     #
     # zone_2:
     #   name: Estia Zone 2     # Optional; this mapping enables Zone 2.
     #   visual:
-    #     min_temperature: 20
-    #     max_temperature: 65
+    #     min_temperature: 20     # Temperature limits make sense if the zone operates
+    #     max_temperature: 65     # floor heating, often limited to 40-45 degrees
     #     temperature_step: 0.5
 
     # Optional diagnostic entity names; defaults shown below.
