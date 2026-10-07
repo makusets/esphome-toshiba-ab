@@ -8,6 +8,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 STUB = r'''
 #pragma once
 #include <cstdint>
+#include <cmath>
 #include <initializer_list>
 #include <string>
 #include <vector>
@@ -27,7 +28,20 @@ enum Value { CLIMATE_MODE_OFF, CLIMATE_MODE_HEAT, CLIMATE_MODE_COOL,
   CLIMATE_MODE_HEAT_COOL, CLIMATE_MODE_FAN_ONLY, CLIMATE_MODE_DRY, CLIMATE_MODE_AUTO,
   CLIMATE_PRESET_NONE, CLIMATE_PRESET_BOOST, CLIMATE_PRESET_ECO, CLIMATE_PRESET_SLEEP,
   CLIMATE_FAN_AUTO, CLIMATE_FAN_LOW, CLIMATE_FAN_MEDIUM, CLIMATE_FAN_HIGH,
+  CLIMATE_ACTION_OFF, CLIMATE_ACTION_IDLE, CLIMATE_ACTION_HEATING, CLIMATE_ACTION_COOLING,
+  CLIMATE_ACTION_FAN, CLIMATE_ACTION_DRYING,
   CLIMATE_SWING_OFF, CLIMATE_SWING_BOTH, CLIMATE_SWING_VERTICAL, CLIMATE_SWING_HORIZONTAL };
+using ClimateMode = Value;
+using ClimateAction = Value;
+using ClimateFanMode = Value;
+using ClimatePreset = Value;
+template<typename T> class Optional {
+ bool set_{false}; T value_{};
+ public:
+ bool has_value() const { return set_; }
+ T operator*() const { return value_; }
+ Optional &operator=(T value) { set_=true; value_=value; return *this; }
+};
 constexpr int CLIMATE_SUPPORTS_CURRENT_TEMPERATURE = 1;
 constexpr int CLIMATE_SUPPORTS_ACTION = 2;
 class ClimateCall {};
@@ -46,6 +60,11 @@ class Climate {
  public:
   Value mode{CLIMATE_MODE_OFF};
   float target_temperature{};
+  float current_temperature{NAN};
+  Value action{CLIMATE_ACTION_OFF};
+  Optional<Value> fan_mode, preset;
+  unsigned publish_count{0};
+  void publish_state() { publish_count++; }
   virtual ClimateTraits traits() { return {}; }
   virtual void control(const ClimateCall &) {}
 };
@@ -108,3 +127,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

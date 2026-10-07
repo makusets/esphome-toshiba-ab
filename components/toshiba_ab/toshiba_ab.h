@@ -6,6 +6,7 @@
 #include "esphome/components/uart/uart.h"
 #include "esphome/core/component.h"
 #include <array>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -82,6 +83,44 @@ struct ProtocolValue {
 
 class DiagnosticTextSensor : public text_sensor::TextSensor {};
 
+// Presence flags describe this frame only, so omitted optional fields never
+// overwrite a previously published thermostat state with a fabricated value.
+struct DecodedStatus {
+  bool water{false};
+  bool extended{false};
+  bool has_air_state{false};
+  bool power{false};
+  uint8_t mode{0};
+  uint8_t fan{0};
+  bool ventilation{false};
+  bool has_air_flags{false};
+  bool preheating{false};
+  bool filter_alert{false};
+  bool has_louvre{false};
+  uint8_t louvre{0};
+  bool has_preset{false};
+  uint8_t preset{0};
+  bool has_water_flags{false};
+  uint8_t flags{0};
+  uint8_t mode_flags{0};
+  bool dhw_enabled{false};
+  bool zone1_enabled{false};
+  bool heating{false};
+  bool cooling{false};
+  bool automatic{false};
+  bool boost{false};
+  bool has_antibacteria{false};
+  bool antibacteria{false};
+  bool has_heater_flags{false};
+  uint8_t heater_flags{0};
+  bool heat_pump{false};
+  bool resistor{false};
+  std::array<float, 3> target{{NAN, NAN, NAN}};
+  std::array<float, 3> current{{NAN, NAN, NAN}};
+  std::array<float, 3> repeated_target{{NAN, NAN, NAN}};
+  float unknown_temperature{NAN};
+};
+
 class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, public Component {
  public:
   void setup() override;
@@ -92,6 +131,9 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   void control(const climate::ClimateCall &call) override;
   void reset();
   void control_water(WaterCircuit circuit, const climate::ClimateCall &call);
+  void register_thermostat(ToshibaAbThermostat *thermostat, WaterCircuit circuit) {
+    water_thermostats_[static_cast<size_t>(circuit)] = thermostat;
+  }
 
   void set_master_address(uint8_t address) { master_setting_ = address; }
   void set_esp_address(uint8_t address) {
@@ -163,6 +205,9 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   void observe_remote_(uint8_t address, uint32_t now);
   void expire_remotes_(uint32_t now);
   void update_esp_address_();
+  void process_master_status_(Protocol protocol, const uint8_t *data, size_t size, bool extended);
+  void publish_decoded_status_(const DecodedStatus &status);
+  void log_decoded_status_(Protocol protocol, const DecodedStatus &status);
   void set_runtime_parity_(uart::UARTParityOptions parity);
   void diagnostic_(const std::string &message);
   static const char *protocol_name_(Protocol protocol);
@@ -179,6 +224,8 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   uint8_t master_setting_{AUTO_ADDRESS};
   uint8_t master_address_{AUTO_ADDRESS};
   uint8_t esp_address_{AUTO_ADDRESS};
+  std::array<ToshibaAbThermostat *, 3> water_thermostats_{{nullptr, nullptr, nullptr}};
+  DecodedStatus decoded_status_;
   bool esp_address_auto_{true};
   bool esp_address_collision_reported_{false};
   bool esp_address_unavailable_reported_{false};

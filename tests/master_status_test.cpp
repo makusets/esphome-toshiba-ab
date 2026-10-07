@@ -67,6 +67,7 @@ struct Fixture {
   uint8_t minimum, extended_minimum, marker;
 };
 
+#ifndef STATUS_DECODING_FIXTURES_ONLY
 int main() {
   const Fixture fixtures[] = {
       {Protocol::TCC, SystemType::AIR, 0x1C, 0x58, 0x81, 7, 7, 0},
@@ -127,3 +128,4 @@ int main() {
   assert(tcc_water.unknown_status());
   std::cout << "Master status tests passed (five combinations, signatures, minimum lengths, CRC, source, labels).\n";
 }
+#endif
