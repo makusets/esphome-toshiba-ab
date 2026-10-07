@@ -507,6 +507,11 @@ void ToshibaAbClimate::log_decoded_status_(Protocol protocol, const DecodedStatu
   const auto setting = [&fields](const char *name, const char *value) {
     fields += std::string(name) + "=" + value + " ";
   };
+  const auto named_setting = [&setting](const char *name, const char *value, uint8_t code) {
+    const std::string text = std::string(value) == "unknown"
+                                 ? "unknown(" + std::to_string(code) + ")" : value;
+    setting(name, text.c_str());
+  };
   const auto flag = [&setting](const char *name, bool value) {
     setting(name, value ? "on" : "off");
   };
@@ -520,8 +525,8 @@ void ToshibaAbClimate::log_decoded_status_(Protocol protocol, const DecodedStatu
   if (!status.water) {
     if (status.has_air_state) {
       flag("power", status.power);
-      setting("mode", air_mode_name(status.mode));
-      setting("fan", air_fan_name(status.fan));
+      named_setting("mode", air_mode_name(status.mode), status.mode);
+      named_setting("fan", air_fan_name(status.fan), status.fan);
       flag("ventilation", status.ventilation);
     }
     if (status.has_air_flags) {
@@ -529,9 +534,9 @@ void ToshibaAbClimate::log_decoded_status_(Protocol protocol, const DecodedStatu
       flag("filter_alert", status.filter_alert);
     }
     if (status.has_louvre)
-      setting("louvre_position", air_louvre_name(status.louvre));
+      named_setting("louvre_position", air_louvre_name(status.louvre), status.louvre);
     if (status.has_preset)
-      setting("preset", air_preset_name(status.preset));
+      named_setting("preset", air_preset_name(status.preset), status.preset);
     temperature("target", status.target[0]);
     temperature("room", status.current[0]);
   } else {
