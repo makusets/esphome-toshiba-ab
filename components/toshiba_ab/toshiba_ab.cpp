@@ -17,6 +17,20 @@ constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_DATA_TYPE;
 constexpr ProtocolValue ToshibaAbClimate::REMOTE_PING_OPCODE;
 constexpr ProtocolValue ToshibaAbClimate::REMOTE_PING_LENGTH;
 constexpr ProtocolValue ToshibaAbClimate::REMOTE_PING_DATA_TYPE;
+constexpr ProtocolValue ToshibaAbClimate::MASTER_STATUS_OPCODE;
+constexpr ProtocolValue ToshibaAbClimate::MASTER_STATUS_MIN_LENGTH;
+constexpr ProtocolValue ToshibaAbClimate::MASTER_STATUS_DATA_TYPE;
+constexpr ProtocolValue ToshibaAbClimate::MASTER_EXTENDED_STATUS_OPCODE;
+constexpr ProtocolValue ToshibaAbClimate::MASTER_EXTENDED_STATUS_MIN_LENGTH;
+constexpr ProtocolValue ToshibaAbClimate::MASTER_EXTENDED_STATUS_DATA_TYPE;
+constexpr ProtocolValue ToshibaAbClimate::MASTER_STATUS_BROADCAST_ADDRESS;
+constexpr ProtocolValue ToshibaAbClimate::WATER_MASTER_STATUS_OPCODE;
+constexpr ProtocolValue ToshibaAbClimate::WATER_MASTER_STATUS_MIN_LENGTH;
+constexpr ProtocolValue ToshibaAbClimate::WATER_MASTER_STATUS_DATA_TYPE;
+constexpr ProtocolValue ToshibaAbClimate::WATER_MASTER_EXTENDED_STATUS_OPCODE;
+constexpr ProtocolValue ToshibaAbClimate::WATER_MASTER_EXTENDED_STATUS_MIN_LENGTH;
+constexpr ProtocolValue ToshibaAbClimate::WATER_MASTER_EXTENDED_STATUS_DATA_TYPE;
+constexpr ProtocolValue ToshibaAbClimate::WATER_MASTER_STATUS_MARKER;
 
 ToshibaAbThermostat::ToshibaAbThermostat(ToshibaAbClimate *parent, WaterCircuit circuit)
     : parent_(parent), circuit_(circuit) {
@@ -290,6 +304,12 @@ void ToshibaAbClimate::process_frame_(Protocol protocol, const uint8_t *data, si
   uint8_t source = 0;
   const bool master_keepalive = crc_ok && is_master_keepalive_(protocol, data, size, source);
   const bool remote_ping = crc_ok && !master_keepalive && is_remote_ping_(protocol, data, size, source);
+  // Longer TU2C water status shares the short status signature, so classify
+  // extended status first. Status frames never establish master identity.
+  const bool extended_status = crc_ok && !master_keepalive && !remote_ping &&
+                               is_master_status_(protocol, data, size, true, source);
+  const bool status = crc_ok && !master_keepalive && !remote_ping && !extended_status &&
+                      is_master_status_(protocol, data, size, false, source);
   std::string description;
   if (!crc_ok) {
     description = "CRC failed";
@@ -297,6 +317,10 @@ void ToshibaAbClimate::process_frame_(Protocol protocol, const uint8_t *data, si
     description = "master keepalive " + hex_(&source, 1);
   } else if (remote_ping) {
     description = "remote ping " + hex_(&source, 1);
+  } else if (extended_status) {
+    description = "master extended status " + hex_(&source, 1);
+  } else if (status) {
+    description = "master status " + hex_(&source, 1);
   }
   ESP_LOGD(TAG, "RX %s: %s [%s%s%s]", protocol_name_(protocol), colored_hex_(protocol, data, size, crc_ok).c_str(),
            ESPHOME_LOG_COLOR(ESPHOME_LOG_COLOR_GREEN), description.c_str(), ESPHOME_LOG_RESET_COLOR);
@@ -375,6 +399,58 @@ bool ToshibaAbClimate::is_remote_ping_(Protocol protocol, const uint8_t *data, s
                                  (protocol == Protocol::TU2C && data_type == TU2C_FIRST_GEN_REMOTE_PING_DATA_TYPE);
   return frame_length_(protocol, data, size) == REMOTE_PING_LENGTH.for_protocol(protocol) &&
          opcode_(protocol, data, size) == REMOTE_PING_OPCODE.for_protocol(protocol) && data_type_matches;
+}
+
+bool ToshibaAbClimate::is_master_status_(Protocol protocol, const uint8_t *data, size_t size,
+                                        bool extended, uint8_t &source) const {
+  if (data == nullptr || !protocol_confirmed_ || !master_address_confirmed_ || protocol != protocol_detected_)
+    return false;
+
+  const bool water = system_type_ == SystemType::WATER;
+  if (water && protocol == Protocol::TCC)
+    return false;  // No water TCC signature is established in main.
+
+  const uint8_t length = frame_length_(protocol, data, size);
+  uint8_t destination = 0;
+  switch (protocol) {
+    case Protocol::TCC:
+      if (size != static_cast<size_t>(length) + 5)
+        return false;
+      source = data[0];
+      destination = data[1];
+      break;
+    case Protocol::TU2C:
+      if (size < 8 || size != length)
+        return false;
+      source = data[3];
+      destination = data[4];
+      if (water && data[5] != WATER_MASTER_STATUS_MARKER.for_protocol(protocol))
+        return false;
+      if (!water && destination != MASTER_STATUS_BROADCAST_ADDRESS.for_protocol(protocol))
+        return false;
+      break;
+    case Protocol::A0:
+      if (size < 11 || size != static_cast<size_t>(length) + 6)
+        return false;
+      source = data[6];
+      destination = data[8];
+      break;
+    default:
+      return false;
+  }
+  if (source != master_address_)
+    return false;
+
+  const auto &opcodes = water ? (extended ? WATER_MASTER_EXTENDED_STATUS_OPCODE : WATER_MASTER_STATUS_OPCODE)
+                              : (extended ? MASTER_EXTENDED_STATUS_OPCODE : MASTER_STATUS_OPCODE);
+  const auto &lengths = water ? (extended ? WATER_MASTER_EXTENDED_STATUS_MIN_LENGTH : WATER_MASTER_STATUS_MIN_LENGTH)
+                              : (extended ? MASTER_EXTENDED_STATUS_MIN_LENGTH : MASTER_STATUS_MIN_LENGTH);
+  const auto &types = water ? (extended ? WATER_MASTER_EXTENDED_STATUS_DATA_TYPE : WATER_MASTER_STATUS_DATA_TYPE)
+                            : (extended ? MASTER_EXTENDED_STATUS_DATA_TYPE : MASTER_STATUS_DATA_TYPE);
+  const uint16_t expected_opcode = opcodes.for_protocol(protocol);
+  return length >= lengths.for_protocol(protocol) &&
+         (expected_opcode == UNSPECIFIED_OPCODE || opcode_(protocol, data, size) == expected_opcode) &&
+         data_type_(protocol, data, size) == types.for_protocol(protocol);
 }
 
 void ToshibaAbClimate::consider_keepalive_(Protocol protocol, uint8_t source) {

@@ -44,11 +44,12 @@ Status meanings:
 | Master-address discovery and validation | Done | Learns the source from the first valid master keepalive or checks it against an explicitly configured address. |
 | Existing remote discovery | Partial | After protocol and master confirmation, known checksum-valid remote pings maintain a live address inventory. Addresses expire after five minutes without a ping and drive automatic ESP address selection. |
 | ESP address selection | Done | Auto mode selects the lowest free protocol/system candidate, moves on remote collisions, and reclaims lower expired addresses. Explicit mode retains its address and reports a collision once per component lifetime. Bus registration/transmission remains unimplemented. |
+| Master status identification | Done | Labels checksum-valid status and extended status from the confirmed master using protocol-value opcode, data-type and minimum-length constants. Supports TCC air, TU2C air/water and A0 air/water. Payload state decoding remains unimplemented. |
 | Frame logging | Done | Logs every complete candidate, highlights addresses and command/type fields, and marks checksum failures. |
 | Diagnostic sensor | Done | Publishes the latest discovery event; earlier states remain available through Home Assistant history. |
 | Manual rediscovery | Done | The diagnostic reset button clears discovery state, reader state, and counters, then restarts scanning. |
 | Climate API capability declaration | Partial | Air systems advertise the intended climate modes, fan modes, swing modes, presets, current temperature, and action. Water systems currently expose only off mode. These are API declarations, not working controls. |
-| Climate state decoding | Not started | Valid non-keepalive frames are logged and then discarded. State parsing and publication must be rebuilt. |
+| Climate state decoding | Not started | Status and extended-status frames are identified and logged; their payloads are not yet decoded into climate state. |
 | Command generation/transmission | Not started | `control()` deliberately ignores calls. Bus registration, command queues, retries, and bus timing still need implementation. |
 | Connection/liveness tracking | Not started | A keepalive confirms discovery, but no ongoing online/offline state or timeout is currently published. |
 | Automated parser tests | Partial | Host tests feed synthetic checksum-valid master/remote frames through the real readers and cover address selection, collisions, expiration, reset, checksum rejection, and master mismatch. Captured frames, truncation/noise, and discovery timing still need broader coverage. |
@@ -151,8 +152,8 @@ so bytes collected under one format cannot leak into the next.
 ### 4. Frame processing and keepalive identification
 
 Every complete frame candidate is logged. A checksum failure is highlighted and
-stops processing. A checksum-valid frame is currently acted upon only when all
-three protocol-specific keepalive fields match:
+stops processing. Master keepalive identification requires all three
+protocol-specific keepalive fields to match:
 
 | Protocol | Encoded length | Opcode | Data type | Source byte |
 | --- | ---: | ---: | ---: | ---: |
@@ -188,7 +189,52 @@ address selection as described below. As with master keepalive identification, e
 lengths, opcodes, and data types are held in protocol-value constants and
 compared through the common semantic field helpers rather than at raw offsets.
 
-### 5. Confirming protocol and master
+### 5. Master status and extended status identification
+
+Status recognition follows the existing keepalive/remote-ping pipeline and uses
+`ProtocolValue` constants for opcode, data type, and minimum encoded length.
+Only checksum-valid frames from the confirmed master, in the confirmed protocol,
+receive `master status 0xNN` or `master extended status 0xNN` labels (the existing
+RX log renders the address as `NN`). They never establish protocol/master
+identity, update remote inventory, publish diagnostic sensor events, or decode
+climate state. Complete-buffer size must agree with the encoded length.
+
+| Protocol | System | Status opcode / type | Extended opcode / type | Minimum encoded length (status / extended) |
+| --- | --- | --- | --- | --- |
+| TCC | Air | `1C / 81` | `58 / 81` | `07 / 07` |
+| A0 | Air (formerly HM) | `1C / 00:81` | `58 / 00:81` | `0C / 0C` |
+| TU2C | Air | `C0 / 38` | `A0 / 38` | `0F / 0F` |
+| A0 | Water | `1C / 03:C6` | `58 / 03:C6` | `0F / 0F` |
+| TU2C | Water (formerly Estia) | `E0:<unspecified opcode>:31` | Same signature, longer frame | `0C / 15` |
+
+Lengths are hexadecimal values carried by the protocol's length byte. TCC/A0
+encode body length; TU2C encodes the complete wrapped frame length. These are
+minimums, not a whitelist of exact lengths. Air minimums cover the base status
+fields used in main (through target temperature), without requiring optional
+room-temperature or preset fields. HM's stripped wrapper and inserted padding
+in main correspond to minimum A0 body length `0C` in the unified wire reader.
+A0 water retains main's `frame_len >= 15` decimal requirement for both opcodes.
+
+TU2C water retains main's status threshold (`len > 11`, minimum `0C`). Its longer
+form has temperatures at encoded length `15` in main; recognition treats `15`
+and longer as extended status. Both forms require wire marker `E0` and data type
+`31`. Main leaves the intervening opcode unconstrained; the constants represent
+this with `UNSPECIFIED_OPCODE` (`0x100`, outside the 8-bit opcode range).
+Extended recognition runs first so the shared shorter signature cannot hide it.
+
+TU2C air status must broadcast to `FF`, as in main. TCC and A0 also recognize
+master status directed to other participants, while TU2C water accepts directed
+and broadcast reports. TCC water has no established status signature. A0's
+`55 / 00:9F` demand-interface report and sensor/query responses remain outside
+this main-thermostat status classification.
+
+This is recognition only. Minimum-length status labels do not guarantee that
+all later optional payload fields exist; future state decoding must validate
+each accessed payload field independently. Fixtures use synthetic valid-checksum
+frames derived from main's handlers, not verified live captures. HM air frames
+continue to use the unified A0 reader and its existing CRC-16 requirement.
+
+### 6. Confirming protocol and master
 
 When a keepalive is found:
 
@@ -204,7 +250,7 @@ Note that the protocol is confirmed before an explicit-address mismatch is
 reported. Consequently, the automatic scan stops in that case. This is current
 behavior and should be revisited if address mismatch recovery is desired.
 
-### 6. ESP address selection and collisions
+### 7. ESP address selection and collisions
 
 After both protocol and master confirmation, `esp_address: auto` selects the
 first free candidate in this preference order:
@@ -245,7 +291,7 @@ recognized pings to the confirmed master populate the remote inventory, so an
 unseen or silent participant cannot yet be excluded. Future transmission must
 also distinguish locally echoed pings from other participants.
 
-### 7. Climate behavior during this phase
+### 8. Climate behavior during this phase
 
 The main thermostat name is optional. Air defaults to `Toshiba AC`; water
 defaults its DHW entity to `Estia DHW`, Zone 1 to `Estia Zone 1`, and Zone 2\nto `Estia Zone 2` when enabled. An explicit top-level `name` overrides
@@ -318,6 +364,7 @@ hardware-specific behavior visible.
 | 2026-10-07 | ESP address assignment change | Linux host, C++11 with AddressSanitizer/UndefinedBehaviorSanitizer (leak detection disabled for sandbox) | TCC air, TU2C air/water, A0 water | Passed synthetic bus-fixture tests | All candidate ranges, exhaustion/recovery, lower-address reclaim, explicit collision warning once, reset, filtering, master mismatch, and timer wraparound. ESPHome 2026.9.1 generated all four supported combinations and auto/fixed configuration; generated component/main C++ compiled against actual host headers. No live AB-bus validation. |
 | 2026-10-07 | Default thermostat names | ESPHome 2026.9.1 host configuration/C++ generation | Air/water | Passed | Eight configurations verify omitted/default/custom main names, explicit DHW name precedence, empty DHW config, and disabled DHW. Generated entity registration names checked; no live device test. |
 | 2026-10-07 | Estia zone names and example defaults | ESPHome 2026.9.1 | Water/ESP8266 example | Passed | Four generated water configurations verify default, enabled, empty-mapping and custom zone names; complete example passes config validation with local source and dummy secrets. |
+| 2026-10-07 | Master status recognition | Linux C++11 ASan/UBSan host fixtures, ESPHome 2026.9.1 | Five supported protocol/system combinations | Passed | Status/extended labels, minimum-length boundaries and longer variants, CRC rejection, confirmed-master filtering, TU2C water priority, source/destination and marker checks; address regression suite and real generated component/main compilation passed. Leak detection disabled for sandbox; no live device validation. |
 | 2026-09-06 | Initial tracking document | Source review only | All | Documentation baseline | No new hardware or parser test was performed for this entry. |
 
 ## How to update this document
@@ -335,5 +382,6 @@ For each development change:
 Keep the description tied to the current source. Protocol background and stable
 wire-format reference material belong in `frame_formats.md`; this page should
 remain focused on implementation status, decision flow, and verified progress.
+
 
 
