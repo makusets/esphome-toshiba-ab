@@ -85,9 +85,25 @@ climate:
       name: "Estia Failed CRCs"  #sensor that counts failed frames
       
     #read-only enables putting the esp in read-only mode for experimentation or diagnosing, with no comms being sent
-    read_only: true             # optional, defaults to false; used for debugging to listen to the traffic on the bus without sending
+    read_only: false            # optional, defaults to false; used for debugging to listen to the traffic on the bus without sending
+
     read_only_switch:
       name: "Read only"         # optional switch to turn on and off read only mode while the esp is running
+
+    antibacteria:
+      name: "Anti Bacteria"
+
+    night_setback:
+      name: "Night Setback"
+
+    silent_mode:
+      name: "Silent Mode"
+
+    frost_mode:
+      name: "Frost Mode"
+
+    sensor_polling_switch:
+      name: "Sensor Polling Disabled"
 
     # Setpoints reported by the periodic 03:C6 status frame.
     dhw_setpoint:

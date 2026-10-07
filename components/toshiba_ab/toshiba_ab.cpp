@@ -924,6 +924,10 @@ void ToshibaAbClimate::add_polled_sensor(uint8_t id, float scale, uint32_t inter
 }
 
 bool ToshibaAbClimate::enqueue_sensor_query_(uint8_t id) {
+  // Skip enqueueing if sensor polling is disabled
+  if (!this->sensor_polling_enabled_) {
+    return false;
+  }
   if (this->pending_count_ >= MAX_PENDING_SENSOR_QUERIES) {
     ESP_LOGW(TAG, "Sensor query queue full; dropping query for 0x%02X", id);
     return false;
@@ -1000,6 +1004,13 @@ void ToshibaAbClimate::send_sensor_query(uint8_t sensor_id) {
 }
 
 
+void ToshibaAbClimate::flush_sensor_query_queue_() {
+  // Clear all pending sensor queries
+  this->pending_head_ = 0;
+  this->pending_count_ = 0;
+  ESP_LOGD(TAG, "Sensor query queue flushed");
+}
+
 void ToshibaAbClimate::drain_sensor_query_queue_() {
   // sensor_query_outstanding_ is cleared by process_sensor_value_() on a
   // matching reply, or by the sensor-query timeout watchdog if a reply never
@@ -1007,6 +1018,11 @@ void ToshibaAbClimate::drain_sensor_query_queue_() {
   if (this->sensor_query_outstanding_) return;
   if (this->pending_count_ == 0) return;
   if (this->write_queue_.size() >= WRITE_QUEUE_THROTTLE) return;
+  
+  // Check if sensor polling is disabled (defaults to enabled)
+  if (!this->sensor_polling_enabled_) {
+    return;
+  }
 
   const uint8_t next = this->pending_sensor_queries_[this->pending_head_];
   this->pending_head_ = (this->pending_head_ + 1) & (MAX_PENDING_SENSOR_QUERIES - 1);
@@ -1432,6 +1448,7 @@ void ToshibaAbClimate::dump_config() {
   LOG_SELECT("  ", "Wall-mounted louvre", this->wall_mounted_louvre_select_);
   ESP_LOGCONFIG(TAG, "  Vent switch: %s", this->vent_switch_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Read-only switch: %s", this->read_only_switch_ ? "yes" : "no");
+  ESP_LOGCONFIG(TAG, "  Sensor polling switch: %s", this->sensor_polling_switch_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Remote address select: %s", this->remote_address_select_ ? "yes" : "no");
 }
 
@@ -1668,6 +1685,13 @@ void ToshibaAbClimate::setup() {
   // Ensure the read-only switch reports its initial state on startup (default OFF)
   if (this->read_only_switch_)
     this->read_only_switch_->publish_state(this->read_only_);
+  
+  // Ensure the sensor polling switch reports its initial state on startup (default OFF = polling enabled)
+  if (this->sensor_polling_switch_) {
+    this->sensor_polling_switch_->state = false;
+    this->sensor_polling_switch_->publish_state(false);
+    this->sensor_polling_enabled_ = true;  // polling enabled by default
+  }
 
 }
 
@@ -3809,6 +3833,118 @@ void ToshibaAbClimate::send_estia_dhw_boost(bool on) {
   this->send_estia_tracked_(frame, sizeof(frame), 0x03C4);  // ACK: 00:A1:03:C4
 }
 
+void ToshibaAbClimate::send_estia_night_setback(bool on) {
+  if (this->read_only_) {
+    ESP_LOGW(TAG, "Read-only mode: not sending Estia Night Setback command");
+    return;
+  }
+
+  // R32 Estia A0 protocol: Night Setback (selector 0x88, value 0x08=on or 0x00=off)
+  // NOT using make_estia_first_gen_frame() - this is A0 protocol, not R410A first-gen
+  uint16_t src = this->estia_source_address_;
+  uint16_t dst = this->estia_master_address_;
+  uint8_t frame[] = {
+    0xA0, 0x00, 0x11, 0x0B, 0x00,
+    (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),
+    (uint8_t)(dst >> 8), (uint8_t)(dst & 0xFF),
+    0x03, 0xC4, 0x88, on ? (uint8_t)0x08 : (uint8_t)0x00, 0x00, 0x00,
+    0x00, 0x00
+  };
+  size_t crc_len = sizeof(frame) - 2;
+  uint16_t crc = estia_crc16(frame, crc_len);
+  frame[crc_len] = (crc >> 8) & 0xFF;
+  frame[crc_len + 1] = crc & 0xFF;
+  ESP_LOGD(TAG, "TX: Night Setback %s", on ? "ON" : "OFF");
+  log_raw_data("Estia TX", frame, sizeof(frame));
+  this->estia_night_setback_ = on;  // Track state optimistically
+  if (this->night_setback_switch_) this->night_setback_switch_->publish_state(on);
+  this->send_estia_tracked_(frame, sizeof(frame), 0x03C4);
+}
+
+void ToshibaAbClimate::send_estia_silent_mode(bool on) {
+  if (this->read_only_) {
+    ESP_LOGW(TAG, "Read-only mode: not sending Estia Silent Mode command");
+    return;
+  }
+
+  // Silent Mode: selector 0x04, value 0x01=on or 0x00=off
+  // Captured from R32 Estia external remote (0x40)
+  uint16_t src = this->estia_source_address_;
+  uint16_t dst = this->estia_master_address_;
+  uint8_t frame[] = {
+    0xA0, 0x00, 0x11, 0x0B, 0x00,
+    (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),
+    (uint8_t)(dst >> 8), (uint8_t)(dst & 0xFF),
+    0x03, 0xC4, 0x04, on ? (uint8_t)0x01 : (uint8_t)0x00, 0x00, 0x00,
+    0x00, 0x00
+  };
+  size_t crc_len = sizeof(frame) - 2;
+  uint16_t crc = estia_crc16(frame, crc_len);
+  frame[crc_len] = (crc >> 8) & 0xFF;
+  frame[crc_len + 1] = crc & 0xFF;
+  ESP_LOGD(TAG, "TX: Silent Mode %s", on ? "ON" : "OFF");
+  log_raw_data("Estia TX", frame, sizeof(frame));
+  this->estia_silent_mode_ = on;  // Track state optimistically
+  if (this->silent_mode_switch_) this->silent_mode_switch_->publish_state(on);
+  this->send_estia_tracked_(frame, sizeof(frame), 0x03C4);
+}
+
+void ToshibaAbClimate::send_estia_frost_mode(bool on) {
+  if (this->read_only_) {
+    ESP_LOGW(TAG, "Read-only mode: not sending Estia Frost Mode command");
+    return;
+  }
+
+  // Frost Mode: selector 0x02, value 0x02=on or 0x00=off
+  // Captured from R32 Estia external remote (0x40)
+  uint16_t src = this->estia_source_address_;
+  uint16_t dst = this->estia_master_address_;
+  uint8_t frame[] = {
+    0xA0, 0x00, 0x11, 0x0B, 0x00,
+    (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),
+    (uint8_t)(dst >> 8), (uint8_t)(dst & 0xFF),
+    0x03, 0xC4, 0x02, on ? (uint8_t)0x02 : (uint8_t)0x00, 0x00, 0x00,
+    0x00, 0x00
+  };
+  size_t crc_len = sizeof(frame) - 2;
+  uint16_t crc = estia_crc16(frame, crc_len);
+  frame[crc_len] = (crc >> 8) & 0xFF;
+  frame[crc_len + 1] = crc & 0xFF;
+  ESP_LOGD(TAG, "TX: Frost Mode %s", on ? "ON" : "OFF");
+  log_raw_data("Estia TX", frame, sizeof(frame));
+  this->estia_frost_mode_ = on;  // Track state optimistically
+  if (this->frost_mode_switch_) this->frost_mode_switch_->publish_state(on);
+  this->send_estia_tracked_(frame, sizeof(frame), 0x03C4);
+}
+
+void ToshibaAbClimate::send_estia_antibacteria(bool on) {
+  if (this->read_only_) {
+    ESP_LOGW(TAG, "Read-only mode: not sending Estia Anti Bacteria command");
+    return;
+  }
+
+  // Anti Bacteria: selector 0x60, value 0x20=on or 0x00=off
+  // Captured from R32 Estia external remote (0x40)
+  uint16_t src = this->estia_source_address_;
+  uint16_t dst = this->estia_master_address_;
+  uint8_t frame[] = {
+    0xA0, 0x00, 0x11, 0x0B, 0x00,
+    (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),
+    (uint8_t)(dst >> 8), (uint8_t)(dst & 0xFF),
+    0x03, 0xC4, 0x60, on ? (uint8_t)0x20 : (uint8_t)0x00, 0x00, 0x00,
+    0x00, 0x00
+  };
+  size_t crc_len = sizeof(frame) - 2;
+  uint16_t crc = estia_crc16(frame, crc_len);
+  frame[crc_len] = (crc >> 8) & 0xFF;
+  frame[crc_len + 1] = crc & 0xFF;
+  ESP_LOGD(TAG, "TX: Anti Bacteria %s", on ? "ON" : "OFF");
+  log_raw_data("Estia TX", frame, sizeof(frame));
+  this->estia_antibacteria_ = on;  // Track state optimistically
+  if (this->antibacteria_switch_) this->antibacteria_switch_->publish_state(on);
+  this->send_estia_tracked_(frame, sizeof(frame), 0x03C4);
+}
+
 void ToshibaAbClimate::send_estia_mode(uint8_t mode_cmd) {
   if (this->read_only_) {
     ESP_LOGW(TAG, "Read-only mode: not sending Estia mode command");
@@ -4061,6 +4197,27 @@ void ToshibaAbClimate::send_estia_first_gen_antibacteria(bool on) {
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
+void ToshibaAbClimate::send_estia_first_gen_night_setback(bool on) {
+  if (this->read_only_) return;
+  // Night Setback: selector 0x88, value 0x08=on or 0x00=off
+  const uint8_t payload[] = {0xE0, 0x01, 0x24, 0x88, static_cast<uint8_t>(on ? 0x08 : 0x00)};
+  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+}
+
+void ToshibaAbClimate::send_estia_first_gen_silent_mode(bool on) {
+  if (this->read_only_) return;
+  // Silent Mode: selector 0x04, value 0x01=on or 0x00=off
+  const uint8_t payload[] = {0xE0, 0x01, 0x24, 0x04, static_cast<uint8_t>(on ? 0x01 : 0x00)};
+  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+}
+
+void ToshibaAbClimate::send_estia_first_gen_frost_mode(bool on) {
+  if (this->read_only_) return;
+  // Frost Mode: selector 0x02, value 0x02=on or 0x00=off
+  const uint8_t payload[] = {0xE0, 0x01, 0x24, 0x02, static_cast<uint8_t>(on ? 0x02 : 0x00)};
+  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+}
+
 void ToshibaAbClimate::send_estia_first_gen_auto_mode(bool on) {
   if (this->read_only_) return;
   const uint8_t payload[] = {0xE0, 0x01, 0x24, 0x01, static_cast<uint8_t>(on ? 0x01 : 0x00)};
@@ -4214,6 +4371,9 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     this->estia_first_gen_dhw_boost_ = frame->raw[7] & 0x40;
     this->estia_first_gen_antibacteria_ = frame->raw[7] & 0x80;
     this->estia_first_gen_auto_mode_active_ = frame->raw[7] & 0x04;
+    this->estia_first_gen_night_setback_ = frame->raw[7] & 0x10;
+    this->estia_first_gen_silent_mode_ = frame->raw[7] & 0x20;
+    this->estia_first_gen_frost_mode_ = frame->raw[7] & 0x08;
     this->estia_first_gen_hotwater_resistor_heating_ = frame->raw[8] & 0x04;
     this->estia_first_gen_hotwater_pump_heating_ = frame->raw[8] & 0x08;
     this->estia_first_gen_dhw_encoded_ = frame->raw[9];
@@ -4226,6 +4386,9 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     if (this->zone1_switch_) this->zone1_switch_->publish_state(this->estia_first_gen_zone1_active_);
     if (this->dhw_boost_switch_) this->dhw_boost_switch_->publish_state(this->estia_first_gen_dhw_boost_);
     if (this->antibacteria_switch_) this->antibacteria_switch_->publish_state(this->estia_first_gen_antibacteria_);
+    if (this->night_setback_switch_) this->night_setback_switch_->publish_state(this->estia_first_gen_night_setback_);
+    if (this->silent_mode_switch_) this->silent_mode_switch_->publish_state(this->estia_first_gen_silent_mode_);
+    if (this->frost_mode_switch_) this->frost_mode_switch_->publish_state(this->estia_first_gen_frost_mode_);
     if (this->hotwater_pump_heating_binary_sensor_)
       this->hotwater_pump_heating_binary_sensor_->publish_state(this->estia_first_gen_hotwater_pump_heating_);
     if (this->hotwater_resistor_heating_binary_sensor_)
@@ -4279,7 +4442,19 @@ void ToshibaAbEstiaDhwBoostSwitch::write_state(bool state) {
 }
 
 void ToshibaAbEstiaAntibacteriaSwitch::write_state(bool state) {
-  this->climate_->send_estia_first_gen_antibacteria(state);
+  this->climate_->send_estia_antibacteria(state);
+}
+
+void ToshibaAbEstiaNightSetbackSwitch::write_state(bool state) {
+  this->climate_->send_estia_night_setback(state);
+}
+
+void ToshibaAbEstiaSilentModeSwitch::write_state(bool state) {
+  this->climate_->send_estia_silent_mode(state);
+}
+
+void ToshibaAbEstiaFrostModeSwitch::write_state(bool state) {
+  this->climate_->send_estia_frost_mode(state);
 }
 
 void ToshibaAbVentSwitch::write_state(bool state) {
@@ -4292,6 +4467,23 @@ void ToshibaAbReadOnlySwitch::write_state(bool state) {
   // Toggle read-only mode on the climate component
   this->climate_->set_read_only(state);
   // Publish the new state so Home Assistant UI reflects the change immediately
+  this->publish_state(state);
+}
+
+void ToshibaAbSensorPollingSwitch::write_state(bool state) {
+  // Inverted logic: state=true means DISABLE polling, state=false means ENABLE polling
+  bool polling_enabled = !state;
+  this->climate_->set_sensor_polling_enabled(polling_enabled);
+  
+  if (state) {
+    ESP_LOGI(TAG, "Sensor polling DISABLED - useful for debugging AB-bus traffic");
+    // Flush any pending queries to prevent queue full warnings
+    this->climate_->flush_sensor_query_queue_();
+  } else {
+    ESP_LOGI(TAG, "Sensor polling ENABLED");
+  }
+  
+  // Always publish the state we just set (respecting user's toggle)
   this->publish_state(state);
 }
 

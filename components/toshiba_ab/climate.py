@@ -42,6 +42,7 @@ CONF_CONNECTED = "connected"
 CONF_WALL_MOUNTED_LOUVRE = "wall_mounted_louvre"
 CONF_VENT = "vent"
 CONF_READ_ONLY_SWITCH = "read_only_switch"
+CONF_SENSOR_POLLING_SWITCH = "sensor_polling_switch"
 CONF_FAILED_CRCS = "failed_crcs"
 CONF_NOISE_RATE = "noise_rate"
 CONF_CRC_FAILURES_5MIN = "crc_failures_5min"
@@ -85,6 +86,9 @@ CONF_DEMAND_ENABLED = "demand_enabled"
 CONF_ZONE1_SWITCH = "zone1_switch"
 CONF_DHW_BOOST = "dhw_boost"
 CONF_ANTIBACTERIA = "antibacteria"
+CONF_NIGHT_SETBACK = "night_setback"
+CONF_SILENT_MODE = "silent_mode"
+CONF_FROST_MODE = "frost_mode"
 CONF_ZONE1_WATER_TEMPERATURE = "zone1_water_temperature"
 CONF_ZONE1_TARGET_TEMPERATURE = "zone1_target_temperature"
 CONF_DHW_CURRENT_TEMPERATURE = "dhw_current_temperature"
@@ -131,6 +135,9 @@ ToshibaAbVentSwitch =  toshiba_ab_ns.class_(
 ToshibaAbReadOnlySwitch = toshiba_ab_ns.class_(
     "ToshibaAbReadOnlySwitch", switch.Switch, cg.Component
 )
+ToshibaAbSensorPollingSwitch = toshiba_ab_ns.class_(
+    "ToshibaAbSensorPollingSwitch", switch.Switch, cg.Component
+)
 ToshibaAbEstiaZone1Switch = toshiba_ab_ns.class_(
     "ToshibaAbEstiaZone1Switch", switch.Switch, cg.Component
 )
@@ -139,6 +146,15 @@ ToshibaAbEstiaDhwBoostSwitch = toshiba_ab_ns.class_(
 )
 ToshibaAbEstiaAntibacteriaSwitch = toshiba_ab_ns.class_(
     "ToshibaAbEstiaAntibacteriaSwitch", switch.Switch, cg.Component
+)
+ToshibaAbEstiaNightSetbackSwitch = toshiba_ab_ns.class_(
+    "ToshibaAbEstiaNightSetbackSwitch", switch.Switch, cg.Component
+)
+ToshibaAbEstiaSilentModeSwitch = toshiba_ab_ns.class_(
+    "ToshibaAbEstiaSilentModeSwitch", switch.Switch, cg.Component
+)
+ToshibaAbEstiaFrostModeSwitch = toshiba_ab_ns.class_(
+    "ToshibaAbEstiaFrostModeSwitch", switch.Switch, cg.Component
 )
 
 ToshibaAbOnDataReceivedTrigger = toshiba_ab_ns.class_(
@@ -293,6 +309,17 @@ CONFIG_SCHEMA = cv.All(
             ),
             key=CONF_NAME,
         ),
+        cv.Optional(CONF_SENSOR_POLLING_SWITCH): cv.maybe_simple_value(
+            switch._SWITCH_SCHEMA.extend(
+                cv.Schema(
+                    {
+                        cv.GenerateID(): cv.declare_id(ToshibaAbSensorPollingSwitch),
+                    }
+                )
+            ),
+            key=CONF_NAME,
+            default={"name": "Disable sensor polling", "restore_mode": "DEFAULT_OFF"},
+        ),
 
         cv.Optional(CONF_ZONE1_SWITCH): cv.maybe_simple_value(
             switch._SWITCH_SCHEMA.extend(
@@ -319,6 +346,36 @@ CONFIG_SCHEMA = cv.All(
                 cv.Schema(
                     {
                         cv.GenerateID(): cv.declare_id(ToshibaAbEstiaAntibacteriaSwitch),
+                    }
+                )
+            ),
+            key=CONF_NAME,
+        ),
+        cv.Optional(CONF_NIGHT_SETBACK): cv.maybe_simple_value(
+            switch._SWITCH_SCHEMA.extend(
+                cv.Schema(
+                    {
+                        cv.GenerateID(): cv.declare_id(ToshibaAbEstiaNightSetbackSwitch),
+                    }
+                )
+            ),
+            key=CONF_NAME,
+        ),
+        cv.Optional(CONF_SILENT_MODE): cv.maybe_simple_value(
+            switch._SWITCH_SCHEMA.extend(
+                cv.Schema(
+                    {
+                        cv.GenerateID(): cv.declare_id(ToshibaAbEstiaSilentModeSwitch),
+                    }
+                )
+            ),
+            key=CONF_NAME,
+        ),
+        cv.Optional(CONF_FROST_MODE): cv.maybe_simple_value(
+            switch._SWITCH_SCHEMA.extend(
+                cv.Schema(
+                    {
+                        cv.GenerateID(): cv.declare_id(ToshibaAbEstiaFrostModeSwitch),
                     }
                 )
             ),
@@ -666,6 +723,9 @@ async def to_code(config):
     if CONF_READ_ONLY_SWITCH in config:
         sw = await switch.new_switch(config[CONF_READ_ONLY_SWITCH], var)
         cg.add(var.set_read_only_switch(sw))
+    if CONF_SENSOR_POLLING_SWITCH in config:
+        sw = await switch.new_switch(config[CONF_SENSOR_POLLING_SWITCH], var)
+        cg.add(var.set_sensor_polling_switch(sw))
     if CONF_ZONE1_SWITCH in config:
         sw = await switch.new_switch(config[CONF_ZONE1_SWITCH], var)
         cg.add(var.set_zone1_switch(sw))
@@ -675,6 +735,15 @@ async def to_code(config):
     if CONF_ANTIBACTERIA in config:
         sw = await switch.new_switch(config[CONF_ANTIBACTERIA], var)
         cg.add(var.set_antibacteria_switch(sw))
+    if CONF_NIGHT_SETBACK in config:
+        sw = await switch.new_switch(config[CONF_NIGHT_SETBACK], var)
+        cg.add(var.set_night_setback_switch(sw))
+    if CONF_SILENT_MODE in config:
+        sw = await switch.new_switch(config[CONF_SILENT_MODE], var)
+        cg.add(var.set_silent_mode_switch(sw))
+    if CONF_FROST_MODE in config:
+        sw = await switch.new_switch(config[CONF_FROST_MODE], var)
+        cg.add(var.set_frost_mode_switch(sw))
 
     if CONF_ON_DATA_RECEIVED in config:
         for on_data_received in config.get(CONF_ON_DATA_RECEIVED, []):

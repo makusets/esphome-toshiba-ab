@@ -10,6 +10,18 @@ ESTIA hydronic heat-pump systems that communicate over the two-wire **AB bus**.
 
 ## Changelog
 
+### October 2026 — New Estia R32 features
+
+Added support for four additional Estia R32 (Series 1 and later) features:
+
+- **Night Setback** - Energy-saving night temperature reduction
+- **Silent Mode** - Reduced operational noise
+- **Anti Bacteria** - Antibacterial function activation
+- **Frost Mode** - Frost prevention protection
+
+These features are available as ESPHome switches when using `frame_format: a0` for R32 Estia systems.
+See the [new features documentation](docs/new_features.md) for details and examples.
+
 ### July 2026 — TU2C and ESTIA R410A support
 
 The TU2C protocol is now fully functional, thanks to contributions from

@@ -988,9 +988,15 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_vent_switch(switch_::Switch *vent_switch) { vent_switch_ = vent_switch; }
 
   void set_read_only_switch(switch_::Switch *read_only_switch) { read_only_switch_ = read_only_switch; }
+  void set_sensor_polling_switch(switch_::Switch *sensor_polling_switch) { sensor_polling_switch_ = sensor_polling_switch; }
+  void set_sensor_polling_enabled(bool enabled) { sensor_polling_enabled_ = enabled; }
+  bool is_sensor_polling_enabled() const { return sensor_polling_enabled_; }
   void set_zone1_switch(switch_::Switch *zone1_switch) { zone1_switch_ = zone1_switch; }
   void set_dhw_boost_switch(switch_::Switch *dhw_boost_switch) { dhw_boost_switch_ = dhw_boost_switch; }
   void set_antibacteria_switch(switch_::Switch *antibacteria_switch) { antibacteria_switch_ = antibacteria_switch; }
+  void set_night_setback_switch(switch_::Switch *night_setback_switch) { night_setback_switch_ = night_setback_switch; }
+  void set_silent_mode_switch(switch_::Switch *silent_mode_switch) { silent_mode_switch_ = silent_mode_switch; }
+  void set_frost_mode_switch(switch_::Switch *frost_mode_switch) { frost_mode_switch_ = frost_mode_switch; }
 
   void set_failed_crcs_sensor(sensor::Sensor *failed_crcs_sensor) { this->failed_crcs_sensor_ = failed_crcs_sensor; }
   void set_noise_rate_sensor(sensor::Sensor *sensor) { this->noise_rate_sensor_ = sensor; }
@@ -1031,6 +1037,10 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void send_estia_zone1_operation(bool on);
   void send_estia_dhw(bool on);
   void send_estia_dhw_boost(bool on);
+  void send_estia_night_setback(bool on);
+  void send_estia_silent_mode(bool on);
+  void send_estia_frost_mode(bool on);
+  void send_estia_antibacteria(bool on);
   void send_estia_mode(uint8_t mode_cmd);  // 0x02=heat, 0x01=cool
   void send_estia_automatik_mode(bool on);
   void send_estia_demand(uint8_t demand);  // 0-10V demand (0..15)
@@ -1044,6 +1054,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void send_estia_first_gen_dhw_boost(bool on);
   void send_estia_first_gen_antibacteria(bool on);
   void send_estia_first_gen_auto_mode(bool on);
+  void send_estia_first_gen_night_setback(bool on);
+  void send_estia_first_gen_silent_mode(bool on);
+  void send_estia_first_gen_frost_mode(bool on);
   void send_estia_first_gen_request_data(uint8_t request_code);
   void send_estia_tracked_(const uint8_t *frame, size_t len, uint16_t ack_dtype);
   
@@ -1062,6 +1075,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_current_sensor(sensor::Sensor *s) { current_sensor_ = s; } // Sensor for current, x10 A
   void send_sensor_query(uint8_t sensor_id); // Send sensor query for a specific sensor ID
   void add_polled_sensor(uint8_t id, float scale, uint32_t interval_ms, sensor::Sensor *sensor);
+  void flush_sensor_query_queue_();
 
 //*************************************
   bool control_vent(bool state);
@@ -1131,9 +1145,13 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   optional<uint8_t> wall_mounted_louvre_mode_;
   switch_::Switch *vent_switch_{nullptr};
   switch_::Switch *read_only_switch_{nullptr};
+  switch_::Switch *sensor_polling_switch_{nullptr};
   switch_::Switch *zone1_switch_{nullptr};
   switch_::Switch *dhw_boost_switch_{nullptr};
   switch_::Switch *antibacteria_switch_{nullptr};
+  switch_::Switch *night_setback_switch_{nullptr};
+  switch_::Switch *silent_mode_switch_{nullptr};
+  switch_::Switch *frost_mode_switch_{nullptr};
   sensor::Sensor *failed_crcs_sensor_{nullptr};
   sensor::Sensor *noise_rate_sensor_{nullptr};
   sensor::Sensor *crc_failures_5min_sensor_{nullptr};
@@ -1236,6 +1254,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool read_only_{false};
   bool ping_enabled_{true};
   bool autoreset_errors_{false};
+  // Sensor polling enabled flag (defaults to true, independent of switch state)
+  bool sensor_polling_enabled_{true};
 
   //autonomous mode **********************************
   bool autonomous_ = true;
@@ -1320,6 +1340,16 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool estia_first_gen_dhw_boost_{false};
   bool estia_first_gen_antibacteria_{false};
   bool estia_first_gen_auto_mode_active_{false};
+  bool estia_first_gen_night_setback_{false};
+  bool estia_first_gen_silent_mode_{false};
+  bool estia_first_gen_frost_mode_{false};
+  
+  // R32 Estia feature states (tracked after ACK)
+  bool estia_dhw_boost_{false};
+  bool estia_night_setback_{false};
+  bool estia_silent_mode_{false};
+  bool estia_frost_mode_{false};
+  bool estia_antibacteria_{false};
   bool estia_first_gen_hotwater_pump_heating_{false};
   bool estia_first_gen_hotwater_resistor_heating_{false};
   uint8_t estia_first_gen_dhw_encoded_{0};
@@ -1373,9 +1403,49 @@ class ToshibaAbEstiaAntibacteriaSwitch : public switch_::Switch, public Componen
   ToshibaAbClimate *climate_;
 };
 
+class ToshibaAbEstiaNightSetbackSwitch : public switch_::Switch, public Component {
+ public:
+  ToshibaAbEstiaNightSetbackSwitch(ToshibaAbClimate *climate) { climate_ = climate; }
+ protected:
+  void write_state(bool state) override;
+  ToshibaAbClimate *climate_;
+};
+
+class ToshibaAbEstiaSilentModeSwitch : public switch_::Switch, public Component {
+ public:
+  ToshibaAbEstiaSilentModeSwitch(ToshibaAbClimate *climate) { climate_ = climate; }
+ protected:
+  void write_state(bool state) override;
+  ToshibaAbClimate *climate_;
+};
+
+class ToshibaAbEstiaFrostModeSwitch : public switch_::Switch, public Component {
+ public:
+  ToshibaAbEstiaFrostModeSwitch(ToshibaAbClimate *climate) { climate_ = climate; }
+ protected:
+  void write_state(bool state) override;
+  ToshibaAbClimate *climate_;
+};
+
 class ToshibaAbReadOnlySwitch : public switch_::Switch, public Component {
  public:
   ToshibaAbReadOnlySwitch(ToshibaAbClimate *climate) { climate_ = climate; }
+ protected:
+  void write_state(bool state) override;
+  ToshibaAbClimate *climate_;
+};
+
+class ToshibaAbSensorPollingSwitch : public switch_::Switch, public Component {
+ public:
+  ToshibaAbSensorPollingSwitch(ToshibaAbClimate *climate) { climate_ = climate; }
+  void setup() override {
+    // Always default to ON (polling enabled) on every boot
+    this->state = true;
+    this->publish_state(true);
+    if (this->climate_) {
+      this->climate_->set_sensor_polling_enabled(true);
+    }
+  }
  protected:
   void write_state(bool state) override;
   ToshibaAbClimate *climate_;
