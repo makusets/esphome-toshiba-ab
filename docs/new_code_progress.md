@@ -434,3 +434,7 @@ unrecognized setting values are shown as `unknown(<value>)`. Numeric temperature
 The existing raw RX frame log still contains the original bytes.
 
 Unknown named settings include their received decimal code, for example `fan=unknown(7)`, while known settings retain names such as `fan=medium`.
+
+### Estia thermostat ranges and presets
+
+DHW displays 40–65 °C and retains its presets. Zone 1 and Zone 2 display 20–65 °C and advertise no presets. All three use 0.5 °C steps. Zone 1 still has no target temperature in Auto mode.
