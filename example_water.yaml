@@ -55,34 +55,54 @@ climate:
                                # Set any circuit to false to omit its thermostat.
 
     # Optional names and display ranges:
-    # Youc can use a mapping instead of true/false above for that circuit. Uncomment ONLY one
-    # definition per circuit. A mapping enables the circuit.
-    # The visual values below are the component defaults, not required settings.
-    # visual changes the Home Assistant display, not the system's operating limits.
-    # Rebuild and upload after changing YAML; the standard HA card cannot edit
-    # these ranges. In Zone 1 Auto mode there is no fixed target temperature.
-    # Zone 1 and Zone 2 have no presets; DHW retains its presets.
+    # Use a mapping instead of true/false above. Uncomment ONLY one definition
+    # per circuit; a mapping enables it, including Zone 2.
+    # visual sets one fixed Home Assistant display range, not separate Heat/Cool
+    # ranges and not the system's operating limits. Rebuild/upload after edits.
+    # Zone 1 Auto mode has no fixed target. Both zones have no presets.
     #
+    # DHW defaults: 40–65 °C, in 0.5 °C steps.
     # dhw:
-    #   name: Estia DHW        # Optional; omit to keep the default name.
-    #   visual:               # Optional; omit the whole block to use defaults.
+    #   name: Estia DHW
+    #   visual:                    # Optional; omit to keep component defaults.
     #     min_temperature: 40
     #     max_temperature: 65
     #     temperature_step: 0.5
     #
+    # Default zone display range: 7–65 °C, in 0.5 °C steps (combined range).
+    # Operating ranges: heating 20–65 °C; cooling 7–25 °C.
+    # Heating installations can choose a lower maximum for their emitters;
+    # underfloor heating is often limited to 40–45 °C.
+    # Underfloor cooling is typically limited to a minimum of 18 °C to help
+    # avoid condensation. The safe minimum depends on humidity/dew point;
+    # visual alone does not enforce condensation protection.
+    #
+    # Heating display override (20–65 °C), shown for Zone 1:
     # zone_1:
-    #   name: Estia Zone 1     # Optional; omit to keep the default name.
-    #   visual:
-    #     min_temperature: 20     # Temperature limits make sense if the zone operates
-    #     max_temperature: 65     # floor heating, often limited to 40-45 degrees
+    #   name: Estia Zone 1
+    #   visual:                    # Optional; apply to either zone.
+    #     min_temperature: 20
+    #     max_temperature: 65
     #     temperature_step: 0.5
     #
+    # Cooling display override (7–25 °C), shown for Zone 2:
     # zone_2:
-    #   name: Estia Zone 2     # Optional; this mapping enables Zone 2.
-    #   visual:
-    #     min_temperature: 20     # Temperature limits make sense if the zone operates
-    #     max_temperature: 65     # floor heating, often limited to 40-45 degrees
+    #   name: Estia Zone 2          # This mapping enables Zone 2.
+    #   visual:                    # Optional; apply to either zone.
+    #     min_temperature: 7       # Underfloor cooling: typically use 18 instead.
+    #     max_temperature: 25
     #     temperature_step: 0.5
+    #
+    # Underfloor cooling alternative, shown for Zone 1 (18–25 °C):
+    # zone_1:
+    #   visual:
+    #     min_temperature: 18
+    #     max_temperature: 25
+    #     temperature_step: 0.5
+    #
+    # For a zone used for both heating and cooling, a single combined visual
+    # range is 7–65 °C (or 18–65 °C for underfloor cooling). It does not switch
+    # with mode; configure operating limits/condensation protection on the system.
 
     # Optional diagnostic entity names; defaults shown below.
     # diagnostic:

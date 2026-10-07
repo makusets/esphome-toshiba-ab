@@ -437,4 +437,10 @@ Unknown named settings include their received decimal code, for example `fan=unk
 
 ### Estia thermostat ranges and presets
 
-DHW displays 40–65 °C and retains its presets. Zone 1 and Zone 2 display 20–65 °C and advertise no presets. All three use 0.5 °C steps. Zone 1 still has no target temperature in Auto mode.
+DHW displays 40–65 °C and retains its presets. Zone 1 and Zone 2 display the combined 7–65 °C range and advertise no presets. All three use 0.5 °C steps. Zone 1 still has no target temperature in Auto mode.
+
+### Zone heating and cooling ranges
+
+Zone operating ranges are 20–65 °C for heating and 7–25 °C for cooling. ESPHome/HA native climate metadata carries a single fixed visual range, so both zones advertise 7–65 °C to cover both modes. The display does not change its bounds when mode changes. The water example documents optional heating-only (20–65), cooling-only (7–25), and underfloor-cooling (18–25) visual overrides for either zone. Underfloor cooling typically uses an 18 °C minimum to help avoid condensation; the safe limit depends on humidity/dew point. Display overrides do not enforce operating limits or condensation protection. Transmission remains unimplemented.
+
+Validation: ESPHome 2026.9.1 accepted heating, cooling and underfloor-cooling configurations for both zones; generated cooling overrides are 7–25 °C.
