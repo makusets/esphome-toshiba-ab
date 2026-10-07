@@ -70,6 +70,9 @@ def _water_thermostat(default_name):
             return False
         if value is True:
             value = {CONF_NAME: default_name}
+        elif isinstance(value, dict):
+            value = dict(value)
+            value.setdefault(CONF_NAME, default_name)
         return schema(value)
 
     return validate
@@ -117,8 +120,8 @@ _CONFIG_SCHEMA = (
                 *SYSTEM_TYPES, lower=True
             ),
             cv.Optional(CONF_DHW, default=True): _water_thermostat("Estia DHW"),
-            cv.Optional(CONF_ZONE_1, default=True): _water_thermostat("Zone 1"),
-            cv.Optional(CONF_ZONE_2, default=False): _water_thermostat("Zone 2"),
+            cv.Optional(CONF_ZONE_1, default=True): _water_thermostat("Estia Zone 1"),
+            cv.Optional(CONF_ZONE_2, default=False): _water_thermostat("Estia Zone 2"),
         }
     )
     .extend(uart.UART_DEVICE_SCHEMA)
