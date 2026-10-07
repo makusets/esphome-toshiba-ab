@@ -303,7 +303,7 @@ For an air system, the entity advertises the intended modes and controls so API
 clients can retain the eventual entity schema while development continues. A
 water system creates separate `DHW` and `Zone 1` thermostats by default, with an
 optional `Zone 2` thermostat. DHW advertises off/heat and a 45–60 °C range;
-both zones advertise off/heat/cool and a 20–65 °C range. All three water
+both zones advertise off/heat/cool/auto, with Zone 1 displaying 20–65 °C\nand Zone 2 displaying 20–40 °C. All three water
 thermostats offer normal, boost, and eco presets and use 0.5 °C steps.
 
 These capabilities must not be interpreted as functional support yet:
@@ -437,10 +437,12 @@ Unknown named settings include their received decimal code, for example `fan=unk
 
 ### Estia thermostat ranges and presets
 
-DHW displays 40–65 °C and retains its presets. Zone 1 and Zone 2 display the combined 7–65 °C range and advertise no presets. All three use 0.5 °C steps. Zone 1 still has no target temperature in Auto mode.
+DHW displays 40–65 °C and retains its presets. Zone 1 displays 20–65 °C and Zone 2 displays 20–40 °C; both advertise no presets. All three use 0.5 °C steps. Zone 1 still has no target temperature in Auto mode.
 
 ### Zone heating and cooling ranges
 
-Zone operating ranges are 20–65 °C for heating and 7–25 °C for cooling. ESPHome/HA native climate metadata carries a single fixed visual range, so both zones advertise 7–65 °C to cover both modes. The display does not change its bounds when mode changes. The water example documents optional heating-only (20–65), cooling-only (7–25), and underfloor-cooling (18–25) visual overrides for either zone. Underfloor cooling typically uses an 18 °C minimum to help avoid condensation; the safe limit depends on humidity/dew point. Display overrides do not enforce operating limits or condensation protection. Transmission remains unimplemented.
+Zone operating ranges are 20–65 °C for heating and 7–25 °C for cooling. ESPHome/HA native climate metadata carries a single fixed visual range, so the default display ranges are heating-oriented: Zone 1 20–65 °C and Zone 2 20–40 °C. Users can choose a combined 7–65 °C range or cooling-only range through optional visual YAML overrides. The display does not change its bounds when mode changes. The water example documents optional heating-only (20–65), cooling-only (7–25), and underfloor-cooling (18–25) visual overrides for either zone. Underfloor cooling typically uses an 18 °C minimum to help avoid condensation; the safe limit depends on humidity/dew point. Display overrides do not enforce operating limits or condensation protection. Transmission remains unimplemented.
 
 Validation: ESPHome 2026.9.1 accepted heating, cooling and underfloor-cooling configurations for both zones; generated cooling overrides are 7–25 °C.
+
+Heating-oriented zone display defaults require no YAML overrides: Zone 1 uses 20–65 °C and Zone 2 uses 20–40 °C. Optional visual mappings can still override either range. DHW remains 40–65 °C; all retain 0.5 °C steps and zones have no presets.
