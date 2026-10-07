@@ -39,7 +39,7 @@ uart:
 
 climate:
   - platform: toshiba_ab       # Required.
-    system_type: water        # Required for Estia; default is air.
+    system_type: water         # Required for Estia; default is air.
 
     # Optional settings; uncomment to override defaults.
     # format: auto             # Default: auto (recommended). Use tu2c for older R410A Estia Systems,
@@ -69,36 +69,29 @@ climate:
     #     max_temperature: 65
     #     temperature_step: 0.5
     #
-    # Default zone display range: 7–65 °C, in 0.5 °C steps (combined range).
-    # Operating ranges: heating 20–65 °C; cooling 7–25 °C.
+    # Zones display default range: 7–65 °C, in 0.5 °C steps (combined range).
+    # Toshiba Typical Operating ranges: heating 20–65 °C; cooling 7–25 °C.
     # Heating installations can choose a lower maximum for their emitters;
     # underfloor heating is often limited to 40–45 °C.
-    # Underfloor cooling is typically limited to a minimum of 18 °C to help
-    # avoid condensation. The safe minimum depends on humidity/dew point;
-    # visual alone does not enforce condensation protection.
-    #
-    # Heating display override (20–65 °C), shown for Zone 1:
+    # Underfloor cooling is typically limited to a minimum of 18-20 °C to help
+    # avoid condensation.
+    # If only using heating mode, a higher minimum display range is recommended
+    # 
     # zone_1:
     #   name: Estia Zone 1
     #   visual:                    # Optional; apply to either zone.
-    #     min_temperature: 20
-    #     max_temperature: 65
+    #     min_temperature: 20      # 20-65 is a typical range for heating only
+    #     max_temperature: 65      # installations that use emitters
     #     temperature_step: 0.5
     #
-    # Cooling display override (7–25 °C), shown for Zone 2:
+    # 
     # zone_2:
-    #   name: Estia Zone 2          # This mapping enables Zone 2.
-    #   visual:                    # Optional; apply to either zone.
-    #     min_temperature: 7       # Underfloor cooling: typically use 18 instead.
-    #     max_temperature: 25
+    #   name: Estia Zone 2         # This mapping enables Zone 2.
+    #   visual:                    # 20-40 is a typical range for heating only
+    #     min_temperature: 20      # underfloor system.
+    #     max_temperature: 40
     #     temperature_step: 0.5
     #
-    # Underfloor cooling alternative, shown for Zone 1 (18–25 °C):
-    # zone_1:
-    #   visual:
-    #     min_temperature: 18
-    #     max_temperature: 25
-    #     temperature_step: 0.5
     #
     # For a zone used for both heating and cooling, a single combined visual
     # range is 7–65 °C (or 18–65 °C for underfloor cooling). It does not switch
