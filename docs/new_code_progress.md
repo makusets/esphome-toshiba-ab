@@ -19,9 +19,8 @@ are restored. Its current job is to:
 5. retain a valid ESPHome climate entity shape while the functional climate
    behavior is added incrementally.
 
-The implementation is currently **identification-only**. It observes frames and
-reports discovery results, but it does not decode climate state and does not
-transmit climate commands.
+The implementation observes traffic, reports discovery results, and decodes
+read-only master status into climate states. It does not transmit climate commands.
 
 ## Progress snapshot
 
@@ -44,12 +43,12 @@ Status meanings:
 | Master-address discovery and validation | Done | Learns the source from the first valid master keepalive or checks it against an explicitly configured address. |
 | Existing remote discovery | Partial | After protocol and master confirmation, known checksum-valid remote pings maintain a live address inventory. Addresses expire after five minutes without a ping and drive automatic ESP address selection. |
 | ESP address selection | Done | Auto mode selects the lowest free protocol/system candidate, moves on remote collisions, and reclaims lower expired addresses. Explicit mode retains its address and reports a collision once per component lifetime. Bus registration/transmission remains unimplemented. |
-| Master status identification | Done | Labels checksum-valid status and extended status from the confirmed master using protocol-value opcode, data-type and minimum-length constants. Supports TCC air, TU2C air/water and A0 air/water. Payload state decoding remains unimplemented. |
+| Master status identification | Done | Labels checksum-valid status and extended status from the confirmed master using protocol-value opcode, data-type and minimum-length constants. Supports TCC air, TU2C air/water and A0 air/water. Recognized payloads are decoded into thermostat state and a separate single-line debug log. |
 | Frame logging | Done | Logs every complete candidate, highlights addresses and command/type fields, and marks checksum failures. |
 | Diagnostic sensor | Done | Publishes the latest discovery event; earlier states remain available through Home Assistant history. |
 | Manual rediscovery | Done | The diagnostic reset button clears discovery state, reader state, and counters, then restarts scanning. |
-| Climate API capability declaration | Partial | Air systems advertise the intended climate modes, fan modes, swing modes, presets, current temperature, and action. Water systems currently expose only off mode. These are API declarations, not working controls. |
-| Climate state decoding | Not started | Status and extended-status frames are identified and logged; their payloads are not yet decoded into climate state. |
+| Climate API capability declaration | Partial | Air systems advertise the intended climate modes, fan modes, swing modes, presets, current temperature, and action. Water DHW exposes Off/Heat; zones expose Off/Heat/Cool/Auto. These are API declarations, not working controls. |
+| Climate state decoding | Partial | TCC air, TU2C air/water, and unified A0 air/water status are decoded. Known temperatures, modes, fan and preset values update the relevant entities; auxiliary fields remain internal/logged. Zone 2 has known A0 setpoints only. Hardware validation remains pending. |
 | Command generation/transmission | Not started | `control()` deliberately ignores calls. Bus registration, command queues, retries, and bus timing still need implementation. |
 | Connection/liveness tracking | Not started | A keepalive confirms discovery, but no ongoing online/offline state or timeout is currently published. |
 | Automated parser tests | Partial | Host tests feed synthetic checksum-valid master/remote frames through the real readers and cover address selection, collisions, expiration, reset, checksum rejection, and master mismatch. Captured frames, truncation/noise, and discovery timing still need broader coverage. |
@@ -330,7 +329,7 @@ These capabilities must not be interpreted as functional support yet:
 
 The UART validator requires 2400 baud. It normally requires an RX pin; on
 ESP8266, GPIO13 can use the special UART0 swapped-RX path. TX is not required in
-this identification-only phase.
+this receive-only phase.
 
 ## Next development milestones
 
@@ -342,8 +341,8 @@ Work should proceed in small steps that keep receive behavior observable:
    addresses, UART path, and representative redacted frames below.
 3. **Add ongoing master liveness**, with an explicit definition of which frames
    refresh it and how disconnect/recovery is reported.
-4. **Decode read-only climate state** one protocol at a time and publish only
-   fields demonstrated by fixtures and captures.
+4. **Validate decoded climate state on hardware**, including optional fields
+   and unknown mode/fan/preset values.
 5. **Validate local-address selection on hardware** and add registration and
    echo handling before enabling any write path.
 6. **Build and test command transmission**, including bus-idle timing,
@@ -385,3 +384,42 @@ remain focused on implementation status, decision flow, and verified progress.
 
 
 
+
+
+## Status payload decoding
+
+Checksum-valid status and extended status from the confirmed master pass through
+the existing identification pipeline. Payload offsets are stored in ProtocolValue
+arrays. Each optional field is checked against the payload boundary, excluding
+CRC and wrapper suffix bytes. Every decoded frame adds one separate debug line:
+`Decoded <protocol> <status or extended status>: key=value ...`. Only changed
+thermostat state is published.
+
+Air decoding includes power, mode, fan, ventilation, target/current temperature,
+preheating and filter flags, TCC louvre code and TU2C preset code when present.
+Main's temperature conversions and plausibility bounds are retained. Unsupported
+raw fan/preset codes remain visible in logs without replacing known entity state.
+
+Water decoding includes DHW/Zone 1 enable flags, heating/cooling, Auto, boost,
+setpoints, TU2C anti-bacteria and DHW pump/resistor flags, and known TU2C current
+temperatures. Unknown/repeated temperatures are retained internally and logged.
+The tank temperature uses main's DHW current-temperature mapping. A0 water
+extended status also logs repeated DHW/Zone 1/Zone 2 setpoints.
+
+DHW reports Heat only when its dedicated enable bit is set, otherwise Off;
+Auto does not enable DHW. Zone 1 reports Off when disabled, otherwise Auto
+when the automatic flag is set, otherwise Cool when cooling is set, else Heat.
+In Auto, Zone 1 has no target temperature (NAN), including short status frames
+without a setpoint. Returning to fixed operation restores the reported setpoint.
+DHW retains its own target. Zone 2 updates its known A0 setpoint only; its
+mode/action remain unchanged until independent flags are established.
+
+TU2C's active DHW pump/resistor flags establish Heating action when DHW is
+enabled. Other enabled water circuits report Idle because an enable flag alone
+does not establish active heat transfer. Controls/transmission remain unimplemented.
+
+Validation: synthetic checksummed bus fixtures passed under ASan/UBSan for all
+five protocol/system combinations, including Auto setpoint suppression, short
+frames, DHW independence, main's tank mapping and duplicate-state suppression.
+Address and identification regression suites also passed. Generated ESPHome
+2026.9.1 host component and main translation units compiled; no live bus test.

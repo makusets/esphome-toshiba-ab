@@ -11,6 +11,58 @@ namespace esphome {
 namespace toshiba_ab {
 
 static const char *const TAG = "toshiba_ab";
+
+// Offsets refer to the complete wire frame, including wrappers. The HM
+// normalisation in main inserted padding; the unified A0 reader does not.
+static constexpr uint16_t NO_FIELD = 0xFFFF;
+static constexpr ProtocolValue AIR_MODE_POWER_OFFSET{6, 8, 11};
+static constexpr ProtocolValue AIR_FAN_VENT_OFFSET{7, 9, 12};
+static constexpr ProtocolValue AIR_FLAGS_OFFSET{8, 10, 13};
+static constexpr ProtocolValue AIR_TARGET_OFFSET{10, 12, 15};
+static constexpr ProtocolValue AIR_CURRENT_OFFSET{11, 13, 16};
+static constexpr ProtocolValue AIR_PRESET_OFFSET{NO_FIELD, 14, NO_FIELD};
+static constexpr ProtocolValue AIR_EXTENDED_PRESET_OFFSET{NO_FIELD, 17, NO_FIELD};
+static constexpr ProtocolValue WATER_FLAGS_OFFSET{NO_FIELD, 8, 11};
+static constexpr ProtocolValue WATER_MODE_FLAGS_OFFSET{NO_FIELD, 9, 12};
+static constexpr ProtocolValue WATER_HEATER_FLAGS_OFFSET{NO_FIELD, 10, NO_FIELD};
+static constexpr ProtocolValue WATER_DHW_TARGET_OFFSET{NO_FIELD, 11, 14};
+static constexpr ProtocolValue WATER_ZONE1_TARGET_OFFSET{NO_FIELD, 12, 15};
+static constexpr ProtocolValue WATER_ZONE2_TARGET_OFFSET{NO_FIELD, NO_FIELD, 16};
+static constexpr ProtocolValue WATER_DHW_CURRENT_OFFSET{NO_FIELD, 14, NO_FIELD};
+static constexpr ProtocolValue WATER_ZONE1_CURRENT_OFFSET{NO_FIELD, 16, NO_FIELD};
+static constexpr ProtocolValue WATER_UNKNOWN_TEMP_OFFSET{NO_FIELD, 15, NO_FIELD};
+
+static constexpr std::array<ProtocolValue, 3> WATER_REPEATED_TARGET_OFFSETS{{
+    {NO_FIELD, NO_FIELD, 17}, {NO_FIELD, NO_FIELD, 18}, {NO_FIELD, NO_FIELD, 19}}};
+
+static bool update_temperature(float &destination, float value) {
+  if ((std::isnan(destination) && std::isnan(value)) || destination == value)
+    return false;
+  destination = value;
+  return true;
+}
+
+static climate::ClimateMode air_mode(uint8_t mode) {
+  switch (mode) {
+    case 1: return climate::CLIMATE_MODE_HEAT;
+    case 2: return climate::CLIMATE_MODE_COOL;
+    case 3: return climate::CLIMATE_MODE_FAN_ONLY;
+    case 4: return climate::CLIMATE_MODE_DRY;
+    case 5: return climate::CLIMATE_MODE_HEAT_COOL;
+    default: return climate::CLIMATE_MODE_OFF;
+  }
+}
+
+static const char *air_mode_name(uint8_t mode) {
+  switch (mode) {
+    case 1: return "heat";
+    case 2: return "cool";
+    case 3: return "fan";
+    case 4: return "dry";
+    case 5: return "auto";
+    default: return "unknown";
+  }
+}
 constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_OPCODE;
 constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_LENGTH;
 constexpr ProtocolValue ToshibaAbClimate::MASTER_KEEPALIVE_DATA_TYPE;
@@ -34,6 +86,7 @@ constexpr ProtocolValue ToshibaAbClimate::WATER_MASTER_STATUS_MARKER;
 
 ToshibaAbThermostat::ToshibaAbThermostat(ToshibaAbClimate *parent, WaterCircuit circuit)
     : parent_(parent), circuit_(circuit) {
+  parent_->register_thermostat(this, circuit);
   this->mode = climate::CLIMATE_MODE_OFF;
   this->target_temperature = circuit == WaterCircuit::DHW ? 50.0f : 22.0f;
 }
@@ -51,7 +104,8 @@ climate::ClimateTraits ToshibaAbThermostat::traits() {
     traits.set_visual_min_temperature(45);
     traits.set_visual_max_temperature(60);
   } else {
-    traits.set_supported_modes({climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_COOL});
+    traits.set_supported_modes({climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_COOL,
+                                climate::CLIMATE_MODE_AUTO});
     traits.set_visual_min_temperature(20);
     traits.set_visual_max_temperature(65);
   }
@@ -330,6 +384,258 @@ void ToshibaAbClimate::process_frame_(Protocol protocol, const uint8_t *data, si
     consider_keepalive_(protocol, source);
   else if (remote_ping)
     observe_remote_(source, millis());
+  else if (status || extended_status)
+    process_master_status_(protocol, data, size, extended_status);
+}
+
+void ToshibaAbClimate::process_master_status_(Protocol protocol, const uint8_t *data, size_t size, bool extended) {
+  DecodedStatus decoded;
+  decoded.water = system_type_ == SystemType::WATER;
+  decoded.extended = extended;
+  // Exclude CRC bytes and TU2C's trailing A0 from every payload access.
+  const size_t payload_end = size - (protocol == Protocol::TCC ? 1 : 2);
+  const auto present = [protocol, payload_end](const ProtocolValue &offset) {
+    return offset.for_protocol(protocol) < payload_end;
+  };
+  const auto read = [protocol, data](const ProtocolValue &offset) { return data[offset.for_protocol(protocol)]; };
+  const auto temperature = [&](const ProtocolValue &offset, float conversion_offset) {
+    return present(offset) ? read(offset) / 2.0f - conversion_offset : NAN;
+  };
+
+  if (!decoded.water) {
+    if (present(AIR_MODE_POWER_OFFSET) && present(AIR_FAN_VENT_OFFSET)) {
+      decoded.has_air_state = true;
+      const uint8_t mode_power = read(AIR_MODE_POWER_OFFSET);
+      decoded.power = (mode_power & 0x01) != 0;
+      decoded.mode = (mode_power & 0xE0) >> 5;
+      if (protocol == Protocol::TU2C && decoded.mode == 6)
+        decoded.mode = 5;  // TU2C auto -> common air auto.
+      decoded.fan = (read(AIR_FAN_VENT_OFFSET) & 0xE0) >> 5;
+      decoded.ventilation = (read(AIR_FAN_VENT_OFFSET) & 0x04) != 0;
+      if (protocol == Protocol::TCC) {
+        decoded.has_louvre = true;
+        decoded.louvre = (mode_power >> 2) & 0x07;
+      }
+    }
+    decoded.target[0] = temperature(AIR_TARGET_OFFSET, 35.0f);
+    if ((extended || protocol == Protocol::TU2C) && present(AIR_CURRENT_OFFSET) && read(AIR_CURRENT_OFFSET) > 1)
+      decoded.current[0] = temperature(AIR_CURRENT_OFFSET, 35.0f);
+    if ((extended || protocol == Protocol::TU2C) && present(AIR_FLAGS_OFFSET)) {
+      decoded.has_air_flags = true;
+      decoded.flags = read(AIR_FLAGS_OFFSET);
+      decoded.preheating = (decoded.flags & 0x02) != 0;
+      decoded.filter_alert = (decoded.flags & 0x80) != 0;
+    }
+    const auto &preset_offset = extended ? AIR_EXTENDED_PRESET_OFFSET : AIR_PRESET_OFFSET;
+    if (present(preset_offset)) {
+      decoded.has_preset = true;
+      decoded.preset = read(preset_offset);
+    }
+  } else {
+    if (present(WATER_FLAGS_OFFSET) && present(WATER_MODE_FLAGS_OFFSET)) {
+      decoded.has_water_flags = true;
+      decoded.flags = read(WATER_FLAGS_OFFSET);
+      decoded.mode_flags = read(WATER_MODE_FLAGS_OFFSET);
+      decoded.zone1_enabled = (decoded.flags & 0x01) != 0;
+      decoded.dhw_enabled = (decoded.flags & 0x02) != 0;
+      decoded.cooling = (decoded.flags & 0x20) != 0;
+      decoded.heating = (decoded.flags & 0x40) != 0;
+      decoded.automatic = (decoded.mode_flags & 0x04) != 0;
+      decoded.boost = (decoded.mode_flags & 0x40) != 0;
+      if (protocol == Protocol::TU2C) {
+        decoded.has_antibacteria = true;
+        decoded.antibacteria = (decoded.mode_flags & 0x80) != 0;
+      }
+    }
+    if (present(WATER_HEATER_FLAGS_OFFSET)) {
+      decoded.has_heater_flags = true;
+      decoded.heater_flags = read(WATER_HEATER_FLAGS_OFFSET);
+      decoded.resistor = (decoded.heater_flags & 0x04) != 0;
+      decoded.heat_pump = (decoded.heater_flags & 0x08) != 0;
+    }
+    decoded.target[0] = temperature(WATER_DHW_TARGET_OFFSET, 16.0f);
+    decoded.target[1] = temperature(WATER_ZONE1_TARGET_OFFSET, 16.0f);
+    decoded.target[2] = temperature(WATER_ZONE2_TARGET_OFFSET, 16.0f);
+    if (protocol == Protocol::TU2C && extended) {
+      // Retain main's confirmed tank->DHW and water-outlet->Zone 1 mapping.
+      decoded.current[0] = temperature(WATER_DHW_CURRENT_OFFSET, 16.0f);
+      decoded.current[1] = temperature(WATER_ZONE1_CURRENT_OFFSET, 16.0f);
+      decoded.unknown_temperature = temperature(WATER_UNKNOWN_TEMP_OFFSET, 16.0f);
+    }
+    if (protocol == Protocol::A0 && extended) {
+      for (size_t i = 0; i < 3; i++)
+        decoded.repeated_target[i] = temperature(WATER_REPEATED_TARGET_OFFSETS[i], 16.0f);
+    }
+  }
+  decoded_status_ = decoded;
+  log_decoded_status_(protocol, decoded);
+  publish_decoded_status_(decoded);
+}
+
+void ToshibaAbClimate::log_decoded_status_(Protocol protocol, const DecodedStatus &status) {
+  std::string fields;
+  const auto integer = [&fields](const char *name, unsigned value) {
+    char field[64];
+    std::snprintf(field, sizeof(field), "%s=%u ", name, value);
+    fields += field;
+  };
+  const auto temperature = [&fields](const char *name, float value) {
+    if (std::isnan(value))
+      return;
+    char field[64];
+    std::snprintf(field, sizeof(field), "%s=%.1f ", name, value);
+    fields += field;
+  };
+  if (!status.water) {
+    if (status.has_air_state) {
+      integer("power", status.power);
+      fields += std::string("mode=") + air_mode_name(status.mode) + " ";
+      integer("mode_code", status.mode);
+      integer("fan_code", status.fan);
+      integer("ventilation", status.ventilation);
+    }
+    if (status.has_air_flags) {
+      integer("flags", status.flags);
+      integer("preheating", status.preheating);
+      integer("filter_alert", status.filter_alert);
+    }
+    if (status.has_louvre)
+      integer("louvre_position", status.louvre);
+    if (status.has_preset)
+      integer("preset_code", status.preset);
+    temperature("target", status.target[0]);
+    temperature("room", status.current[0]);
+  } else {
+    if (status.has_water_flags) {
+      integer("flags", status.flags);
+      integer("mode_flags", status.mode_flags);
+      integer("dhw_enabled", status.dhw_enabled);
+      integer("zone1_enabled", status.zone1_enabled);
+      integer("heating", status.heating);
+      integer("cooling", status.cooling);
+      integer("auto", status.automatic);
+      integer("dhw_boost", status.boost);
+    }
+    if (status.has_antibacteria)
+      integer("antibacteria", status.antibacteria);
+    if (status.has_heater_flags) {
+      integer("heater_flags", status.heater_flags);
+      integer("dhw_heat_pump", status.heat_pump);
+      integer("dhw_resistor", status.resistor);
+    }
+    temperature("dhw_target", status.target[0]);
+    temperature("zone1_target", status.target[1]);
+    temperature("zone2_target", status.target[2]);
+    temperature("dhw_current", status.current[0]);
+    temperature("zone1_current", status.current[1]);
+    temperature("unknown_temperature", status.unknown_temperature);
+    temperature("repeated_dhw_target", status.repeated_target[0]);
+    temperature("repeated_zone1_target", status.repeated_target[1]);
+    temperature("repeated_zone2_target", status.repeated_target[2]);
+  }
+  if (!fields.empty())
+    fields.pop_back();
+  ESP_LOGD(TAG, "Decoded %s %s: %s", protocol_name_(protocol), status.extended ? "extended status" : "status",
+           fields.c_str());
+}
+
+void ToshibaAbClimate::publish_decoded_status_(const DecodedStatus &status) {
+  if (!status.water) {
+    bool changed = false;
+    if (status.has_air_state) {
+      const auto new_mode = status.power ? air_mode(status.mode) : climate::CLIMATE_MODE_OFF;
+      if (this->mode != new_mode) { this->mode = new_mode; changed = true; }
+      climate::ClimateAction new_action = climate::CLIMATE_ACTION_OFF;
+      if (status.power) {
+        switch (status.mode) {
+          case 1: new_action = climate::CLIMATE_ACTION_HEATING; break;
+          case 2: new_action = climate::CLIMATE_ACTION_COOLING; break;
+          case 3: new_action = climate::CLIMATE_ACTION_FAN; break;
+          case 4: new_action = climate::CLIMATE_ACTION_DRYING; break;
+          default: new_action = climate::CLIMATE_ACTION_IDLE; break;
+        }
+      }
+      if (this->action != new_action) { this->action = new_action; changed = true; }
+      climate::ClimateFanMode new_fan = climate::CLIMATE_FAN_AUTO;
+      bool valid_fan = true;
+      if (status.power) {
+        switch (status.fan) {
+          case 2: new_fan = climate::CLIMATE_FAN_AUTO; break;
+          case 5: new_fan = climate::CLIMATE_FAN_LOW; break;
+          case 4: new_fan = climate::CLIMATE_FAN_MEDIUM; break;
+          case 3: new_fan = climate::CLIMATE_FAN_HIGH; break;
+          default: valid_fan = false; break;
+        }
+      }
+      if (valid_fan && (!this->fan_mode.has_value() || *this->fan_mode != new_fan)) {
+        this->fan_mode = new_fan;
+        changed = true;
+      }
+    }
+    if (status.has_preset) {
+      climate::ClimatePreset new_preset = climate::CLIMATE_PRESET_NONE;
+      bool valid_preset = true;
+      switch (status.preset) {
+        case 0x00: break;
+        case 0x01: new_preset = climate::CLIMATE_PRESET_BOOST; break;
+        case 0x03: new_preset = climate::CLIMATE_PRESET_ECO; break;
+        case 0x10: new_preset = climate::CLIMATE_PRESET_SLEEP; break;
+        default: valid_preset = false; break;
+      }
+      if (valid_preset && (!this->preset.has_value() || *this->preset != new_preset)) {
+        this->preset = new_preset;
+        changed = true;
+      }
+    }
+    // Keep main's plausibility limits while logging all received values.
+    if (status.target[0] >= 16 && status.target[0] <= 29)
+      changed |= update_temperature(this->target_temperature, status.target[0]);
+    if (status.current[0] >= 5 && status.current[0] <= 35)
+      changed |= update_temperature(this->current_temperature, status.current[0]);
+    if (changed)
+      this->publish_state();
+    return;
+  }
+
+  for (size_t circuit = 0; circuit < water_thermostats_.size(); circuit++) {
+    auto *thermostat = water_thermostats_[circuit];
+    if (thermostat == nullptr)
+      continue;
+    bool changed = false;
+    if (status.has_water_flags && circuit < 2) {
+      climate::ClimateMode new_mode = climate::CLIMATE_MODE_OFF;
+      if (circuit == 0) {
+        if (status.dhw_enabled)
+          new_mode = climate::CLIMATE_MODE_HEAT;
+      } else if (status.zone1_enabled) {
+        new_mode = status.automatic ? climate::CLIMATE_MODE_AUTO
+                                   : (status.cooling ? climate::CLIMATE_MODE_COOL : climate::CLIMATE_MODE_HEAT);
+      }
+      if (thermostat->mode != new_mode) { thermostat->mode = new_mode; changed = true; }
+      // Enable/mode flags do not establish active heat transfer. Only TU2C
+      // DHW pump/resistor flags do; otherwise an enabled circuit is idle.
+      const auto new_action = new_mode == climate::CLIMATE_MODE_OFF ? climate::CLIMATE_ACTION_OFF
+                              : circuit == 0 && status.has_heater_flags && (status.heat_pump || status.resistor)
+                                  ? climate::CLIMATE_ACTION_HEATING : climate::CLIMATE_ACTION_IDLE;
+      if (thermostat->action != new_action) { thermostat->action = new_action; changed = true; }
+      if (circuit == 0) {
+        const auto new_preset = status.boost ? climate::CLIMATE_PRESET_BOOST : climate::CLIMATE_PRESET_NONE;
+        if (!thermostat->preset.has_value() || *thermostat->preset != new_preset) {
+          thermostat->preset = new_preset;
+          changed = true;
+        }
+      }
+    }
+    // Auto has no fixed setpoint, even when a short status omits temperatures.
+    if (circuit == 1 && thermostat->mode == climate::CLIMATE_MODE_AUTO)
+      changed |= update_temperature(thermostat->target_temperature, NAN);
+    else if (!std::isnan(status.target[circuit]))
+      changed |= update_temperature(thermostat->target_temperature, status.target[circuit]);
+    if (!std::isnan(status.current[circuit]))
+      changed |= update_temperature(thermostat->current_temperature, status.current[circuit]);
+    if (changed)
+      thermostat->publish_state();
+  }
 }
 
 bool ToshibaAbClimate::is_master_keepalive_(Protocol protocol, const uint8_t *data, size_t size,
