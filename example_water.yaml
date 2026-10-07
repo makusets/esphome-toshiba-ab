@@ -90,7 +90,3 @@ climate:
     # reset_button:
     #   name: Toshiba AB Reset
 
-# This branch discovers the bus, selects a local address, and decodes received
-# thermostat states. Control and bus registration/transmission remain unimplemented.
-# Zone 2 currently updates known A0 setpoints only; independent mode/action
-# fields have not been established.
