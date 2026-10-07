@@ -39,30 +39,28 @@ uart:
   rx_buffer_size: 2048       # Optional; ESPHome defaults to 256 bytes.
 
 climate:
-  - platform: toshiba_ab     # Required.
-    # All component settings below are optional; uncomment to override defaults.
-    # uart_id: ab_bus        # Required only if multiple UARTs need disambiguation.
-    # system_type: air       # Default: air. Use water for an Estia system.
-    # format: auto           # Default: auto. Choices: auto, tcc, a0, tu2c.
-    # master_address: auto   # Default: auto. Or require a specific address, e.g. 0x00.
-    # esp_address: auto      # Default: auto. Or keep a fixed address, e.g. 0x40.
-    # name: Toshiba AC       # Default: Toshiba AC for air; Estia DHW for water.
-                             # With water, this names DHW.
+  - platform: toshiba_ab       # Required.
+    # All settings below are optional; uncomment to override defaults.
+    # uart_id: ab_bus          # Required only if multiple UARTs need disambiguation.
+    # system_type: air         # Default: air.
+    # format: auto             # Default: auto. Choices: auto, tcc, a0, tu2c.
+                              # A0 includes HM air systems.
+    # master_address: auto     # Default: auto; or require an address, e.g. 0x00.
+    # esp_address: auto        # Default: auto; or keep a fixed address, e.g. 0x40.
+    # name: Toshiba AC         # Default: Toshiba AC.
 
-    # Water-only thermostats (ignored for air):
-    # dhw: true              # Default: true; default name: Estia DHW.
-    # zone_1: true           # Default: true; default name: Estia Zone 1.
-    # zone_2: false          # Default: false. If true, default name: Estia Zone 2.
-                             # Set any of these to false to disable that thermostat.
+    # Optional thermostat display overrides; defaults shown below.
+    # These affect the Home Assistant display, not the system's operating limits.
+    # visual:
+    #   min_temperature: 16
+    #   max_temperature: 32
+    #   temperature_step: 0.5
 
-    # Optional custom names (use mappings instead of true/false):
-    # dhw:
-    #   name: Hot Water
-    # zone_1:
-    #   name: Downstairs
-    # zone_2:
-    #   name: Upstairs
+    # Optional diagnostic entity names; defaults shown below.
+    # diagnostic:
+    #   name: Toshiba AB Diagnostic
+    # reset_button:
+    #   name: Toshiba AB Reset
 
-
-# This branch currently identifies the bus and selects a local address;
-# thermostat control and bus registration/transmission are not implemented yet.
+# This branch discovers the bus, selects a local address, and decodes received
+# thermostat states. Control and bus registration/transmission remain unimplemented.

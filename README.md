@@ -138,7 +138,7 @@ climate:
 
 See [`complete_example.yaml`](complete_example.yaml) for autonomous operation,
 addresses, temperature reporting, diagnostic sensors, power estimation and all
-other air-to-air options. [`example.yaml`](example.yaml) is a ready-to-edit,
+other air-to-air options. [`example_air.yaml`](example_air.yaml) is a ready-to-edit,
 smaller device configuration.
 
 ### Optional BME280
@@ -231,3 +231,5 @@ improvements, and [@yvertman](https://github.com/yvertman) and
 [@Dieghito72](https://github.com/Dieghito72) for their contributions to fully
 functional TU2C support. Thanks also to every contributor and tester who has
 shared hardware findings, models, captures, code and documentation.
+
+For the `new_code` branch, use [`example_air.yaml`](example_air.yaml) for air installations or [`example_water.yaml`](example_water.yaml) for Estia water installations. Both identify required settings and optional overrides; the water example documents per-thermostat display ranges.
