@@ -19,6 +19,7 @@ ota:                         # Optional; enables firmware updates over the netwo
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  output_power: 10dB        # Recommended, lowers the noise created by the power spikes, defaults to 20dB
 
 # Required to load this external component.
 external_components:
