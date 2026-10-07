@@ -83,7 +83,7 @@ class TextSensor {
 #define ESPHOME_LOG_RESET_COLOR ""
 '''
 
-def main():
+def run_test(source, stub=STUB):
     with tempfile.TemporaryDirectory(prefix="toshiba-address-tests-") as directory:
         temp = pathlib.Path(directory)
         for header in ("components/button/button.h", "components/climate/climate.h",
@@ -92,16 +92,19 @@ def main():
             path = temp / "esphome" / header
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('#include "host_stubs.h"\n')
-        (temp / "host_stubs.h").write_text(STUB)
+        (temp / "host_stubs.h").write_text(stub)
         executable = temp / "address-tests"
         subprocess.run([
             "g++", "-std=c++11", "-Wall", "-Wextra", "-Wno-unused-parameter",
             "-Wno-unused-variable", "-fsanitize=address,undefined", "-fno-omit-frame-pointer",
             "-I", str(temp), "-I", str(ROOT / "components/toshiba_ab"),
-            str(ROOT / "tests/esp_address_test.cpp"),
+            str(ROOT / "tests" / source),
             str(ROOT / "components/toshiba_ab/toshiba_ab.cpp"), "-o", str(executable),
         ], check=True)
         subprocess.run([str(executable)], check=True)
+
+def main():
+    run_test("esp_address_test.cpp")
 
 if __name__ == "__main__":
     main()

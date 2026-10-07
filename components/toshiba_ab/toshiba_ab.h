@@ -125,6 +125,28 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   // 0x0C for its remote ping instead of the air protocol's 0x5C.
   static constexpr uint16_t TU2C_FIRST_GEN_REMOTE_PING_DATA_TYPE = 0x0C;
 
+  // Status lengths are minimum encoded lengths, not complete buffer sizes.
+  // TCC and A0 air share the 0x81 status marker (A0 carries 00:81).
+  // Air TU2C uses C0:38 / A0:38 and broadcasts to 0xFF.
+  static constexpr ProtocolValue MASTER_STATUS_OPCODE{0x1C, 0xC0, 0x1C};
+  static constexpr ProtocolValue MASTER_STATUS_MIN_LENGTH{0x07, 0x0F, 0x0C};
+  static constexpr ProtocolValue MASTER_STATUS_DATA_TYPE{0x81, 0x38, 0x0081};
+  static constexpr ProtocolValue MASTER_EXTENDED_STATUS_OPCODE{0x58, 0xA0, 0x58};
+  static constexpr ProtocolValue MASTER_EXTENDED_STATUS_MIN_LENGTH{0x07, 0x0F, 0x0C};
+  static constexpr ProtocolValue MASTER_EXTENDED_STATUS_DATA_TYPE{0x81, 0x38, 0x0081};
+  static constexpr ProtocolValue MASTER_STATUS_BROADCAST_ADDRESS{0xF0, 0xFF, 0xFE};
+
+  // Main identifies TU2C water status by E0:<reserved opcode>:31; it does
+  // not constrain that opcode. 0x100 denotes an unspecified 8-bit opcode.
+  static constexpr uint16_t UNSPECIFIED_OPCODE = 0x100;
+  static constexpr ProtocolValue WATER_MASTER_STATUS_OPCODE{0, UNSPECIFIED_OPCODE, 0x1C};
+  static constexpr ProtocolValue WATER_MASTER_STATUS_MIN_LENGTH{0, 0x0C, 0x0F};
+  static constexpr ProtocolValue WATER_MASTER_STATUS_DATA_TYPE{0, 0x31, 0x03C6};
+  static constexpr ProtocolValue WATER_MASTER_EXTENDED_STATUS_OPCODE{0, UNSPECIFIED_OPCODE, 0x58};
+  static constexpr ProtocolValue WATER_MASTER_EXTENDED_STATUS_MIN_LENGTH{0, 0x15, 0x0F};
+  static constexpr ProtocolValue WATER_MASTER_EXTENDED_STATUS_DATA_TYPE{0, 0x31, 0x03C6};
+  static constexpr ProtocolValue WATER_MASTER_STATUS_MARKER{0, 0xE0, 0};
+
   void read_byte_(uint8_t byte);
   void read_even_byte_(uint8_t byte);
   void read_tu2c_byte_(uint8_t byte);
@@ -135,6 +157,8 @@ class ToshibaAbClimate : public climate::Climate, public uart::UARTDevice, publi
   void process_frame_(Protocol protocol, const uint8_t *data, size_t size, bool crc_ok);
   bool is_master_keepalive_(Protocol protocol, const uint8_t *data, size_t size, uint8_t &source) const;
   bool is_remote_ping_(Protocol protocol, const uint8_t *data, size_t size, uint8_t &source) const;
+  bool is_master_status_(Protocol protocol, const uint8_t *data, size_t size, bool extended,
+                         uint8_t &source) const;
   void consider_keepalive_(Protocol protocol, uint8_t source);
   void observe_remote_(uint8_t address, uint32_t now);
   void expire_remotes_(uint32_t now);
