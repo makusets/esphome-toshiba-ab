@@ -94,13 +94,10 @@ climate:
     #     temperature_step: 0.5
     #
     #
-    # Cooling-only override for either zone: min_temperature: 7,
-    # max_temperature: 25. For underfloor cooling, typically use a minimum
-    # of 18–20 °C instead to help avoid condensation.
-    #
-    # For a zone used for both heating and cooling, a single combined visual
-    # range is 7–65 °C (or 18–65 °C for underfloor cooling). It does not switch
-    # with mode; configure operating limits/condensation protection on the system.
+    # For a zone used for both heating and cooling, the max single combined visual
+    # range is 7–65 °C (though 18–40 °C is recommended for underfloor systems). The visual
+    # range does not change with mode.
+ 
 
     # Optional diagnostic entity names; defaults shown below.
     # diagnostic:
