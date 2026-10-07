@@ -124,15 +124,12 @@ ToshibaAbThermostat::ToshibaAbThermostat(ToshibaAbClimate *parent, WaterCircuit 
 climate::ClimateTraits ToshibaAbThermostat::traits() {
   auto traits = climate::ClimateTraits();
   traits.set_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE | climate::CLIMATE_SUPPORTS_ACTION);
-  // Hydronic controllers expose these operating presets independently of the
-  // circuit's heat/cool mode. Keep them on DHW and both zones so each entity
-  // can eventually report and control the corresponding water-system state.
-  traits.set_supported_presets(
-      {climate::CLIMATE_PRESET_NONE, climate::CLIMATE_PRESET_BOOST, climate::CLIMATE_PRESET_ECO});
   if (circuit_ == WaterCircuit::DHW) {
+    traits.set_supported_presets(
+        {climate::CLIMATE_PRESET_NONE, climate::CLIMATE_PRESET_BOOST, climate::CLIMATE_PRESET_ECO});
     traits.set_supported_modes({climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT});
-    traits.set_visual_min_temperature(45);
-    traits.set_visual_max_temperature(60);
+    traits.set_visual_min_temperature(40);
+    traits.set_visual_max_temperature(65);
   } else {
     traits.set_supported_modes({climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_COOL,
                                 climate::CLIMATE_MODE_AUTO});
