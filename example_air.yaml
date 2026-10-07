@@ -30,7 +30,6 @@ external_components:
 
 # Required AB-bus UART settings. Choose pins to match your hardware.
 uart:
-  id: ab_bus                 # Optional when there is only one UART.
   rx_pin: GPIO13             # Required receive connection.
   tx_pin: GPIO12             # Optional in the current receive-only implementation.
   baud_rate: 2400            # Required; must be 2400.
@@ -41,12 +40,10 @@ uart:
 climate:
   - platform: toshiba_ab       # Required.
     # All settings below are optional; uncomment to override defaults.
-    # uart_id: ab_bus          # Required only if multiple UARTs need disambiguation.
     # system_type: air         # Default: air.
-    # format: auto             # Default: auto. Choices: auto, tcc, a0, tu2c.
-                              # A0 includes HM air systems.
-    # master_address: auto     # Default: auto; or require an address, e.g. 0x00.
-    # esp_address: auto        # Default: auto; or keep a fixed address, e.g. 0x40.
+    # format: auto             # Default: auto (recommended). Choices: auto, tcc, a0, tu2c.
+    # master_address: auto     # Default: auto (recommended); or require an address, e.g. 0x00.
+    # esp_address: auto        # Default: auto (recommended); or keep a fixed address, e.g. 0x40.
     # name: Toshiba AC         # Default: Toshiba AC.
 
     # Optional thermostat display overrides; defaults shown below.
@@ -62,5 +59,4 @@ climate:
     # reset_button:
     #   name: Toshiba AB Reset
 
-# This branch discovers the bus, selects a local address, and decodes received
-# thermostat states. Control and bus registration/transmission remain unimplemented.
+
