@@ -398,7 +398,7 @@ thermostat state is published.
 Air decoding includes power, mode, fan, ventilation, target/current temperature,
 preheating and filter flags, TCC louvre code and TU2C preset code when present.
 Main's temperature conversions and plausibility bounds are retained. Unsupported
-fan/preset values are logged as `unknown` without replacing known entity state.
+fan/preset values are logged as `unknown(<value>)` without replacing known entity state.
 
 Water decoding includes DHW/Zone 1 enable flags, heating/cooling, Auto, boost,
 setpoints, TU2C anti-bacteria and DHW pump/resistor flags, and known TU2C current
@@ -430,5 +430,7 @@ Decoded status logs use names for modes, fans, presets and known TCC louvre
 positions, and `on`/`off` for every boolean flag across all protocols. For example:
 `power=on mode=cool fan=medium ventilation=off preheating=off filter_alert=on`.
 Raw numeric setting codes and flag bytes are omitted from this decoded line;
-unrecognized setting values are shown as `unknown`. Numeric temperatures remain.
+unrecognized setting values are shown as `unknown(<value>)`. Numeric temperatures remain.
 The existing raw RX frame log still contains the original bytes.
+
+Unknown named settings include their received decimal code, for example `fan=unknown(7)`, while known settings retain names such as `fan=medium`.
