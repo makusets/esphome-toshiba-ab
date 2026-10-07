@@ -81,6 +81,9 @@ void ToshibaAbClimate::reset() {
   discovery_finished_ = false;
   reader_reset_count_ = 0;
   remotes_.clear();
+  if (esp_address_auto_)
+    esp_address_ = AUTO_ADDRESS;
+  esp_address_unavailable_reported_ = false;
   select_scan_protocol_(protocol_setting_ == Protocol::AUTO ? Protocol::TCC : protocol_setting_);
   diagnostic_(protocol_setting_ == Protocol::AUTO
                   ? "Reset: scanning TCC master keepalives (0-20s)"
@@ -399,12 +402,14 @@ void ToshibaAbClimate::consider_keepalive_(Protocol protocol, uint8_t source) {
   master_address_ = source;
   master_address_confirmed_ = true;
   diagnostic_(std::string("Confirmed ") + protocol_name_(protocol) + " master " + hex_(&source, 1));
+  update_esp_address_();
 }
 
 void ToshibaAbClimate::observe_remote_(uint8_t address, uint32_t now) {
   for (auto &remote : remotes_) {
     if (remote.address == address) {
       remote.last_seen = now;
+      update_esp_address_();
       return;
     }
   }
@@ -413,6 +418,7 @@ void ToshibaAbClimate::observe_remote_(uint8_t address, uint32_t now) {
   std::sort(remotes_.begin(), remotes_.end(),
             [](const RemotePresence &left, const RemotePresence &right) { return left.address < right.address; });
   diagnostic_(std::string("Remote discovered: ") + hex_(&address, 1));
+  update_esp_address_();
 }
 
 void ToshibaAbClimate::expire_remotes_(uint32_t now) {
@@ -428,6 +434,53 @@ void ToshibaAbClimate::expire_remotes_(uint32_t now) {
                  remotes_.end());
   for (uint8_t address : expired)
     diagnostic_(std::string("Remote removed: ") + hex_(&address, 1));
+  if (!expired.empty())
+    update_esp_address_();
+}
+
+void ToshibaAbClimate::update_esp_address_() {
+  if (!protocol_confirmed_ || !master_address_confirmed_)
+    return;
+
+  const auto address_in_use = [this](uint8_t address) {
+    return address == master_address_ ||
+           std::any_of(remotes_.begin(), remotes_.end(),
+                       [address](const RemotePresence &remote) { return remote.address == address; });
+  };
+
+  if (!esp_address_auto_) {
+    if (!esp_address_collision_reported_ && address_in_use(esp_address_)) {
+      esp_address_collision_reported_ = true;
+      diagnostic_(std::string("ESP address collision: ") + hex_(&esp_address_, 1) +
+                  " is in use; keeping explicit YAML address");
+    }
+    return;
+  }
+
+  const auto candidates = esp_address_candidates(protocol_detected_, system_type_);
+  uint8_t selected = AUTO_ADDRESS;
+  for (size_t i = 0; i < candidates.size; i++) {
+    if (!address_in_use(candidates.data[i])) {
+      selected = candidates.data[i];
+      break;
+    }
+  }
+
+  // Never retain a colliding address when all candidates are occupied.
+  const uint8_t previous = esp_address_;
+  esp_address_ = selected;
+  if (selected == AUTO_ADDRESS) {
+    if (!esp_address_unavailable_reported_) {
+      esp_address_unavailable_reported_ = true;
+      diagnostic_(candidates.size == 0 ? "ESP auto address unavailable: unsupported protocol/system combination"
+                                       : "ESP auto address unavailable: all candidate addresses are in use");
+    }
+    return;
+  }
+
+  esp_address_unavailable_reported_ = false;
+  if (selected != previous)
+    diagnostic_(std::string("ESP auto address selected: ") + hex_(&selected, 1));
 }
 
 void ToshibaAbClimate::set_runtime_parity_(uart::UARTParityOptions parity) {
@@ -440,7 +493,9 @@ void ToshibaAbClimate::set_runtime_parity_(uart::UARTParityOptions parity) {
 #endif
   if (parent_ != nullptr) {
     parent_->set_parity(parity);
+#if defined(USE_ESP8266) || defined(USE_ESP32)
     parent_->load_settings();
+#endif
   }
 }
 
@@ -587,7 +642,9 @@ void ToshibaAbClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "  Configured format: %s", protocol_name_(protocol_setting_));
   ESP_LOGCONFIG(TAG, "  Master address: %s",
                 master_setting_ == AUTO_ADDRESS ? "auto" : hex_(&master_setting_, 1).c_str());
-  ESP_LOGCONFIG(TAG, "  ESP address: %s", esp_address_ == AUTO_ADDRESS ? "auto" : hex_(&esp_address_, 1).c_str());
+  ESP_LOGCONFIG(TAG, "  ESP address mode: %s", esp_address_auto_ ? "auto" : "explicit");
+  ESP_LOGCONFIG(TAG, "  ESP address: %s",
+                esp_address_ == AUTO_ADDRESS ? "unassigned" : hex_(&esp_address_, 1).c_str());
 }
 
 }  // namespace toshiba_ab

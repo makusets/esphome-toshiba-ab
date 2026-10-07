@@ -1,6 +1,6 @@
 # New component code: development progress and logic
 
-> **Living document** — Last reviewed: 2026-09-06<br>
+> **Living document** — Last reviewed: 2026-10-07<br>
 > Update this page whenever a feature is implemented, its behavior changes, or
 > a test result changes. The status described here applies to the new,
 > identification-focused implementation in `components/toshiba_ab/` and not to
@@ -40,17 +40,18 @@ Status meanings:
 | TU2C frame collection | Done | Synchronizes on `F0:F0`, uses the encoded total length, requires the trailing `A0`, and validates the 8-bit additive checksum. |
 | Incomplete-frame recovery | Done | Drops a partial frame after a 25 ms inter-byte timeout and records reader resynchronizations. |
 | Automatic protocol discovery | Done | Scans TCC, A0, and TU2C for 20 seconds each and confirms a protocol only from a checksum-valid master keepalive. |
-| Runtime UART parity selection | Partial | Selects even parity for TCC/A0 and no parity for TU2C. Includes the existing ESP8266 UART0 GPIO13 swap path; broader hardware validation is still required. |
+| Runtime UART parity selection | Partial | Selects even parity for TCC/A0 and no parity for TU2C. Includes the existing ESP8266 UART0 GPIO13 swap path; broader hardware validation is still required. UART settings reload is guarded to ESP8266/ESP32, matching the ESPHome API and permitting host builds. |
 | Master-address discovery and validation | Done | Learns the source from the first valid master keepalive or checks it against an explicitly configured address. |
-| Existing remote discovery | Partial | After protocol and master confirmation, known checksum-valid remote pings maintain a live address inventory. Addresses expire after five minutes without a ping; ESP address assignment is not implemented yet. |
+| Existing remote discovery | Partial | After protocol and master confirmation, known checksum-valid remote pings maintain a live address inventory. Addresses expire after five minutes without a ping and drive automatic ESP address selection. |
+| ESP address selection | Done | Auto mode selects the lowest free protocol/system candidate, moves on remote collisions, and reclaims lower expired addresses. Explicit mode retains its address and reports a collision once per component lifetime. Bus registration/transmission remains unimplemented. |
 | Frame logging | Done | Logs every complete candidate, highlights addresses and command/type fields, and marks checksum failures. |
 | Diagnostic sensor | Done | Publishes the latest discovery event; earlier states remain available through Home Assistant history. |
 | Manual rediscovery | Done | The diagnostic reset button clears discovery state, reader state, and counters, then restarts scanning. |
 | Climate API capability declaration | Partial | Air systems advertise the intended climate modes, fan modes, swing modes, presets, current temperature, and action. Water systems currently expose only off mode. These are API declarations, not working controls. |
 | Climate state decoding | Not started | Valid non-keepalive frames are logged and then discarded. State parsing and publication must be rebuilt. |
-| Command generation/transmission | Not started | `control()` deliberately ignores calls. Address assignment, command queues, retries, and bus timing still need implementation. |
+| Command generation/transmission | Not started | `control()` deliberately ignores calls. Bus registration, command queues, retries, and bus timing still need implementation. |
 | Connection/liveness tracking | Not started | A keepalive confirms discovery, but no ongoing online/offline state or timeout is currently published. |
-| Automated parser tests | Not started | Add captured-frame fixtures and tests for valid frames, bad checksums, truncation, noise recovery, discovery timing, and address mismatch behavior. |
+| Automated parser tests | Partial | Host tests feed synthetic checksum-valid master/remote frames through the real readers and cover address selection, collisions, expiration, reset, checksum rejection, and master mismatch. Captured frames, truncation/noise, and discovery timing still need broader coverage. |
 | On-device protocol validation | Partial | The reader logic exists; each protocol and supported hardware path still needs results recorded from representative installations. |
 
 ## Runtime logic
@@ -182,8 +183,8 @@ component keeps a live remote-address inventory internally. A valid ping adds
 or refreshes its source address, and an address is removed after five minutes
 without another ping. The diagnostic sensor reports `Remote discovered:` and
 `Remote removed:` events only when membership changes; routine presence
-refreshes do not republish a current-address snapshot. The addresses do not yet
-influence the configured ESP address. As with master keepalive identification, encoded
+refreshes do not republish a current-address snapshot. This inventory drives ESP
+address selection as described below. As with master keepalive identification, encoded
 lengths, opcodes, and data types are held in protocol-value constants and
 compared through the common semantic field helpers rather than at raw offsets.
 
@@ -203,7 +204,48 @@ Note that the protocol is confirmed before an explicit-address mismatch is
 reported. Consequently, the automatic scan stops in that case. This is current
 behavior and should be revisited if address mismatch recovery is desired.
 
-### 6. Climate behavior during this phase
+### 6. ESP address selection and collisions
+
+After both protocol and master confirmation, `esp_address: auto` selects the
+first free candidate in this preference order:
+
+| Protocol | System | Candidate order |
+| --- | --- | --- |
+| TCC | Air | `0x40, 0x41, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49` |
+| TU2C | Air | `0x50, 0x51, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59` |
+| TU2C | Water | `0x60` through `0x69` |
+| A0 | Water | `0x40` through `0x49`, including `0x41` and `0x42` |
+
+TCC water and A0 air have no established automatic candidate list. They stay
+unassigned and publish an unsupported-combination diagnostic; an explicit
+address can still be configured. The master address is always excluded from
+automatic selection, along with every address in the live remote inventory.
+
+Each recognized, checksum-valid remote ping to the confirmed master updates
+that inventory and recalculates the preferred free address. Occupied candidates
+are skipped, including addresses above the current selection. When a remote
+expires after five minutes without a ping, selection is recalculated after the
+whole expiration batch, allowing the ESP to move down to a preferred free address.
+Routine pings that do not change the selection do not publish selection events.
+
+If every candidate is occupied, the ESP becomes unassigned (`0xAA` internally)
+and publishes one unavailable diagnostic until a candidate becomes free. It
+never keeps a known colliding automatic address. Reset clears the inventory and
+automatic selection, then waits for a new master confirmation before selecting.
+
+An explicit `esp_address` never changes. A remote ping using that address (or a
+confirmed master using it) publishes `ESP address collision:` once per component
+lifetime. Repeated pings, expiration/reappearance, and the diagnostic reset button
+do not repeat that collision warning; a reboot starts a new component lifetime.
+
+These are local selection decisions only: the component still transmits no
+registration, keepalive, or control frames. Maintaining the required first
+address on the physical bus needs the future transmit/registration path. Only
+recognized pings to the confirmed master populate the remote inventory, so an
+unseen or silent participant cannot yet be excluded. Future transmission must
+also distinguish locally echoed pings from other participants.
+
+### 7. Climate behavior during this phase
 
 For an air system, the entity advertises the intended modes and controls so API
 clients can retain the eventual entity schema while development continues. A
@@ -228,7 +270,7 @@ These capabilities must not be interpreted as functional support yet:
 | `zone_1` | `true` | Create the water system's first heating/cooling thermostat; set to `false` to omit it. |
 | `zone_2` | `false` | Create a second heating/cooling thermostat when enabled. |
 | `master_address` | `auto` (`0xAA` internally) | Learn the master or require an explicit 8-bit address. |
-| `esp_address` | `auto` (`0xAA` internally) | Stores the future local address; it is not yet used to transmit. |
+| `esp_address` | `auto` (`0xAA` internally) | Selects the lowest free candidate in auto mode; explicit addresses stay fixed with a one-time collision warning. Not yet used to transmit. |
 | `diagnostic` | `Toshiba AB Diagnostic` | Text sensor containing the latest discovery event. |
 | `reset_button` | `Toshiba AB Reset` | Restarts the identification process without rebooting. |
 
@@ -248,8 +290,8 @@ Work should proceed in small steps that keep receive behavior observable:
    refresh it and how disconnect/recovery is reported.
 4. **Decode read-only climate state** one protocol at a time and publish only
    fields demonstrated by fixtures and captures.
-5. **Implement local-address selection and collision avoidance** before enabling
-   any write path.
+5. **Validate local-address selection on hardware** and add registration and
+   echo handling before enabling any write path.
 6. **Build and test command transmission**, including bus-idle timing,
    acknowledgements, retry limits, and failure diagnostics.
 7. **Enable `control()` incrementally**, guarding support by protocol and system
@@ -265,6 +307,7 @@ hardware-specific behavior visible.
 
 | Date | Revision | Environment/system | Protocol/path | Result | Evidence or notes |
 | --- | --- | --- | --- | --- | --- |
+| 2026-10-07 | ESP address assignment change | Linux host, C++11 with AddressSanitizer/UndefinedBehaviorSanitizer (leak detection disabled for sandbox) | TCC air, TU2C air/water, A0 water | Passed synthetic bus-fixture tests | All candidate ranges, exhaustion/recovery, lower-address reclaim, explicit collision warning once, reset, filtering, master mismatch, and timer wraparound. ESPHome 2026.9.1 generated all four supported combinations and auto/fixed configuration; generated component/main C++ compiled against actual host headers. No live AB-bus validation. |
 | 2026-09-06 | Initial tracking document | Source review only | All | Documentation baseline | No new hardware or parser test was performed for this entry. |
 
 ## How to update this document
@@ -282,3 +325,4 @@ For each development change:
 Keep the description tied to the current source. Protocol background and stable
 wire-format reference material belong in `frame_formats.md`; this page should
 remain focused on implementation status, decision flow, and verified progress.
+
