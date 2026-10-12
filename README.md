@@ -19,7 +19,7 @@ The TU2C protocol is now fully functional, thanks to contributions from
 Thanks to [@JuhaniVu](https://github.com/JuhaniVu), the first-generation Toshiba
 ESTIA R410A frame format is fully implemented. Select `frame_format: estia` and
 use a 2400 baud, 8N1 UART (`parity: NONE`). See the
-[complete R410A configuration](estia_R410A.yaml).
+[complete R410A configuration](estia_R410A_example.yaml).
 
 ### May 2026 — ESTIA R32 and protocol improvements
 
@@ -237,7 +237,7 @@ climate:
     frame_format: estia
 ```
 
-Use [`estia_R410A.yaml`](estia_R410A.yaml) for the complete R410A configuration.
+Use [`estia_R410A_example.yaml`](estia_R410A_example.yaml) for the complete R410A configuration.
 
 ### Minimal R32 configuration
 
@@ -254,7 +254,7 @@ climate:
     frame_format: a0
 ```
 
-Use [`example_estia.yaml`](example_estia.yaml) for the complete R32 configuration,
+Use [`estia_R32_example.yaml`](estia_R32_example.yaml) for the complete R32 configuration,
 including optional demand emulation, sensors and runtime switches.
 
 ### Optional BME280

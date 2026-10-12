@@ -3,7 +3,7 @@
 #
 # Protocol: Estia A0-protocol at 2400 baud 8E1 (NOT TCC-Link or TU2C)
 # Compatible with Toshiba Estia R32 systems. For ESTIA R410A systems, use
-# estia_R410A.yaml instead.
+# estia_R410A_example.yaml instead.
 ###############################################################################
 
 esphome:
@@ -19,7 +19,8 @@ logger:
 api:
 
 ota:
-  password: "your_ota_password"
+  - platform: esphome
+    password: "your_ota_password"
 
 wifi:
   ssid: !secret wifi_ssid
