@@ -1038,6 +1038,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_demand_enabled(bool en) { demand_enabled_ = en; }
   void send_estia_data_request(uint8_t subtype);
   void send_estia_first_gen_dhw_setpoint(float target_temp);
+  void send_estia_first_gen_zone1_setpoint(float target_temp);
+  void send_estia_first_gen_zone1_mode(climate::ClimateMode mode);
   void send_estia_first_gen_zone1(bool on);
   void send_estia_first_gen_dhw_on();
   void send_estia_first_gen_dhw_off();
@@ -1324,6 +1326,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool estia_first_gen_hotwater_resistor_heating_{false};
   uint8_t estia_first_gen_dhw_encoded_{0};
   uint8_t estia_first_gen_zone1_encoded_{0};
+  optional<climate::ClimateMode> estia_first_gen_pending_zone1_mode_;
   uint32_t last_temp_log_time_ = 0;  // Counter for BME280 temperature logging
   float last_sent_temp_ = 1; // Last sent room temperature to the unit
 
