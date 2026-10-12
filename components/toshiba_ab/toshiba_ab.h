@@ -1038,6 +1038,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_demand_enabled(bool en) { demand_enabled_ = en; }
   void send_estia_data_request(uint8_t subtype);
   void send_estia_first_gen_dhw_setpoint(float target_temp);
+  void send_estia_first_gen_zone1_setpoint(float target_temp);
   void send_estia_first_gen_zone1(bool on);
   void send_estia_first_gen_dhw_on();
   void send_estia_first_gen_dhw_off();

@@ -3446,6 +3446,33 @@ void ToshibaAbClimate::control_estia_zone1(const climate::ClimateCall &call) {
     ESP_LOGW(TAG, "Read-only mode: not controlling Estia Zone 1 thermostat");
     return;
   }
+  if (this->data_reader.frame_format() == FrameFormat::ESTIA) {
+    const climate::ClimateMode requested_mode = call.get_mode().value_or(
+        this->zone1_climate_ != nullptr ? this->zone1_climate_->mode : climate::CLIMATE_MODE_HEAT);
+    if (requested_mode == climate::CLIMATE_MODE_COOL) {
+      ESP_LOGW(TAG, "First-generation Estia Zone 1 cooling commands are not implemented");
+      return;
+    }
+    if (call.get_mode().has_value()) {
+      if (requested_mode == climate::CLIMATE_MODE_OFF) {
+        this->send_estia_first_gen_zone1(false);
+      } else if (requested_mode == climate::CLIMATE_MODE_AUTO) {
+        this->send_estia_first_gen_auto_mode(true);
+        this->send_estia_first_gen_zone1(true);
+      } else if (requested_mode == climate::CLIMATE_MODE_HEAT) {
+        this->send_estia_first_gen_auto_mode(false);
+        this->send_estia_first_gen_zone1(true);
+      }
+    }
+    if (call.get_target_temperature().has_value()) {
+      if (requested_mode == climate::CLIMATE_MODE_AUTO) {
+        ESP_LOGD(TAG, "Ignoring Zone 1 target temperature in Automatik mode; the heat pump calculates it");
+      } else {
+        this->send_estia_first_gen_zone1_setpoint(*call.get_target_temperature());
+      }
+    }
+    return;
+  }
   if (call.get_mode().has_value()) {
     const climate::ClimateMode requested_mode = *call.get_mode();
     // Supersede any older deferred transition so a late ACK cannot turn the
@@ -4074,6 +4101,18 @@ void ToshibaAbClimate::send_estia_first_gen_dhw_setpoint(float target_temp) {
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
+void ToshibaAbClimate::send_estia_first_gen_zone1_setpoint(float target_temp) {
+  if (this->read_only_) return;
+  if (!std::isfinite(target_temp) || target_temp < 20.0f || target_temp > 65.0f) {
+    ESP_LOGW(TAG, "Ignoring invalid first-generation Estia Zone 1 setpoint %.1f°C", target_temp);
+    return;
+  }
+  const uint8_t encoded = static_cast<uint8_t>(std::round((target_temp + 16.0f) * 2.0f));
+  // Zone 1 setpoint frame tested in PR #243; retain its captured companion fields.
+  const uint8_t payload[] = {0xE0, 0x01, 0x23, 0x02, encoded, 0x66, 0xA2, encoded};
+  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+}
+
 void ToshibaAbClimate::send_estia_first_gen_request_data(uint8_t request_code) {
   if (this->read_only_) return;
   const uint8_t payload[] = {0xE0, 0x41, 0x5C, 0x70, request_code};
@@ -4232,13 +4271,24 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
       this->hotwater_resistor_heating_binary_sensor_->publish_state(this->estia_first_gen_hotwater_resistor_heating_);
     if (this->zone1_target_temperature_sensor_) this->zone1_target_temperature_sensor_->publish_state(static_cast<float>(frame->raw[10]) / 2.0f - 16.0f);
     const bool has_status_temperatures = frame->raw[0] == 0x15 && len > 18;
-    if (has_status_temperatures)
+    if (has_status_temperatures && frame->raw[12] != 0x00)
       this->publish_dhw_current_temperature_(static_cast<float>(frame->raw[12]) / 2.0f - 16.0f);
     if (has_status_temperatures && this->zone1_water_temp_sensor_)
       this->zone1_water_temp_sensor_->publish_state(static_cast<float>(frame->raw[14]) / 2.0f - 16.0f);
     if (has_status_temperatures) {
       ESP_LOGD(TAG, "Estia first-gen status temperatures: temperature 2=%.1f°C (raw 13=0x%02X)",
                static_cast<float>(frame->raw[13]) / 2.0f - 16.0f, frame->raw[13]);
+    }
+    if (this->zone1_climate_ != nullptr) {
+      this->zone1_climate_->mode = !this->estia_first_gen_zone1_active_
+                                      ? climate::CLIMATE_MODE_OFF
+                                      : (this->estia_first_gen_auto_mode_active_ ? climate::CLIMATE_MODE_AUTO
+                                                                               : climate::CLIMATE_MODE_HEAT);
+      this->zone1_climate_->target_temperature = static_cast<float>(frame->raw[10]) / 2.0f - 16.0f;
+      if (has_status_temperatures) {
+        this->zone1_climate_->current_temperature = static_cast<float>(frame->raw[14]) / 2.0f - 16.0f;
+      }
+      this->zone1_climate_->publish_state();
     }
     this->estia_first_gen_pump_state_known_ = true;
   } else if (src == this->master_address_ && frame->raw[4] == 0x80 && frame->raw[5] == 0x5C && len > 8) {
