@@ -3448,20 +3448,21 @@ void ToshibaAbClimate::control_estia_zone1(const climate::ClimateCall &call) {
   }
   if (this->data_reader.frame_format() == FrameFormat::ESTIA) {
     const climate::ClimateMode requested_mode = call.get_mode().value_or(
-        this->zone1_climate_ != nullptr ? this->zone1_climate_->mode : climate::CLIMATE_MODE_HEAT);
-    if (requested_mode == climate::CLIMATE_MODE_COOL) {
-      ESP_LOGW(TAG, "First-generation Estia Zone 1 cooling commands are not implemented");
-      return;
-    }
+        this->estia_first_gen_pending_zone1_mode_.value_or(
+            this->zone1_climate_ != nullptr ? this->zone1_climate_->mode : climate::CLIMATE_MODE_HEAT));
     if (call.get_mode().has_value()) {
+      this->estia_first_gen_pending_zone1_mode_.reset();
       if (requested_mode == climate::CLIMATE_MODE_OFF) {
         this->send_estia_first_gen_zone1(false);
-      } else if (requested_mode == climate::CLIMATE_MODE_AUTO) {
-        this->send_estia_first_gen_auto_mode(true);
-        this->send_estia_first_gen_zone1(true);
-      } else if (requested_mode == climate::CLIMATE_MODE_HEAT) {
-        this->send_estia_first_gen_auto_mode(false);
-        this->send_estia_first_gen_zone1(true);
+      } else if (requested_mode == climate::CLIMATE_MODE_AUTO || requested_mode == climate::CLIMATE_MODE_HEAT ||
+                 requested_mode == climate::CLIMATE_MODE_COOL) {
+        if (this->estia_first_gen_zone1_active_) {
+          this->send_estia_first_gen_zone1_mode(requested_mode);
+        } else {
+          // Issue #90: mode commands can be missed during Zone 1 startup.
+          this->estia_first_gen_pending_zone1_mode_ = requested_mode;
+          this->send_estia_first_gen_zone1(true);
+        }
       }
     }
     if (call.get_target_temperature().has_value()) {
@@ -4101,6 +4102,17 @@ void ToshibaAbClimate::send_estia_first_gen_dhw_setpoint(float target_temp) {
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
+void ToshibaAbClimate::send_estia_first_gen_zone1_mode(climate::ClimateMode mode) {
+  if (this->read_only_) return;
+  if (mode != climate::CLIMATE_MODE_HEAT && mode != climate::CLIMATE_MODE_COOL && mode != climate::CLIMATE_MODE_AUTO)
+    return;
+  this->send_estia_first_gen_auto_mode(mode == climate::CLIMATE_MODE_AUTO);
+  // Confirmed wall-remote captures in issue #90: 22:05:05 = cool, 22:06:06 = heat.
+  const uint8_t mode_byte = mode == climate::CLIMATE_MODE_COOL ? 0x05 : 0x06;
+  const uint8_t payload[] = {0xE0, 0x01, 0x22, mode_byte, mode_byte};
+  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+}
+
 void ToshibaAbClimate::send_estia_first_gen_zone1_setpoint(float target_temp) {
   if (this->read_only_) return;
   if (!std::isfinite(target_temp) || target_temp < 20.0f || target_temp > 65.0f) {
@@ -4249,6 +4261,11 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
   }
   if (src == this->master_address_ && frame->raw[3] == 0xE0 && frame->raw[5] == 0x31 && len > 11) {
     this->estia_first_gen_zone1_active_ = frame->raw[6] & 0x01;
+    if (this->estia_first_gen_zone1_active_ && this->estia_first_gen_pending_zone1_mode_.has_value()) {
+      const auto pending_mode = *this->estia_first_gen_pending_zone1_mode_;
+      this->estia_first_gen_pending_zone1_mode_.reset();
+      this->send_estia_first_gen_zone1_mode(pending_mode);
+    }
     this->estia_first_gen_dhw_active_ = frame->raw[6] & 0x02;
     this->estia_first_gen_dhw_boost_ = frame->raw[7] & 0x40;
     this->estia_first_gen_antibacteria_ = frame->raw[7] & 0x80;
@@ -4283,7 +4300,9 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
       this->zone1_climate_->mode = !this->estia_first_gen_zone1_active_
                                       ? climate::CLIMATE_MODE_OFF
                                       : (this->estia_first_gen_auto_mode_active_ ? climate::CLIMATE_MODE_AUTO
-                                                                               : climate::CLIMATE_MODE_HEAT);
+                                                                               : ((frame->raw[6] & 0x60) == 0x20
+                                                                                      ? climate::CLIMATE_MODE_COOL
+                                                                                      : climate::CLIMATE_MODE_HEAT));
       this->zone1_climate_->target_temperature = static_cast<float>(frame->raw[10]) / 2.0f - 16.0f;
       if (has_status_temperatures) {
         this->zone1_climate_->current_temperature = static_cast<float>(frame->raw[14]) / 2.0f - 16.0f;
