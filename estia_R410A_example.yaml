@@ -1,16 +1,15 @@
 ###############################################################################
-# Complete ESPHome config example for Toshiba Estia first-generation heat pumps
-# using first-generation / R410A Estia frames on the AB-bus.
+# Complete ESPHome config example for Toshiba Estia R410A hydronic heat pumps
+# using first-generation Estia frames on the AB-bus.
 #
-# Hardware: makusets "Toshiba AB D1 Mini" board or similar
 # Protocol: Estia first-generation TU2C-style protocol at 2400 baud 8N1
 # Important: this is NOT the R32 Estia A0 protocol. For R32/A0 systems, use
-# example_estia.yaml instead.
+# estia_R32_example.yaml instead.
 ###############################################################################
 
 substitutions:
-  device_name: toshiba-estia-1st-gen
-  friendly_name: "Toshiba Estia 1st Gen"
+  device_name: toshiba-estia-r410a
+  friendly_name: "Toshiba Estia R410A"
 
 esphome:
   name: ${device_name}
@@ -27,13 +26,14 @@ logger:
 api:
 
 ota:
-  password: "your_ota_password"
+  - platform: esphome
+    password: "your_ota_password"
 
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
   ap:
-    ssid: "Estia 1st Gen Fallback"
+    ssid: "Estia R410A Fallback"
     password: "your_ap_password"
 
 web_server:
@@ -46,7 +46,7 @@ external_components:
     refresh: 0s
 
 # AB-bus UART for Estia first-generation frames.
-# Use parity NONE for first-generation / R410A Estia frames.
+# Use parity NONE for R410A Estia frames.
 # Adjust the pins for your board revision if needed.
 uart:
   tx_pin: GPIO15
@@ -57,22 +57,31 @@ uart:
 
 climate:
   - platform: toshiba_ab
-    name: ${friendly_name}
+    # Main thermostat controls domestic hot water (DHW).
+    name: "${friendly_name} DHW"
     id: toshiba_estia
 
-    # Required for first-generation / R410A Estia frames.
+    # Zone 1 thermostat controls space heating/cooling independently of DHW.
+    # Supports Off, Heat, Cool and weather-compensated Auto.
+    # When starting from Off, the mode command waits for Zone 1 ON status.
+    # Auto uses the heating curve and ignores manual target changes.
+    zone1_climate:
+      name: "${friendly_name} Zone 1"
+      id: estia_zone1
+
+    # Required for R410A Estia frames.
     # This format is not auto-detected, so set it explicitly.
     frame_format: estia
 
-    # Diagnostic binary sensor: true when valid traffic has been seen.
+    # Optional diagnostic binary sensor: true when valid traffic has been seen.
     connected:
       name: "Estia Connected"
 
-    # Diagnostic sensor: number of frames that failed checksum/CRC validation.
+    # Optional diagnostic sensor: number of frames that failed checksum/CRC validation.
     failed_crcs:
       name: "Estia Failed CRCs"
 
-    # Optional: true when a first-generation remote status error is detected,
+    # Optional binary sensor: true when a first-generation remote status error is detected,
     # false again after a remote status OK frame is received.
     remote_error:
       name: "Estia Remote Error"
@@ -81,17 +90,13 @@ climate:
     # first-generation remote error reset command after error 0x49.
     autoreset_errors: false
 
-    # First-generation Estia control switches.
-    # Zone 1 controls the main space-heating/cooling zone.
-    zone1_switch:
-      name: "Estia Zone 1"
-
-    # Switch to activate boost mode for domestic-hot-water operation. In the current first-gen
-    # implementation this uses the known DHW on/off command fallback, as boost command still unknown.
+    # Switch to activate boost mode for domestic-hot-water operation.
     dhw_boost:
       name: "Estia DHW Boost"
       
-    # Read-only Zone 1 values decoded from status frames
+    # Optional separate sensors for values also shown by the Zone 1 thermostat.
+    # Current water temperature uses status byte 14; some Series 4/5 models
+    # report it in byte 13 and need a model-specific decoder adjustment.
     zone1_water_temperature:
       name: "Toshiba Estia Zone 1 Water Temperature"
     zone1_target_temperature:
@@ -106,17 +111,19 @@ climate:
       name: "Estia Hot Water Resistor Heating"
 
 
-    # Optional generic first-generation Estia sensor queries. These poll sensor
-    # IDs through the Estia data-query command and publish the returned raw value
-    # multiplied by the scale below. Not every unit supports every ID; watch logs
-    # for "sensor not available" responses and remove unsupported entries.
+    # Optional generic first-generation Estia sensor queries. These poll extra
+    # information from the master unit, using the specific sensor addresses,
+    # and publish the returned raw value multiplied by the scale below.
+    # Not every unit supports every sensor; watch logs for "sensor not available"
+    # responses and remove unsupported entries.
+    
     sensors:
-      - address: 0x6A           # Required for every sensor added, in this case, AC current sensor of the external unit
+      - address: 0x6A           # Address is required for every sensor added, in this case, AC current sensor of the external unit
         scale: 0.1              # default 1.0; here we decode raw/10 as current is reported in deciAmps
         interval: 30s           # default 5min
         sensor:
-          name: "Estia System Current"  #required
-          id: toshiba_current  #optional, but needed if used later in other yaml entries
+          name: "Estia System Current"  # name is required
+          id: toshiba_current  # optional, but needed if used later in other yaml entries
 
           #all other available options of sensor in esphome:
 
@@ -125,7 +132,7 @@ climate:
           device_class: current  #optional but recommended for HA
           state_class: measurement  #optional but recommended for HA
 
-      - address: 0x61        # Required for every sensor added, in this case, outdoor temperature sensor of the external unit
+      - address: 0x61        # Address is required for every sensor added, in this case, outdoor temperature sensor of the external unit
         sensor:
           name: "Estia Outdoor Temperature" #required
           unit_of_measurement: "°C" 
