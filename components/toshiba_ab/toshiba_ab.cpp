@@ -337,7 +337,13 @@ bool ToshibaAbClimate::is_ack_for_pending_command_(const DataFrame *frame) const
     return this->is_tu2c_command_ack_frame_(frame);
   }
 
-  if (frame->source != pending.dest || frame->dest != pending.source) {
+  // Broadcast louvre commands are acknowledged by the indoor master.
+  const bool is_louvre_command = pending.dest == TOSHIBA_BROADCAST &&
+                                 pending.opcode1 == OPCODE_PARAMETER && pending.data_length == 5 &&
+                                 pending.data[0] == 0x00 && pending.data[1] == OPCODE2_SET_TEMP_WITH_FAN &&
+                                 (pending.data[2] & 0xF8) == 0x20;
+  const uint8_t ack_source = is_louvre_command ? this->master_address_ : pending.dest;
+  if (frame->source != ack_source || frame->dest != pending.source) {
     return false;
   }
 
@@ -1335,7 +1341,7 @@ bool ToshibaAbClimate::control_wall_mounted_louvre(uint8_t position) {
   // the trailing temperature and low fan bits are not requests to change them.
   DataFrame command{};
   command.source = this->remote_address_;
-  command.dest = this->master_address_;
+  command.dest = TOSHIBA_BROADCAST;
   command.opcode1 = OPCODE_PARAMETER;
   command.data_length = 5;
   command.data[0] = 0x00;
