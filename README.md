@@ -6,7 +6,7 @@ ESTIA hydronic heat-pump systems that communicate over the two-wire **AB bus**.
 > This project is not suitable for most split systems that are controlled only
 > by an infrared remote.
 
-<img src="hardware/v3.2/v3_2.png" width="30%" alt="Toshiba AB v3.2 board"> <img src="card.JPG" width="30%" alt="Assembled Toshiba AB board">
+<img src="hardware/v3.3_SMD/v3_3_SMD.JPG" width="60%" alt="Toshiba AB v3.2 board"> <img src="card.JPG" width="30%" alt="Assembled Toshiba AB board">
 
 ## Changelog
 
@@ -47,13 +47,6 @@ ESTIA R32/A0 formats, and address assignment avoids duplicate-address E09
 errors. Thanks to [@mtthidoteu](https://github.com/mtthidoteu), HM-format support
 and hardware UART operation improve compatibility and stability.
 
-### January 2026 — autonomous mode
-
-The component can operate without another wall controller, supports configurable
-commercial-system read/write command modes and a filter-alert sensor, and has
-more robust frame handling and logging. See the relevant complete YAML example
-below for the optional settings.
-
 ### Hardware releases
 
 - **[v3.3_SMD](hardware/v3.3_SMD/README.md):** lower-cost factory assembly,
@@ -63,8 +56,7 @@ below for the optional settings.
   USB-C, boot/reset buttons, a power-selection jumper and easier assembly.
 - **D1 mini:** a simpler board designed with
   [@issalig](https://github.com/issalig), using RX D7 and TX D8.
-- **v3:** wider AB-line voltage range, improved filtering, a comparator-based
-  receiver and selectable AB/USB power.
+
 
 ## About this project
 
@@ -106,20 +98,18 @@ before building a board or substituting components.
    from the air-to-air/ESTIA section below. Add your normal ESPHome Wi-Fi, API,
    OTA and secrets settings.
 2. Select the UART pins for your board: v3.3_SMD and v3.2 use TX `GPIO12` and RX `GPIO13`;
-   v3 uses TX `GPIO10` and RX `GPIO13`; v1 uses TX `GPIO15` and RX `GPIO13`;
+   v3 uses TX `GPIO10` and RX `GPIO13`;
    D1 mini uses TX `D8` and RX `D7`. Also select the parity and optionally the
    `frame_format` required by your AC system in the tables below.
-4. **Leave the AC's A/B wires disconnected.** With all power removed, put the
-   board's power-selection jumper/switch (if fitted) in the **USB** position,
-   then attach it to the computer with a data-capable USB cable.
-5. In the ESPHome dashboard, open the device and choose **Install → Plug into
+4. **Do not connect the A/B wires yet.** Put the board's power-selection jumper/switch
+   (if fitted) in the **USB** position, then attach it to the computer with a data-capable USB cable.
+6. In the ESPHome dashboard, open the device and choose **Install → Plug into
    this computer**, or run `esphome run your-device.yaml` from the ESPHome CLI
    and select the USB serial port. Follow ESPHome's
    [first-device connection guide](https://esphome.io/guides/physical_device_connection/)
    if the serial device is not detected.
-6. v3.3_SMD enters flashing mode automatically; no boot-button press is needed.
-   For v3.2, if flashing does not start, disconnect USB, hold **BOOT**, reconnect
-   USB while continuing to hold **BOOT**, and retry the installation. When the
+7. v3.3_SMD enters flashing mode automatically; no boot-button press is needed.
+   For v3.2, connect the USB while continuing to hold **BOOT**. When the
    upload finishes, confirm that the device boots, joins Wi-Fi and appears in
    ESPHome/Home Assistant. Later firmware updates can be installed over Wi-Fi.
 
@@ -127,25 +117,23 @@ before building a board or substituting components.
 
 > **Electrical safety:** completely isolate the HVAC system at the distribution
 > board before opening the wired controller or indoor unit. Hazardous voltages
-> may be present nearby. Never connect the A/B bus directly to ESP UART pins.
+> may be present nearby.
 
 1. Disconnect USB and switch off/isolate the complete HVAC system.
 2. Remove the wired controller cover and locate its two **A/B remote-bus**
    terminals (or use the indoor unit's documented A/B controller terminals).
    Loosen the terminal screws without removing the existing controller wires.
 3. Run a two-core cable from those A and B terminals to the board's A and B
-   screw terminals. The v1 board is polarity-sensitive, so match A to A and B
-   to B; v3, v3.2 and v3.3_SMD accept either polarity.
+   screw terminals. v3+ boards accept either polarity.
 4. With both USB and the AC still disconnected, move the board's power selector
-   (if fitted) to **AB**. Never move the selector while either power source is
-   connected.
+   (if fitted) to **AB**. 
 5. Check the wiring, refit the controller cover, restore HVAC power, and inspect
    the ESPHome logs for valid frames and a connected state before sending any
    commands.
 
 The board is connected **in parallel** with the wired controller; it does not
 replace or interrupt the existing A/B pair. Autonomous operation without a wall
-controller is an advanced option documented in
+controller is possible too.
 [`complete_example.yaml`](complete_example.yaml).
 
 The A/B screws on a typical wired-controller PCB look like this:
@@ -307,6 +295,5 @@ shared hardware findings, models, captures, code and documentation.
 
 ## Boards on eBay
 
-If you are after a fully finished product, I usually have some fully assembled boards that I am happy to sell. Check the [1-board listing](https://www.ebay.com.au/itm/307132294608) or
-[2-board listing](https://www.ebay.com.au/itm/307132302164) for the available
-revision and what is included.
+If you are after a fully finished product, I usually have some fully assembled boards that I am happy to sell.
+Check my listings: [boards on eBay](https://www.ebay.com.au/usr/zaurak_trade)
