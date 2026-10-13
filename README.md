@@ -3,8 +3,8 @@
 ESPHome hardware and component support for Toshiba central air-conditioning and
 ESTIA hydronic heat-pump systems that communicate over the two-wire **AB bus**.
 
-> This project is not suitable for most split systems that are controlled only
-> by an infrared remote.
+> This project is not suitable for most domestic split systems that are controlled only
+> by an infrared remote, although some models do use the AB Bus and are compatible
 
 <img src="hardware/v3.3_SMD/v3_3_SMD.JPG" width="60%" alt="Toshiba AB v3.2 board"> <img src="card.JPG" width="30%" alt="Assembled Toshiba AB board">
 
