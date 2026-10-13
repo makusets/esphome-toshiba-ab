@@ -10,7 +10,7 @@ ESTIA hydronic heat-pump systems that communicate over the two-wire **AB bus**.
 
 ## Changelog
 
-### October 2026 — v3.3_SMD hardware revision
+### October 2026 — v3.3_SMD hardware and protocol improvements
 
 The new [v3.3_SMD board](hardware/v3.3_SMD/README.md) is designed for affordable
 factory assembly, with SMD components and just two electrolytic capacitors to
@@ -22,6 +22,11 @@ At the last price check, two boards with factory assembly cost approximately
 **AUD 120 / EUR 75 including shipping**, with the two capacitors fitted by the
 end user. See the [ordering and assembly instructions](hardware/v3.3_SMD/README.md)
 and [design files](hardware/v3.3_SMD/).
+
+ESTIA R32 functionality has also improved, thanks to contributions from
+[**@sndrsmnk**](https://github.com/sndrsmnk) and
+[**@Muschu**](https://github.com/Muschu). Thanks to
+[**@ernout-worth**](https://github.com/ernout-worth) for improvements to TU2C.
 
 ### July 2026 — TU2C and ESTIA R410A support
 
