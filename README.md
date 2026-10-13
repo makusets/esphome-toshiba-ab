@@ -10,6 +10,19 @@ ESTIA hydronic heat-pump systems that communicate over the two-wire **AB bus**.
 
 ## Changelog
 
+### October 2026 — v3.3_SMD hardware revision
+
+The new [v3.3_SMD board](hardware/v3.3_SMD/README.md) is designed for affordable
+factory assembly, with SMD components and just two electrolytic capacitors to
+solder yourself. It introduces less noise into the AB circuit and supports USB
+flashing without pressing a boot button. It is functionally equivalent to v3.2
+and uses the same pins and ESPHome configuration.
+
+At the last price check, two boards with factory assembly cost approximately
+**AUD 120 / EUR 75 including shipping**, with the two capacitors fitted by the
+end user. See the [ordering and assembly instructions](hardware/v3.3_SMD/README.md)
+and [design files](hardware/v3.3_SMD/).
+
 ### July 2026 — TU2C and ESTIA R410A support
 
 The TU2C protocol is now fully functional, thanks to contributions from
@@ -37,6 +50,9 @@ more robust frame handling and logging. See the relevant complete YAML example
 below for the optional settings.
 
 ### Hardware releases
+
+- **[v3.3_SMD](hardware/v3.3_SMD/README.md):** lower-cost factory assembly,
+  automatic USB flashing and reduced AB-circuit noise; same pins as v3.2.
 
 - **v3.2:** revised UART pins, a 3300 µF 3.3 V rail capacitor, easier-to-solder
   USB-C, boot/reset buttons, a power-selection jumper and easier assembly.
@@ -84,7 +100,7 @@ before building a board or substituting components.
 1. Start with [`example.yaml`](example.yaml), or copy the minimal configuration
    from the air-to-air/ESTIA section below. Add your normal ESPHome Wi-Fi, API,
    OTA and secrets settings.
-2. Select the UART pins for your board: v3.2 uses TX `GPIO12` and RX `GPIO13`;
+2. Select the UART pins for your board: v3.3_SMD and v3.2 use TX `GPIO12` and RX `GPIO13`;
    v3 uses TX `GPIO10` and RX `GPIO13`; v1 uses TX `GPIO15` and RX `GPIO13`;
    D1 mini uses TX `D8` and RX `D7`. Also select the parity and optionally the
    `frame_format` required by your AC system in the tables below.
@@ -96,7 +112,8 @@ before building a board or substituting components.
    and select the USB serial port. Follow ESPHome's
    [first-device connection guide](https://esphome.io/guides/physical_device_connection/)
    if the serial device is not detected.
-6. For v3.2, if flashing does not start, disconnect USB, hold **BOOT**, reconnect
+6. v3.3_SMD enters flashing mode automatically; no boot-button press is needed.
+   For v3.2, if flashing does not start, disconnect USB, hold **BOOT**, reconnect
    USB while continuing to hold **BOOT**, and retry the installation. When the
    upload finishes, confirm that the device boots, joins Wi-Fi and appears in
    ESPHome/Home Assistant. Later firmware updates can be installed over Wi-Fi.
@@ -113,7 +130,7 @@ before building a board or substituting components.
    Loosen the terminal screws without removing the existing controller wires.
 3. Run a two-core cable from those A and B terminals to the board's A and B
    screw terminals. The v1 board is polarity-sensitive, so match A to A and B
-   to B; v3 and v3.2 accept either polarity.
+   to B; v3, v3.2 and v3.3_SMD accept either polarity.
 4. With both USB and the AC still disconnected, move the board's power selector
    (if fitted) to **AB**. Never move the selector while either power source is
    connected.
@@ -133,7 +150,7 @@ The A/B screws on a typical wired-controller PCB look like this:
 <details>
 <summary><strong>Hardware design, construction, installation and case</strong></summary>
 
-The recommended v3.2 board includes AB-line power conversion, noise filtering,
+The v3.2 and v3.3_SMD boards include AB-line power conversion, noise filtering,
 a comparator receiver and a transistor writer. Isolate the HVAC system before
 opening a controller or changing AB wiring. Select USB power for initial flashing
 and AB power only after USB power has been disconnected.
@@ -142,7 +159,8 @@ Board fabrication files, schematics, bills of materials, assembly advice,
 installation steps and enclosure details are collected in the
 [hardware guide](docs/hardware.md). Go directly to a board revision:
 
-- [v3.2](hardware/v3.2/README.md) — recommended full board
+- [v3.3_SMD](hardware/v3.3_SMD/README.md) — latest revision, aimed at factory assembly
+- [v3.2](hardware/v3.2/README.md) — previous full board
 - [D1 mini](hardware/D1%20mini/README.md) — simpler modular variant
 - [v3](hardware/v3/README.md) and [v1](hardware/v1/README.md) — older revisions
 - [all hardware and printable case files](hardware/)
@@ -284,4 +302,6 @@ shared hardware findings, models, captures, code and documentation.
 
 ## Boards on eBay
 
-If you are after a fully finished product, I usually have some fully assembled boards that I am happy to sell. Search for "makusets" on eBay.
+If you are after a fully finished product, I usually have some fully assembled boards that I am happy to sell. Check the [1-board listing](https://www.ebay.com.au/itm/307132294608) or
+[2-board listing](https://www.ebay.com.au/itm/307132302164) for the available
+revision and what is included.
