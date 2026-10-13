@@ -1243,11 +1243,13 @@ climate::ClimateMode to_climate_mode(const struct TccState *state) {
   return climate::CLIMATE_MODE_OFF;
 }
 
-uint8_t decode_status_mode(const uint8_t mode_power, const bool tu2c_frame) {
+uint8_t decode_status_mode(const uint8_t mode_power) {
   uint8_t mode = (mode_power & STATUS_DATA_MODE_MASK) >> STATUS_DATA_MODE_SHIFT_BITS;
 
-  // TU2C status frames encode AUTO as 0b110 instead of 0b101.
-  if (tu2c_frame && mode == 0x06) {
+  // On classic TCC-Link and TU2C, AUTO is commanded as 0x05 but can be
+  // reported in status as 0x06 (observed on a classic TCC-Link wired unit).
+  // Normalize received status only; outgoing AUTO commands remain 0x05.
+  if (mode == 0x06) {
     mode = MODE_AUTO;
   }
 
@@ -1882,8 +1884,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           log_data_frame("MASTER PARAMETERS", frame);
 
           tcc_state.power = (frame->data[3] & STATUS_DATA_POWER_MASK);
-          tcc_state.mode =
-              (frame->data[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_MODE_MASK) >> STATUS_DATA_MODE_SHIFT_BITS;
+          tcc_state.mode = decode_status_mode(frame->data[STATUS_DATA_MODEPOWER_BYTE]);
           tcc_state.cooling = (frame->data[STATUS_DATA_MODEPOWER_BYTE] & 0b00001000) >> 3;
           tcc_state.heating = (frame->data[STATUS_DATA_MODEPOWER_BYTE] & 0b00000001);
           tcc_state.preheating = (frame->data[3] & 0b0100) >> 2;
@@ -1911,8 +1912,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           this->decode_wall_mounted_louvre_(frame);
 
           tcc_state.power = (frame->data[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_POWER_MASK);
-          tcc_state.mode =
-              (frame->data[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_MODE_MASK) >> STATUS_DATA_MODE_SHIFT_BITS;
+          tcc_state.mode = decode_status_mode(frame->data[STATUS_DATA_MODEPOWER_BYTE]);
           tcc_state.fan = (frame->data[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_FAN_MASK) >> STATUS_DATA_FAN_SHIFT_BITS;
           tcc_state.vent =
               (frame->data[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_VENT_MASK) >> STATUS_DATA_VENT_SHIFT_BITS;
@@ -1945,8 +1945,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
           constexpr uint8_t rt_off = STATUS_DATA_TARGET_TEMP_BYTE + 1;
 
           tcc_state.power = (frame->data[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_POWER_MASK);
-          tcc_state.mode =
-              (frame->data[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_MODE_MASK) >> STATUS_DATA_MODE_SHIFT_BITS;
+          tcc_state.mode = decode_status_mode(frame->data[STATUS_DATA_MODEPOWER_BYTE]);
           tcc_state.fan = (frame->data[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_FAN_MASK) >> STATUS_DATA_FAN_SHIFT_BITS;
           tcc_state.vent =
               (frame->data[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_VENT_MASK) >> STATUS_DATA_VENT_SHIFT_BITS;
@@ -2205,7 +2204,7 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
     const uint8_t *payload = &frame->raw[payload_offset];
     log_raw_data(is_extended_status_frame ? "TU2C extended status" : "TU2C status", frame->raw, size);
     tcc_state.power = (payload[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_POWER_MASK);
-    tcc_state.mode = decode_status_mode(payload[STATUS_DATA_MODEPOWER_BYTE], true);
+    tcc_state.mode = decode_status_mode(payload[STATUS_DATA_MODEPOWER_BYTE]);
     tcc_state.fan = (payload[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_FAN_MASK) >> STATUS_DATA_FAN_SHIFT_BITS;
     tcc_state.vent =
         (payload[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_VENT_MASK) >> STATUS_DATA_VENT_SHIFT_BITS;
