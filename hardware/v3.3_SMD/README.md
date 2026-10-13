@@ -48,15 +48,15 @@ schematic and PCB.
 
 If a component is out of stock, use the manufacturer's parts-sourcing service or
 choose a suitable equivalent. Check the footprint, pinout and electrical ratings
-against the schematic. In particular, changing the DC/DC converter or filtering
-components can affect noise on the AB line; use the specified parts where possible.
+against the schematic. In particular, changing the DC/DC converter
+can affect noise on the AB line; use the specified parts where possible.
 
 ## Finishing the board
 
 Solder the two through-hole electrolytic capacitors yourself:
 
-- **C3: 3300 µF**, on the 3.3 V rail.
-- **C8: 47 µF**, in the read circuit.
+- **C3: 3300 µF**, on the 3.3 V rail. Ideally rated at 10V or more.
+- **C8: 47 µF**, in the read circuit. Ideally rated at 30V or more.
 
 These capacitors are not included in the supplied assembly BOM. Source suitable
 parts for the PCB footprints and circuit voltage ratings, and follow the
@@ -78,7 +78,7 @@ can be installed over Wi-Fi.
 Follow the [main installation instructions](../../README.md#start-here-flash-and-connect-the-board)
 and [hardware guide](../../docs/hardware.md) for connecting the board in parallel
 with the wired controller. Disconnect USB and isolate the HVAC system before
-connecting A/B or changing the power selector. Select **AB** power before normal
+connecting A/B. Select **AB** power before normal
 operation from the bus.
 
 ## Schematic
@@ -87,10 +87,8 @@ operation from the bus.
 
 ## Boards on eBay
 
-If you prefer a finished board, check these listings for the available revision
-and what is included:
+If you prefer a finished board, check these listings
 
-- [1 board on eBay](https://www.ebay.com.au/itm/307132294608)
-- [2 boards on eBay](https://www.ebay.com.au/itm/307132302164)
+[boards on eBay](https://www.ebay.com.au/usr/zaurak_trade)
 
 [Back to the main README](../../README.md) · [v3.2 design](../v3.2/README.md)
