@@ -283,7 +283,7 @@ YAML file if you choose to add one.
 
 The `toshiba_ab.send_raw_frame` action lets ESPHome automations send custom
 commands or setup frames that are not exposed by the component's entities.
-Use it in a button, script, or an `esphome.on_boot` automation. Its `id` refers
+Use it in a button, script, or automation. Its `id` refers
 to the Toshiba climate component, and `frame` is a quoted string of two-digit
 hexadecimal bytes separated by colons. `frame` also accepts an ESPHome lambda
 that returns a string.
@@ -313,37 +313,36 @@ button:
 Here `15` is the request opcode, `08:81:00:00` is the status-request payload,
 and `D8` is the XOR checksum of all preceding bytes. The response is visible
 in the ESPHome logs; support for decoding a status-request reply depends on
-its frame format. Use addresses and commands verified for your installation;
-this example is not an ESTIA or TU2C frame. For protocol layouts, see the
+its frame format. For protocol layouts, see the
 [frame-format reference](docs/frame_formats.md).
 
 The sender writes the complete frame **exactly as supplied**. Include the
 correct checksum/CRC and any protocol wrapper bytes; it does not calculate or
 validate them, substitute addresses, or track acknowledgements and retry raw
 commands. Frames are queued and sent after the initial 30-second boot block
-and the normal bus quiet-time checks, so an `on_boot` action does not transmit
-immediately. **Raw-frame actions bypass `read_only`**; remove or disable these
-automations when you want passive observation. Prefer the built-in controls
-for functions the component already supports.
+and the normal bus quiet-time checks.
+**Raw-frame actions bypass `read_only`**
+You can use this approach to develop, test or implement new commands.
+Use the built-in controls for functions the component already supports.
 
 ### Inspect traffic with the Toshiba AB debugger
 
 The companion [Toshiba AB traffic debugger](https://github.com/makusets/esphome-toshiba-ab-debugger)
 is useful for inspecting bus traffic, diagnosing a connection, and capturing
 commands when investigating an unsupported model or feature. It collects raw
-UART bytes on an ESP8266 and logs captures when the line goes silent, including
-bytes that the main component's protocol parser might reject. UART errors and
-lost captures are reported separately.
+UART bytes, including bytes that the main component's protocol parser might reject.
+UART errors and lost captures are also reported.
 
 Use the debugger's [setup configuration](https://github.com/makusets/esphome-toshiba-ab-debugger#setup)
 as a separate firmware configuration on the AB interface board. It owns
 hardware UART0, so replace the normal component configuration rather than
 adding it alongside the climate component, and remove the previous `uart:`
 section. Its example uses RX GPIO13, 2400 baud, even parity and a `20ms`
-`frame_gap`; select the parity appropriate to your system and adjust the gap
-if captures split frames or combine separate frames. Keep `logger.baud_rate: 0`
-so serial logging does not take over the bus UART. Follow this repository's
-[hardware and connection guide](docs/hardware.md) for the interface board.
+`frame_gap`; select the parity if known and adjust the gap if captures split
+frames or combine separate frames. The component tests the UART connection on
+startup and a diagnostic sensor reports the results.
+Keep `logger.baud_rate: 0` so serial logging does not take over the bus UART.
+Follow this repository's [hardware and connection guide](docs/hardware.md)
 
 To investigate a feature, capture a baseline, change one setting on the wired
 remote, and note the action and time. Save the surrounding command, ACK and
