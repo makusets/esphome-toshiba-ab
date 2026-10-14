@@ -627,7 +627,7 @@ async def to_code(config):
 
     if CONF_WALL_MOUNTED_LOUVRE in config:
         louvre = await select.new_select(
-            config[CONF_WALL_MOUNTED_LOUVRE], var, options=["Swing", "Top", "Middle", "Bottom"]
+            config[CONF_WALL_MOUNTED_LOUVRE], var, options=["Swing", "Top", "Middle", "Bottom", "Lowest"]
         )
         cg.add(var.set_wall_mounted_louvre_select(louvre))
 
