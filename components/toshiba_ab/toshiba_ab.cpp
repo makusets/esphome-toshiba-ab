@@ -1315,7 +1315,7 @@ void ToshibaAbClimate::decode_wall_mounted_louvre_(const DataFrame *frame) {
   this->wall_mounted_louvre_mode_ =
       (frame->data[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_MODE_MASK) >> STATUS_DATA_MODE_SHIFT_BITS;
   const uint8_t position = (frame->data[STATUS_DATA_MODEPOWER_BYTE] >> 2) & 0x07;
-  if (position >= 1 && position <= 4) {
+  if (position >= 1 && position <= 5) {
     const size_t index = position - 1;
     if (this->wall_mounted_louvre_select_->active_index() != index) {
       this->wall_mounted_louvre_select_->publish_state(index);
@@ -1326,7 +1326,7 @@ void ToshibaAbClimate::decode_wall_mounted_louvre_(const DataFrame *frame) {
 }
 
 bool ToshibaAbClimate::control_wall_mounted_louvre(uint8_t position) {
-  if (this->wall_mounted_louvre_select_ == nullptr || position < 1 || position > 4) {
+  if (this->wall_mounted_louvre_select_ == nullptr || position < 1 || position > 5) {
     return false;
   }
   if (this->data_reader.frame_format() != FrameFormat::NORMAL) {
