@@ -91,6 +91,10 @@ climate:
     filter_alert:               # Optional binary sensor to report filter alert status if available
       name: "Filter Alert"
 
+    wall_mounted_louvre:        # Optional addon to select the louvre position, used for wall mounted units with this capability
+      name: "AC Louvre"
+      id: ac_louvre
+
 
     # --- Forward a temperature sensor data to AC  ---
     # The temperature sensor with the given id below will be passed to the thermostat and used to report room temperature to the AC unit
