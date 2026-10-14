@@ -2384,9 +2384,8 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
         uint8_t cmd = frame->raw[9];
         ESP_LOGV(TAG, "    MODE %s(0x%02X)", cmd == 0x01 ? "COOL" : (cmd == 0x02 ? "HEAT" : "???"), cmd);
       } else if (dtype == 0x03C4 && frame_len >= 11) {
-        // DHW boost command: selector 0x10 followed by 0x10=on or 0x00=off.
-        ESP_LOGV(TAG, "    DHW BOOST %s (selector=0x%02X value=0x%02X)",
-                 frame->raw[10] == 0x10 ? "ON" : "OFF", frame->raw[9], frame->raw[10]);
+        // Independent feature selectors, including boost and Automatik.
+        ESP_LOGV(TAG, "    FEATURE selector=0x%02X value=0x%02X", frame->raw[9], frame->raw[10]);
       } else if (dtype == 0x0041) {
         // Independent operation switches sharing one dtype.
         uint8_t cmd = frame->raw[9];
@@ -2402,7 +2401,7 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
         const char *ack_what = "???";
         if (ack_d1 == 0x03 && ack_d2 == 0xC0) ack_what = "MODE";
         else if (ack_d1 == 0x03 && ack_d2 == 0xC1) ack_what = "SETPOINT";
-        else if (ack_d1 == 0x03 && ack_d2 == 0xC4) ack_what = "DHW BOOST";
+        else if (ack_d1 == 0x03 && ack_d2 == 0xC4) ack_what = "FEATURE";
         else if (ack_d1 == 0x00 && ack_d2 == 0x41) ack_what = "POWER";
         else if (ack_d1 == 0x00 && ack_d2 == 0x5F) ack_what = "DEMAND";
         ESP_LOGV(TAG, "    ACK for %s(%02X:%02X)", ack_what, ack_d1, ack_d2);
@@ -2542,6 +2541,7 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       bool is_heating = (flags & 0x40) != 0;
       bool automatik = (frame->raw[10] & 0x04) != 0;
       bool dhw_boost = (frame->raw[10] & 0x40) != 0;
+      this->publish_estia_feature_states_(frame->raw[10]);
       this->publish_estia_zone1_state_(zone1_on, is_cooling, is_heating, automatik, zone1_setpoint);
 
       ESP_LOGV(TAG, "Status: power=%s flags=0x%02X %s DHW=%.1f°C zone1=%.1f°C zone2=%.1f°C",
@@ -2634,6 +2634,7 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       bool is_heating = (flags & 0x40) != 0;
       bool automatik = (frame->raw[10] & 0x04) != 0;
       bool dhw_boost = (frame->raw[10] & 0x40) != 0;
+      this->publish_estia_feature_states_(frame->raw[10]);
       float dhw_setpoint = frame->raw[12] / 2.0f - 16.0f;
       float zone1_setpoint = frame->raw[13] / 2.0f - 16.0f;
       float zone2_setpoint = frame->raw[14] / 2.0f - 16.0f;
@@ -3842,6 +3843,50 @@ void ToshibaAbClimate::send_estia_dhw_boost(bool on) {
   this->send_estia_tracked_(frame, sizeof(frame), 0x03C4);  // ACK: 00:A1:03:C4
 }
 
+// R32 commands captured in issue #197 use independent 03:C4 selectors.
+// Report state only when the master confirms it in a 03:C6 status frame.
+void ToshibaAbClimate::send_estia_feature_(uint8_t selector, uint8_t enabled_value, bool on, const char *name) {
+  if (this->read_only_ || this->data_reader.frame_format() != FrameFormat::A0) {
+    ESP_LOGW(TAG, "Not sending Estia %s command: requires writable A0 protocol", name);
+    return;
+  }
+  const uint16_t src = this->estia_source_address_;
+  const uint16_t dst = this->estia_master_address_;
+  uint8_t frame[] = {
+    0xA0, 0x00, 0x11, 0x0B, 0x00,
+    (uint8_t)(src >> 8), (uint8_t)(src & 0xFF),
+    (uint8_t)(dst >> 8), (uint8_t)(dst & 0xFF),
+    0x03, 0xC4, selector, static_cast<uint8_t>(on ? enabled_value : 0x00), 0x00, 0x00,
+    0x00, 0x00
+  };
+  const size_t crc_len = sizeof(frame) - 2;
+  const uint16_t crc = estia_crc16(frame, crc_len);
+  frame[crc_len] = (crc >> 8) & 0xFF;
+  frame[crc_len + 1] = crc & 0xFF;
+  ESP_LOGD(TAG, "TX: %s %s", name, on ? "ON" : "OFF");
+  log_raw_data("Estia TX", frame, sizeof(frame));
+  this->send_estia_tracked_(frame, sizeof(frame), 0x03C4);
+}
+
+void ToshibaAbClimate::send_estia_antibacteria(bool on) {
+  this->send_estia_feature_(0x60, 0x20, on, "Anti Bacteria");
+}
+
+void ToshibaAbClimate::send_estia_frost_protection(bool on) {
+  this->send_estia_feature_(0x02, 0x02, on, "Frost Protection");
+}
+
+void ToshibaAbClimate::send_estia_night_setback(bool on) {
+  this->send_estia_feature_(0x88, 0x08, on, "Night Setback");
+}
+
+void ToshibaAbClimate::publish_estia_feature_states_(uint8_t mode) {
+  // Both periodic 0x58 and immediate 0x1C 03:C6 frames carry these bits.
+  if (this->antibacteria_switch_) this->antibacteria_switch_->publish_state((mode & 0x80) != 0);
+  if (this->frost_protection_switch_) this->frost_protection_switch_->publish_state((mode & 0x08) != 0);
+  if (this->night_setback_switch_) this->night_setback_switch_->publish_state((mode & 0x20) != 0);
+}
+
 void ToshibaAbClimate::send_estia_mode(uint8_t mode_cmd) {
   if (this->read_only_) {
     ESP_LOGW(TAG, "Read-only mode: not sending Estia mode command");
@@ -4353,7 +4398,18 @@ void ToshibaAbEstiaDhwBoostSwitch::write_state(bool state) {
 }
 
 void ToshibaAbEstiaAntibacteriaSwitch::write_state(bool state) {
-  this->climate_->send_estia_first_gen_antibacteria(state);
+  if (this->climate_->is_estia_first_gen())
+    this->climate_->send_estia_first_gen_antibacteria(state);
+  else
+    this->climate_->send_estia_antibacteria(state);
+}
+
+void ToshibaAbEstiaFrostProtectionSwitch::write_state(bool state) {
+  this->climate_->send_estia_frost_protection(state);
+}
+
+void ToshibaAbEstiaNightSetbackSwitch::write_state(bool state) {
+  this->climate_->send_estia_night_setback(state);
 }
 
 void ToshibaAbVentSwitch::write_state(bool state) {

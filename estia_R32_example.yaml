@@ -90,6 +90,23 @@ climate:
     read_only_switch:
       name: "Read only"         # optional switch to turn on and off read only mode while the esp is running
 
+    # Optional R32 feature switches: omit any entry to avoid creating that switch.
+    # Turn read_only off above (or using its switch) to send commands.
+    # States follow the heat pump's periodic status and immediate state changes,
+    # including changes made on the wired remote; toggles are not optimistic.
+    # Anti Bacteria enables the DHW antibacterial function. Configure its
+    # schedule and temperature on the Toshiba wired remote.
+    antibacteria:
+      name: "Estia Anti Bacteria"
+    # Frost Protection is intended for an otherwise idle installation; the
+    # heat pump uses low-temperature heating (15 C) and displays F on the remote.
+    frost_protection:
+      name: "Estia Frost Protection"
+    # Night Setback enables Toshiba's night temperature reduction. Configure
+    # its schedule and reduction on the wired remote.
+    night_setback:
+      name: "Estia Night Setback"
+
     # Setpoints reported by the periodic 03:C6 status frame.
     dhw_setpoint:
       name: "Estia DHW Setpoint"
