@@ -990,6 +990,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_read_only_switch(switch_::Switch *read_only_switch) { read_only_switch_ = read_only_switch; }
   void set_zone1_switch(switch_::Switch *zone1_switch) { zone1_switch_ = zone1_switch; }
   void set_dhw_boost_switch(switch_::Switch *dhw_boost_switch) { dhw_boost_switch_ = dhw_boost_switch; }
+  void set_frost_protection_switch(switch_::Switch *sw) { frost_protection_switch_ = sw; }
+  void set_night_setback_switch(switch_::Switch *sw) { night_setback_switch_ = sw; }
   void set_antibacteria_switch(switch_::Switch *antibacteria_switch) { antibacteria_switch_ = antibacteria_switch; }
 
   void set_failed_crcs_sensor(sensor::Sensor *failed_crcs_sensor) { this->failed_crcs_sensor_ = failed_crcs_sensor; }
@@ -1031,6 +1033,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void send_estia_zone1_operation(bool on);
   void send_estia_dhw(bool on);
   void send_estia_dhw_boost(bool on);
+  void send_estia_antibacteria(bool on);
+  void send_estia_frost_protection(bool on);
+  void send_estia_night_setback(bool on);
   void send_estia_mode(uint8_t mode_cmd);  // 0x02=heat, 0x01=cool
   void send_estia_automatik_mode(bool on);
   void send_estia_demand(uint8_t demand);  // 0-10V demand (0..15)
@@ -1131,10 +1136,14 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   binary_sensor::BinarySensor *connected_binary_sensor_{nullptr};
   ToshibaAbWallMountedLouvreSelect *wall_mounted_louvre_select_{nullptr};
   optional<uint8_t> wall_mounted_louvre_mode_;
+  void send_estia_feature_(uint8_t selector, uint8_t enabled_value, bool on, const char *name);
+  void publish_estia_feature_states_(uint8_t mode);
   switch_::Switch *vent_switch_{nullptr};
   switch_::Switch *read_only_switch_{nullptr};
   switch_::Switch *zone1_switch_{nullptr};
   switch_::Switch *dhw_boost_switch_{nullptr};
+  switch_::Switch *frost_protection_switch_{nullptr};
+  switch_::Switch *night_setback_switch_{nullptr};
   switch_::Switch *antibacteria_switch_{nullptr};
   sensor::Sensor *failed_crcs_sensor_{nullptr};
   sensor::Sensor *noise_rate_sensor_{nullptr};
@@ -1371,6 +1380,22 @@ class ToshibaAbEstiaDhwBoostSwitch : public switch_::Switch, public Component {
 class ToshibaAbEstiaAntibacteriaSwitch : public switch_::Switch, public Component {
  public:
   ToshibaAbEstiaAntibacteriaSwitch(ToshibaAbClimate *climate) { climate_ = climate; }
+ protected:
+  void write_state(bool state) override;
+  ToshibaAbClimate *climate_;
+};
+
+class ToshibaAbEstiaFrostProtectionSwitch : public switch_::Switch, public Component {
+ public:
+  ToshibaAbEstiaFrostProtectionSwitch(ToshibaAbClimate *climate) { climate_ = climate; }
+ protected:
+  void write_state(bool state) override;
+  ToshibaAbClimate *climate_;
+};
+
+class ToshibaAbEstiaNightSetbackSwitch : public switch_::Switch, public Component {
+ public:
+  ToshibaAbEstiaNightSetbackSwitch(ToshibaAbClimate *climate) { climate_ = climate; }
  protected:
   void write_state(bool state) override;
   ToshibaAbClimate *climate_;

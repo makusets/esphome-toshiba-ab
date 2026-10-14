@@ -85,6 +85,8 @@ CONF_DEMAND_ENABLED = "demand_enabled"
 CONF_ZONE1_SWITCH = "zone1_switch"
 CONF_DHW_BOOST = "dhw_boost"
 CONF_ANTIBACTERIA = "antibacteria"
+CONF_FROST_PROTECTION = "frost_protection"
+CONF_NIGHT_SETBACK = "night_setback"
 CONF_ZONE1_WATER_TEMPERATURE = "zone1_water_temperature"
 CONF_ZONE1_TARGET_TEMPERATURE = "zone1_target_temperature"
 CONF_DHW_CURRENT_TEMPERATURE = "dhw_current_temperature"
@@ -139,6 +141,14 @@ ToshibaAbEstiaDhwBoostSwitch = toshiba_ab_ns.class_(
 )
 ToshibaAbEstiaAntibacteriaSwitch = toshiba_ab_ns.class_(
     "ToshibaAbEstiaAntibacteriaSwitch", switch.Switch, cg.Component
+)
+
+ToshibaAbEstiaFrostProtectionSwitch = toshiba_ab_ns.class_(
+    "ToshibaAbEstiaFrostProtectionSwitch", switch.Switch, cg.Component
+)
+
+ToshibaAbEstiaNightSetbackSwitch = toshiba_ab_ns.class_(
+    "ToshibaAbEstiaNightSetbackSwitch", switch.Switch, cg.Component
 )
 
 ToshibaAbOnDataReceivedTrigger = toshiba_ab_ns.class_(
@@ -321,6 +331,18 @@ CONFIG_SCHEMA = cv.All(
                         cv.GenerateID(): cv.declare_id(ToshibaAbEstiaAntibacteriaSwitch),
                     }
                 )
+            ),
+            key=CONF_NAME,
+        ),
+        cv.Optional(CONF_FROST_PROTECTION): cv.maybe_simple_value(
+            switch._SWITCH_SCHEMA.extend(
+                {cv.GenerateID(): cv.declare_id(ToshibaAbEstiaFrostProtectionSwitch)}
+            ),
+            key=CONF_NAME,
+        ),
+        cv.Optional(CONF_NIGHT_SETBACK): cv.maybe_simple_value(
+            switch._SWITCH_SCHEMA.extend(
+                {cv.GenerateID(): cv.declare_id(ToshibaAbEstiaNightSetbackSwitch)}
             ),
             key=CONF_NAME,
         ),
@@ -675,6 +697,14 @@ async def to_code(config):
     if CONF_ANTIBACTERIA in config:
         sw = await switch.new_switch(config[CONF_ANTIBACTERIA], var)
         cg.add(var.set_antibacteria_switch(sw))
+
+    if CONF_FROST_PROTECTION in config:
+        sw = await switch.new_switch(config[CONF_FROST_PROTECTION], var)
+        cg.add(var.set_frost_protection_switch(sw))
+
+    if CONF_NIGHT_SETBACK in config:
+        sw = await switch.new_switch(config[CONF_NIGHT_SETBACK], var)
+        cg.add(var.set_night_setback_switch(sw))
 
     if CONF_ON_DATA_RECEIVED in config:
         for on_data_received in config.get(CONF_ON_DATA_RECEIVED, []):
