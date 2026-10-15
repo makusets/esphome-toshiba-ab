@@ -115,10 +115,11 @@ uint8_t get_fan_bit_mask_for_mode(uint8_t mode) {
   return 0;
 }
 
-uint8_t encode_tu2c_fan(uint8_t fan) {
+uint8_t encode_tu2c_fan(uint8_t fan, bool half) {
   // TU2C uses bits 1-3 for the fan speed and keeps bit 5 set in every
   // climate mode. This differs from the encoding used by TCC-Link and Estia.
-  return static_cast<uint8_t>((fan << 1) | 0b00100000);
+  // Bit 0 selects the intermediate level on units with five fan levels.
+  return static_cast<uint8_t>((fan << 1) | 0b00100000 | (half ? TU2C_COMMAND_FAN_HALF_BIT : 0));
 }
 
 // Byte 4 of a TU2C frame (after LEN:SRC:DST) is a constant 0xC0
@@ -604,7 +605,7 @@ void write_set_parameter_flags_tu2c(struct DataFrame *command, uint8_t remote_ad
   command->raw[4] = tu2c_header_marker_msb;
   command->raw[5] = tu2c_header_marker_lsb;
   command->raw[6] = static_cast<uint8_t>(state->mode | set_flags);
-  command->raw[7] = encode_tu2c_fan(state->fan);
+  command->raw[7] = encode_tu2c_fan(state->fan, state->fan_half);
   command->raw[8] = temp_celcius_to_payload(state->target_temp);
   command->raw[9] = EMPTY_DATA;
   command->raw[10] = get_heat_cool_bits(state->mode);
@@ -1589,6 +1590,10 @@ void ToshibaAbClimate::setup() {
         climate::CLIMATE_PRESET_ECO,
         climate::CLIMATE_PRESET_SLEEP,
     });
+    if (this->fan_levels_ == 5) {
+      // Levels 1, 3 and 5 stay LOW, MEDIUM and HIGH; 2 and 4 are custom modes.
+      this->set_supported_custom_fan_modes({TU2C_FAN_LOW_MEDIUM, TU2C_FAN_MEDIUM_HIGH});
+    }
   }
 
   pinMode(16, OUTPUT); // Set GPIO16 low, only needed for my old board, to be removed soon
@@ -1790,9 +1795,19 @@ void ToshibaAbClimate::sync_from_received_state() {
     changes++;
   }
 
-  auto new_fan_mode = to_climate_fan(&tcc_state);
-  if (new_fan_mode != fan_mode) {
-    fan_mode = new_fan_mode;
+  const char *custom_fan = nullptr;
+  if (this->fan_levels_ == 5 && tcc_state.power && tcc_state.fan_half) {
+    if (tcc_state.fan == FAN_PEED_LOW) {
+      custom_fan = TU2C_FAN_LOW_MEDIUM;
+    } else if (tcc_state.fan == FAN_PEED_MED) {
+      custom_fan = TU2C_FAN_MEDIUM_HIGH;
+    }
+  }
+  if (custom_fan != nullptr) {
+    if (this->set_custom_fan_mode_(custom_fan)) {
+      changes++;
+    }
+  } else if (this->set_fan_mode_(to_climate_fan(&tcc_state))) {
     changes++;
   }
 
@@ -2335,6 +2350,8 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
     tcc_state.power = (payload[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_POWER_MASK);
     tcc_state.mode = decode_status_mode(payload[STATUS_DATA_MODEPOWER_BYTE]);
     tcc_state.fan = (payload[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_FAN_MASK) >> STATUS_DATA_FAN_SHIFT_BITS;
+    // Kept even with fan_levels: 3, so other commands do not drop a level set on the wired remote.
+    tcc_state.fan_half = (payload[STATUS_DATA_FANVENT_BYTE] & TU2C_STATUS_FAN_HALF_MASK) != 0;
     tcc_state.vent =
         (payload[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_VENT_MASK) >> STATUS_DATA_VENT_SHIFT_BITS;
     tcc_state.target_temp =
@@ -2356,8 +2373,9 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
 
     ESP_LOGD(
         TAG,
-        "TU2C %sstatus: power=%d mode=%02X fan=%02X vent=%02X target=%.1f room=%.1f preset=%02X preheat=%d filter=%d",
-        is_extended_status_frame ? "extended " : "", tcc_state.power, tcc_state.mode, tcc_state.fan, tcc_state.vent,
+        "TU2C %sstatus: power=%d mode=%02X fan=%02X%s vent=%02X target=%.1f room=%.1f preset=%02X preheat=%d filter=%d",
+        is_extended_status_frame ? "extended " : "", tcc_state.power, tcc_state.mode, tcc_state.fan,
+        tcc_state.fan_half ? "+half" : "", tcc_state.vent,
         tcc_state.target_temp, tcc_state.room_temp, tcc_state.preset, tcc_state.preheating, tcc_state.filter_alert);
     sync_from_received_state();
     return;
@@ -3382,7 +3400,7 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
     commands.push_back(command);
   }
 
-  if (new_state->fan != tcc_state.fan) {
+  if (new_state->fan != tcc_state.fan || new_state->fan_half != tcc_state.fan_half) {
     ESP_LOGD(TAG, "Changing fan");
     auto command = DataFrame{};
     if (use_tu2c) {
@@ -3481,6 +3499,19 @@ void ToshibaAbClimate::control(const climate::ClimateCall &call) {
   if (call.get_fan_mode().has_value()) {
     ESP_LOGD(TAG, "Control fan");
     new_state.fan = to_tcc_fan(call.get_fan_mode().value());
+    new_state.fan_half = false;
+  } else if (call.has_custom_fan_mode()) {
+    // Intermediate TU2C levels (fan_levels: 5): LOW or MED code plus the half step.
+    const StringRef custom = call.get_custom_fan_mode();
+    if (custom == TU2C_FAN_LOW_MEDIUM) {
+      ESP_LOGD(TAG, "Control fan: %s", TU2C_FAN_LOW_MEDIUM);
+      new_state.fan = FAN_PEED_LOW;
+      new_state.fan_half = true;
+    } else if (custom == TU2C_FAN_MEDIUM_HIGH) {
+      ESP_LOGD(TAG, "Control fan: %s", TU2C_FAN_MEDIUM_HIGH);
+      new_state.fan = FAN_PEED_MED;
+      new_state.fan_half = true;
+    }
   }
 
   if (call.get_target_temperature().has_value()) {

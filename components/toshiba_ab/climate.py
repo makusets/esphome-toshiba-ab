@@ -58,6 +58,7 @@ CONF_COMMAND_MODE_READ = "command_mode_read"
 CONF_COMMAND_MODE_WRITE = "command_mode_write"
 CONF_FRAME_FORMAT = "frame_format"
 CONF_FILTER_FRAMES = "filter_frames"
+CONF_FAN_LEVELS = "fan_levels"
 CONF_PACKET_MIN_WAIT = "packet_min_wait"
 CONF_AUTORESET_ERRORS = "autoreset_errors"
 CONF_FRAME = "frame"
@@ -282,6 +283,12 @@ def _is_tu2c(config):
     return str(config.get(CONF_FRAME_FORMAT, "auto")).lower() in TU2C_FRAME_FORMATS
 
 
+def _validate_fan_levels(config):
+    if config.get(CONF_FAN_LEVELS, 3) == 5 and not _is_tu2c(config):
+        raise cv.Invalid("fan_levels: 5 is only supported with frame_format: tu2c")
+    return config
+
+
 def _validate_remote_address(config):
     if _is_tu2c(config) and CONF_REMOTE in config and config[CONF_REMOTE] not in TU2C_REMOTE_ADDRESSES:
         raise cv.Invalid(
@@ -315,6 +322,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_COMMAND_MODE_WRITE, default=0x80): cv.uint8_t,
         cv.Optional(CONF_FRAME_FORMAT, default="auto"): cv.one_of(*FRAME_FORMATS, lower=True),
         cv.Optional(CONF_FILTER_FRAMES, default=True): cv.boolean,
+        cv.Optional(CONF_FAN_LEVELS, default=3): cv.one_of(3, 5, int=True),
         cv.Optional(CONF_PACKET_MIN_WAIT, default="200ms"): cv.positive_time_period_milliseconds,
         cv.Optional(CONF_AUTORESET_ERRORS, default=False): cv.boolean,
         # Manual override for hardware UART0 RX. The common ESP8266 case
@@ -631,6 +639,7 @@ CONFIG_SCHEMA = cv.All(
     ).extend(uart.UART_DEVICE_SCHEMA).extend(cv.COMPONENT_SCHEMA),
     _validate_wall_mounted_louvre,
     _validate_remote_address,
+    _validate_fan_levels,
 )
 
 
@@ -750,6 +759,8 @@ async def to_code(config):
             cg.add(var.set_frame_format_auto())
         else:
             cg.add(var.set_frame_format(FRAME_FORMATS[config[CONF_FRAME_FORMAT]]))
+    if config.get(CONF_FAN_LEVELS, 3) != 3:
+        cg.add(var.set_fan_levels(config[CONF_FAN_LEVELS]))
     if CONF_FILTER_FRAMES in config:
         cg.add(var.set_filter_frames(config[CONF_FILTER_FRAMES]))
     if CONF_PACKET_MIN_WAIT in config:

@@ -81,6 +81,8 @@ climate:
                                 
     filter_frames: true         # optional, default true; reject normal TCC-Link frames with source > 0xA0, helps discarding ghost data created by voltage noise in the AB line
 
+    fan_levels: 3               # optional, default 3; TU2C only: 5 adds the custom fan modes "Low-Medium" (level 2) and "Medium-High" (level 4)
+
     
     packet_min_wait: 200ms      # optional, default 200ms; minimum idle time after received bytes before the next packet is parsed
     
