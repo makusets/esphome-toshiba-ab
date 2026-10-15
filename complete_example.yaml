@@ -71,6 +71,7 @@ climate:
 
     master: 0x00                # optional, will autodetect if omitted (recommended)
     remote: 0x40                # optional, will autoassign if omitted (recommended)
+                                # TU2C: 0x50 (default) or 0x51; use 0x51 when a wired remote is also on the bus
     
     command_mode_read: 0x08     # optional, defaults to 0x08 if omitted; use 0x0D for some commercial systems
     command_mode_write: 0x80    # optional, defaults to 0x80 if omitted; use 0xD0 for some commercial systems
@@ -79,6 +80,8 @@ climate:
                                 # further info on protocols settings is found in docs/frame_formats.md
                                 
     filter_frames: true         # optional, default true; reject normal TCC-Link frames with source > 0xA0, helps discarding ghost data created by voltage noise in the AB line
+
+    fan_levels: 3               # optional, default 3; TU2C only: 5 adds the custom fan modes "Low-Medium" (level 2) and "Medium-High" (level 4)
 
     
     packet_min_wait: 200ms      # optional, default 200ms; minimum idle time after received bytes before the next packet is parsed
@@ -91,6 +94,9 @@ climate:
     filter_alert:               # Optional binary sensor to report filter alert status if available
       name: "Filter Alert"
 
+    filter_reset:               # Optional button, TU2C only: resets the filter timer like the wired remote does
+      name: "Filter Reset"
+
     wall_mounted_louvre:        # Optional addon to select the louvre position, used for wall mounted units with this capability
       name: "AC Louvre"
       id: ac_louvre
@@ -102,6 +108,10 @@ climate:
     # regardless of settings in the AC system
     # If "enabled: false" or enabled is omitted, the AC unit will use its internal sensor or the remote controller temperature, depending on settings
     # If the esp is the only remote or setup as header, a sensor should ideally be configured here, regardless of enabled setting.
+    # Reporting can also be switched at runtime from a template switch: id(my_ac_system)->set_ext_temp_enabled(true / false)
+    # TU2C: the temperature is sent in the wired remote's room-temperature frame (61 38, 0.5 °C steps). The indoor unit
+    # only uses it when the wired remote's sensor is disabled (function code FC 32 = 0000); if the frames stop, the unit
+    # falls back to its return-air sensor (TA) after a few minutes. With a wired remote on the bus, also set remote: 0x51.
 
     report_sensor_temp:         # optional
       enabled: true             # default false, when "true" forces AC unit to use this temperature as room temperature control regardless of AC unit settings
@@ -162,6 +172,12 @@ climate:
 #  Use the logs to determine which sensors report valid data for your unit
 #  everytime a sensor response is received, it is logged,
 #  an invalid response means sensor is not available
+#
+#  TU2C: the same codes are read with the wired remote's "Monitor function" query.
+#  Verified on RAS-M10U2DVG-E + RAS-3M26U2AVG-E: 0x02 0x03 0x04 0x07 0x08 0x60 0x61 0x62 0x63
+#  0x6A (x0.1 A) 0xF0 0xF1 0xF2 0xF3. 0x00 and 0x01 are computed by the wired remote itself and
+#  are not served by the unit; 0x70 is not available on this unit. Unavailable codes are logged
+#  as "not available on this unit".
 ###########################################################################
 
 

@@ -115,10 +115,11 @@ uint8_t get_fan_bit_mask_for_mode(uint8_t mode) {
   return 0;
 }
 
-uint8_t encode_tu2c_fan(uint8_t fan) {
+uint8_t encode_tu2c_fan(uint8_t fan, bool half) {
   // TU2C uses bits 1-3 for the fan speed and keeps bit 5 set in every
   // climate mode. This differs from the encoding used by TCC-Link and Estia.
-  return static_cast<uint8_t>((fan << 1) | 0b00100000);
+  // Bit 0 selects the intermediate level on units with five fan levels.
+  return static_cast<uint8_t>((fan << 1) | 0b00100000 | (half ? TU2C_COMMAND_FAN_HALF_BIT : 0));
 }
 
 // Byte 4 of a TU2C frame (after LEN:SRC:DST) is a constant 0xC0
@@ -604,7 +605,7 @@ void write_set_parameter_flags_tu2c(struct DataFrame *command, uint8_t remote_ad
   command->raw[4] = tu2c_header_marker_msb;
   command->raw[5] = tu2c_header_marker_lsb;
   command->raw[6] = static_cast<uint8_t>(state->mode | set_flags);
-  command->raw[7] = encode_tu2c_fan(state->fan);
+  command->raw[7] = encode_tu2c_fan(state->fan, state->fan_half);
   command->raw[8] = temp_celcius_to_payload(state->target_temp);
   command->raw[9] = EMPTY_DATA;
   command->raw[10] = get_heat_cool_bits(state->mode);
@@ -747,6 +748,30 @@ void ToshibaAbClimate::send_remote_temp(float temp_c) {
   const uint8_t raw = static_cast<uint8_t>(
       std::lround((temp_c + TEMPERATURE_CONVERSION_OFFSET) * TEMPERATURE_CONVERSION_RATIO));
   const float rounded_temp_c = static_cast<float>(raw) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
+
+  if (this->data_reader.frame_format() == FrameFormat::TU2C) {
+    // TU2C has no separate external-sensor address: send the frame a wired remote
+    // sends every 30 s with its own sensor reading, with the "remote sensor" flag set:
+    // LEN SRC DST C0 61 38 01 <raw> 00 CRC, raw = (°C + 35) * 2 (0.5 °C resolution).
+    // The indoor unit uses it as control temperature when FC 32 = 0000 on the wired
+    // remote; if the frames stop it falls back to its return-air sensor (TA).
+    DataFrame tu2c{};
+    tu2c.set_tu2c(true);
+    tu2c.raw[0] = 0x0D;
+    tu2c.raw[1] = this->tu2c_remote_address_;
+    tu2c.raw[2] = this->tu2c_master_address_;
+    tu2c.raw[3] = TU2C_FRAME_MARKER;
+    tu2c.raw[4] = 0x61;
+    tu2c.raw[5] = 0x38;
+    tu2c.raw[6] = 0x01;
+    tu2c.raw[7] = raw;
+    tu2c.raw[8] = 0x00;
+    tu2c.raw[9] = calculate_tu2c_crc(tu2c.raw, 9);
+    ESP_LOGD(TAG, "TU2C: sending room temperature %.1f°C (raw=0x%02X)", rounded_temp_c, raw);
+    this->send_command(tu2c);
+    return;
+  }
+
   DataFrame cmd{};
   cmd.source      = TOSHIBA_TEMP_SENSOR;
   cmd.dest        = this->master_address_;  // usually 0x00
@@ -880,6 +905,46 @@ void ToshibaAbClimate::tu2c_send_ping() {
   this->send_command(cmd);
 }
 
+// TU2C "monitor function" query, as sent by the wired remote's field menu
+// (MENU + DOWN for 4 s > Monitor function): LEN SRC DST C0 41 5C <unit> <code> CRC.
+// The keepalive above is the same query for code F3 (filter hours).
+// Reply: LEN 90 SRC C0 80 5C <hi> <lo> CRC (signed 16-bit value, no code in it);
+// "no data" (---- on the remote): LEN 90 SRC C0 80 A2 CRC.
+void ToshibaAbClimate::send_tu2c_monitor_query_(uint8_t code) {
+  DataFrame cmd{};
+  cmd.set_tu2c(true);
+  cmd.raw[0] = 0x0C;
+  cmd.raw[1] = this->tu2c_remote_address_;
+  cmd.raw[2] = this->tu2c_master_address_;
+  cmd.raw[3] = TU2C_FRAME_MARKER;
+  cmd.raw[4] = 0x41;
+  cmd.raw[5] = 0x5C;
+  cmd.raw[6] = this->tu2c_master_address_;
+  cmd.raw[7] = code;
+  cmd.raw[8] = calculate_tu2c_crc(cmd.raw, 8);
+
+  this->last_sensor_query_id_ = code;
+  this->sensor_query_outstanding_ = true;
+  this->last_sensor_query_ms_ = millis();
+  this->tu2c_last_monitor_code_ = code;  // in case our own echo is not seen
+  ESP_LOGV(TAG, "TU2C monitor query code=0x%02X", code);
+  this->send_command(cmd);
+}
+
+void ToshibaAbClimate::publish_tu2c_monitor_value_(uint8_t code, int16_t raw) {
+  for (auto &ps : this->polled_sensors_) {
+    if (ps.id == code) {
+      const float value = static_cast<float>(raw) * ps.scale;
+      if (ps.sensor != nullptr) {
+        ps.sensor->publish_state(value);
+      }
+      ESP_LOGD(TAG, "TU2C monitor code=0x%02X raw=%d -> %.2f", code, raw, value);
+      return;
+    }
+  }
+  ESP_LOGV(TAG, "TU2C monitor code=0x%02X raw=%d (no sensor configured)", code, raw);
+}
+
 bool ToshibaAbClimate::is_tu2c_registration_ack_(const DataFrame *frame) const {
   if (frame == nullptr || !frame->is_tu2c()) {
     return false;
@@ -890,7 +955,10 @@ bool ToshibaAbClimate::is_tu2c_registration_ack_(const DataFrame *frame) const {
     return false;
   }
 
-  return frame->raw[1] == this->tu2c_master_address_ && frame->raw[4] == 0x80 && frame->raw[5] == 0x0D;
+  // Must be addressed to this board: a wired remote on the bus registers too, and its
+  // ACK must not count as ours when the two use different addresses.
+  return frame->raw[1] == this->tu2c_master_address_ && frame->raw[2] == this->tu2c_remote_address_ &&
+         frame->raw[4] == 0x80 && frame->raw[5] == 0x0D;
 }
 
 bool ToshibaAbClimate::is_tu2c_registration_query_(const DataFrame &frame) const {
@@ -976,6 +1044,11 @@ void ToshibaAbClimate::send_sensor_query(uint8_t sensor_id) {
     ESP_LOGV(TAG, "TX: A0 sensor query id=0x%02X from 0x%04X to 0x%04X", sensor_id, src, dst);
     log_raw_data("Estia TX", frame, sizeof(frame));
     this->enqueue_raw_frame_(std::vector<uint8_t>(frame, frame + sizeof(frame)));
+    return;
+  }
+
+  if (this->data_reader.frame_format() == FrameFormat::TU2C) {
+    this->send_tu2c_monitor_query_(sensor_id);
     return;
   }
 
@@ -1356,9 +1429,15 @@ bool ToshibaAbClimate::control_wall_mounted_louvre(uint8_t position) {
   return true;
 }
 
+void ToshibaAbFilterResetButton::press_action() { this->parent_->reset_filter(); }
+
 void ToshibaAbRemoteAddressSelect::control(const std::string &value) {
-  const uint8_t address = value == "0x41" ? 0x41 : 0x40;
-  this->parent_->set_remote_address(address);
+  // Options are 0x50/0x51 with frame_format: tu2c and 0x40/0x41 otherwise.
+  if (value == "0x50" || value == "0x51") {
+    this->parent_->set_tu2c_remote_address(value == "0x51" ? 0x51 : 0x50);
+  } else {
+    this->parent_->set_remote_address(value == "0x41" ? 0x41 : 0x40);
+  }
   this->publish_state(value);
   ESP_LOGI(TAG, "Remote address changed at runtime to %s", value.c_str());
 }
@@ -1451,11 +1530,17 @@ void ToshibaAbClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "  Vent switch: %s", this->vent_switch_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Read-only switch: %s", this->read_only_switch_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Remote address select: %s", this->remote_address_select_ ? "yes" : "no");
+  if (this->data_reader.frame_format() == FrameFormat::TU2C) {
+    ESP_LOGCONFIG(TAG, "  TU2C remote address: 0x%02X (%s)", this->tu2c_remote_address_,
+                  this->tu2c_remote_address_ == 0x51 ? "follower" : "header");
+  }
 }
 
 void ToshibaAbClimate::setup() {
   this->boot_millis_ = millis();
-  if (this->remote_address_select_ != nullptr &&
+  if (this->remote_address_select_ != nullptr && this->data_reader.frame_format() == FrameFormat::TU2C) {
+    this->remote_address_select_->publish_state(this->tu2c_remote_address_ == 0x51 ? "0x51" : "0x50");
+  } else if (this->remote_address_select_ != nullptr &&
       (this->remote_address_ == 0x40 || this->remote_address_ == 0x41)) {
     this->remote_address_select_->publish_state(this->remote_address_ == 0x41 ? "0x41" : "0x40");
   }
@@ -1507,6 +1592,10 @@ void ToshibaAbClimate::setup() {
         climate::CLIMATE_PRESET_ECO,
         climate::CLIMATE_PRESET_SLEEP,
     });
+    if (this->fan_levels_ == 5) {
+      // Levels 1, 3 and 5 stay LOW, MEDIUM and HIGH; 2 and 4 are custom modes.
+      this->set_supported_custom_fan_modes({TU2C_FAN_LOW_MEDIUM, TU2C_FAN_MEDIUM_HIGH});
+    }
   }
 
   pinMode(16, OUTPUT); // Set GPIO16 low, only needed for my old board, to be removed soon
@@ -1655,8 +1744,12 @@ void ToshibaAbClimate::setup() {
     // frame format is: 42:00:11:04:08:89:<raw>:46:<crc> for temp in celcius
     // in autonomous mode the same sensor is used for the regular temp reporting with ping above
 
-  if (this->ext_temp_enabled_ && this->ext_temp_sensor_ && this->ext_temp_interval_ms_ > 0) {
+  // Registered whenever a source sensor is configured, so reporting can be switched
+  // on and off at runtime with set_ext_temp_enabled() (e.g. from a template switch).
+  if (this->ext_temp_sensor_ && this->ext_temp_interval_ms_ > 0) {
     this->set_interval(this->ext_temp_interval_ms_, [this]() {
+      if (!this->ext_temp_enabled_)
+        return;
       float t = NAN;
       if (this->ext_temp_sensor_->has_state())
         t = this->ext_temp_sensor_->state;
@@ -1704,9 +1797,19 @@ void ToshibaAbClimate::sync_from_received_state() {
     changes++;
   }
 
-  auto new_fan_mode = to_climate_fan(&tcc_state);
-  if (new_fan_mode != fan_mode) {
-    fan_mode = new_fan_mode;
+  const char *custom_fan = nullptr;
+  if (this->fan_levels_ == 5 && tcc_state.power && tcc_state.fan_half) {
+    if (tcc_state.fan == FAN_PEED_LOW) {
+      custom_fan = TU2C_FAN_LOW_MEDIUM;
+    } else if (tcc_state.fan == FAN_PEED_MED) {
+      custom_fan = TU2C_FAN_MEDIUM_HIGH;
+    }
+  }
+  if (custom_fan != nullptr) {
+    if (this->set_custom_fan_mode_(custom_fan)) {
+      changes++;
+    }
+  } else if (this->set_fan_mode_(to_climate_fan(&tcc_state))) {
     changes++;
   }
 
@@ -2178,15 +2281,48 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
   if (frame_length == 0x0C && source == this->tu2c_master_address_ && payload_available >= 4 &&
       frame->raw[payload_offset] == 0x80) {
     log_raw_data("Master ACK frame", frame->raw, size);
+    if (frame->raw[payload_offset + 1] == 0x5C) {
+      // Monitor-function reply: signed 16-bit value of the last "41 5C" query on the
+      // bus (ours or the wired remote's), as the reply does not repeat the code.
+      const int16_t raw = static_cast<int16_t>((static_cast<uint16_t>(frame->raw[payload_offset + 2]) << 8) |
+                                               frame->raw[payload_offset + 3]);
+      const uint8_t code = this->tu2c_last_monitor_code_;
+      if (code != 0xFF) {
+        this->publish_tu2c_monitor_value_(code, raw);
+      }
+      if (this->sensor_query_outstanding_ && this->last_sensor_query_id_ == code) {
+        this->sensor_query_outstanding_ = false;
+        this->last_sensor_query_id_ = 0xFF;
+      }
+      this->tu2c_last_monitor_code_ = 0xFF;
+      return;
+    }
     ESP_LOGD(TAG, "ACK from master %02X with counter: %02X:%02X", source, frame->raw[payload_offset + 2],
              frame->raw[payload_offset + 3]);
+    return;
+  }
+
+  if (frame_length == 0x0A && source == this->tu2c_master_address_ && payload_available >= 2 &&
+      frame->raw[payload_offset] == 0x80 && frame->raw[payload_offset + 1] == 0xA2) {
+    // Monitor-function "no data" reply (shown as ---- on the wired remote).
+    const uint8_t code = this->tu2c_last_monitor_code_;
+    ESP_LOGD(TAG, "TU2C monitor code=0x%02X: not available on this unit", code);
+    if (this->sensor_query_outstanding_ && this->last_sensor_query_id_ == code) {
+      this->sensor_query_outstanding_ = false;
+      this->last_sensor_query_id_ = 0xFF;
+    }
+    this->tu2c_last_monitor_code_ = 0xFF;
     return;
   }
 
   if (frame_length == 0x0C && payload_available >= 2 && frame->raw[payload_offset] == 0x41 &&
       frame->raw[payload_offset + 1] == 0x5C) {
     log_raw_data("Remote keepalive frame", frame->raw, size);
-    ESP_LOGD(TAG, "Remote %02X keepalive", source);
+    if (payload_available >= 4) {
+      // Monitor-function query; the keepalive is the same query for code F3.
+      this->tu2c_last_monitor_code_ = frame->raw[payload_offset + 3];
+    }
+    ESP_LOGD(TAG, "Remote %02X keepalive / monitor query code=0x%02X", source, this->tu2c_last_monitor_code_);
     this->record_discovered_address_(source, true);
     return;
   }
@@ -2216,6 +2352,8 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
     tcc_state.power = (payload[STATUS_DATA_MODEPOWER_BYTE] & STATUS_DATA_POWER_MASK);
     tcc_state.mode = decode_status_mode(payload[STATUS_DATA_MODEPOWER_BYTE]);
     tcc_state.fan = (payload[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_FAN_MASK) >> STATUS_DATA_FAN_SHIFT_BITS;
+    // Kept even with fan_levels: 3, so other commands do not drop a level set on the wired remote.
+    tcc_state.fan_half = (payload[STATUS_DATA_FANVENT_BYTE] & TU2C_STATUS_FAN_HALF_MASK) != 0;
     tcc_state.vent =
         (payload[STATUS_DATA_FANVENT_BYTE] & STATUS_DATA_VENT_MASK) >> STATUS_DATA_VENT_SHIFT_BITS;
     tcc_state.target_temp =
@@ -2237,8 +2375,9 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
 
     ESP_LOGD(
         TAG,
-        "TU2C %sstatus: power=%d mode=%02X fan=%02X vent=%02X target=%.1f room=%.1f preset=%02X preheat=%d filter=%d",
-        is_extended_status_frame ? "extended " : "", tcc_state.power, tcc_state.mode, tcc_state.fan, tcc_state.vent,
+        "TU2C %sstatus: power=%d mode=%02X fan=%02X%s vent=%02X target=%.1f room=%.1f preset=%02X preheat=%d filter=%d",
+        is_extended_status_frame ? "extended " : "", tcc_state.power, tcc_state.mode, tcc_state.fan,
+        tcc_state.fan_half ? "+half" : "", tcc_state.vent,
         tcc_state.target_temp, tcc_state.room_temp, tcc_state.preset, tcc_state.preheating, tcc_state.filter_alert);
     sync_from_received_state();
     return;
@@ -3263,7 +3402,7 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
     commands.push_back(command);
   }
 
-  if (new_state->fan != tcc_state.fan) {
+  if (new_state->fan != tcc_state.fan || new_state->fan_half != tcc_state.fan_half) {
     ESP_LOGD(TAG, "Changing fan");
     auto command = DataFrame{};
     if (use_tu2c) {
@@ -3362,6 +3501,19 @@ void ToshibaAbClimate::control(const climate::ClimateCall &call) {
   if (call.get_fan_mode().has_value()) {
     ESP_LOGD(TAG, "Control fan");
     new_state.fan = to_tcc_fan(call.get_fan_mode().value());
+    new_state.fan_half = false;
+  } else if (call.has_custom_fan_mode()) {
+    // Intermediate TU2C levels (fan_levels: 5): LOW or MED code plus the half step.
+    const StringRef custom = call.get_custom_fan_mode();
+    if (custom == TU2C_FAN_LOW_MEDIUM) {
+      ESP_LOGD(TAG, "Control fan: %s", TU2C_FAN_LOW_MEDIUM);
+      new_state.fan = FAN_PEED_LOW;
+      new_state.fan_half = true;
+    } else if (custom == TU2C_FAN_MEDIUM_HIGH) {
+      ESP_LOGD(TAG, "Control fan: %s", TU2C_FAN_MEDIUM_HIGH);
+      new_state.fan = FAN_PEED_MED;
+      new_state.fan_half = true;
+    }
   }
 
   if (call.get_target_temperature().has_value()) {
@@ -3478,7 +3630,7 @@ void ToshibaAbClimate::publish_estia_telemetry_(const DataFrame *frame) {
     publish(sensor, value);
     return value;
   };
-  const auto word = [&](size_t index, sensor::Sensor *sensor, float scale) {
+  const auto publish_word = [&](size_t index, sensor::Sensor *sensor, float scale) {
     if (has(index + 1))
       publish(sensor, ((uint16_t(frame->raw[index]) << 8) | frame->raw[index + 1]) * scale);
   };
@@ -3525,15 +3677,15 @@ void ToshibaAbClimate::publish_estia_telemetry_(const DataFrame *frame) {
     if (!std::isnan(zone2)) this->publish_estia_zone_temperature_(2, zone2);
     const float dhw = temperature(24, nullptr, 23.5f);
     if (!std::isnan(dhw)) this->publish_dhw_current_temperature_(dhw);
-    word(26, this->water_flow_sensor_, 0.1f);
+    publish_word(26, this->water_flow_sensor_, 0.1f);
   } else if (frame->raw[9] == 0xC1) {
-    word(14, this->dhw_compressor_hours_sensor_, 1.0f);
-    word(18, this->compressor_hours_sensor_, 1.0f);  // heating only
-    word(20, this->waterpump_hours_sensor_, 1.0f);
-    word(26, this->backup_heater_hours_sensor_, 1.0f);
+    publish_word(14, this->dhw_compressor_hours_sensor_, 1.0f);
+    publish_word(18, this->compressor_hours_sensor_, 1.0f);  // heating only
+    publish_word(20, this->waterpump_hours_sensor_, 1.0f);
+    publish_word(26, this->backup_heater_hours_sensor_, 1.0f);
     byte(29, this->mixing_valve_position_sensor_);
     byte(31, this->compressor_frequency_sensor_);
-    word(32, this->fan_speed_sensor_, 1.0f);
+    publish_word(32, this->fan_speed_sensor_, 1.0f);
     byte(37, this->waterpump_duty_sensor_);
   }
 }
@@ -4473,6 +4625,37 @@ void ToshibaAbReadOnlySwitch::write_state(bool state) {
   this->climate_->set_read_only(state);
   // Publish the new state so Home Assistant UI reflects the change immediately
   this->publish_state(state);
+}
+
+// TU2C filter-timer reset, as sent by the wired remote's filter reset:
+// LEN SRC DST C0 08 2B CRC. The unit sends no ACK for it; the filter hours
+// (monitor code F3) drop to 0.
+void ToshibaAbClimate::reset_filter() {
+  if (this->data_reader.frame_format() != FrameFormat::TU2C) {
+    ESP_LOGW(TAG, "Filter reset is only implemented for TU2C");
+    return;
+  }
+  DataFrame cmd{};
+  cmd.set_tu2c(true);
+  cmd.raw[0] = 0x0A;
+  cmd.raw[1] = this->tu2c_remote_address_;
+  cmd.raw[2] = this->tu2c_master_address_;
+  cmd.raw[3] = TU2C_FRAME_MARKER;
+  cmd.raw[4] = 0x08;
+  cmd.raw[5] = 0x2B;
+  cmd.raw[6] = calculate_tu2c_crc(cmd.raw, 6);
+  ESP_LOGI(TAG, "TU2C: resetting the filter timer");
+  this->send_command(cmd);  // dropped in read-only mode
+}
+
+void ToshibaAbClimate::set_tu2c_remote_address(uint8_t address) {
+  if (address == this->tu2c_remote_address_) {
+    return;
+  }
+  this->tu2c_remote_address_ = address;
+  // In autonomous mode, register again with the indoor unit under the new address
+  // (the registration interval retries until the ACK arrives).
+  this->announce_ack_received_ = false;
 }
 
 void ToshibaAbClimate::set_master_address(uint8_t address) {

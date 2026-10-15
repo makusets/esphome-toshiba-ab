@@ -156,6 +156,101 @@ F0:F0:0A:50:90:C0:49:0D:00:A0     # registration/query example
 F0:F0:0C:50:90:C0:41:5C:90:F3:CC:A0  # keepalive example
 ```
 
+### Monitor function (`sensors:`)
+
+The wired remote's field menu (MENU + DOWN for 4 s, *Monitor function*) reads unit
+data with a query per code. The component sends the same query for each entry in
+`sensors:`:
+
+```text
+F0:F0:0C:50:90:C0:41:5C:90:<code>:CRC:A0   # query (the keepalive is code F3)
+F0:F0:0C:90:50:C0:80:5C:<hi>:<lo>:CRC:A0   # reply: signed 16-bit value
+F0:F0:0A:90:50:C0:80:A2:CRC:A0             # no data for this code (---- on the remote)
+```
+
+The reply does not repeat the code, so it is matched to the last query seen on the
+bus, whether sent by the component or by the wired remote.
+
+### Room temperature
+
+The wired remote sends its room temperature every 30 s:
+
+```text
+F0:F0:0D:50:90:C0:61:38:<flag>:<raw>:00:CRC:A0   # raw = (°C + 35) * 2
+```
+
+`flag` is `01` when the remote's own sensor is selected (function code FC 32 =
+0001) and `00` when it is not (FC 32 = 0000); with `00` the value is only an echo of
+the control temperature. With `report_sensor_temp`, the component sends this frame
+with `flag = 01`. The indoor unit uses it as control temperature only when FC 32 =
+0000, and falls back to its return-air sensor (TA) a few minutes after the frames
+stop. The control temperature in use is the room byte of the status frames.
+
+### Addresses and wired remotes
+
+The indoor unit is `0x90`. A wired remote set as *Header* (the factory default)
+uses `0x50`; a remote set as *Follower* uses `0x51`. The component uses `0x50` by
+default, so with a wired remote on the bus both transmit as `0x50`. Commands and
+monitor queries work like that, but as soon as the component also sends the room
+temperature (`report_sensor_temp`) the wired remote shows check code 30 or 32
+(*Header/Follower remote controller settings are not set correctly*) and blocks
+its menus until the frames stop.
+
+With a wired remote installed, set the component to `0x51` and leave the remote
+as Header:
+
+```yaml
+climate:
+  - platform: toshiba_ab
+    frame_format: tu2c
+    remote: 0x51
+```
+
+The *Toshiba Remote Address* select offers `0x50`/`0x51` with `frame_format: tu2c`
+and switches at runtime; in autonomous mode the component registers again with
+the indoor unit under the new address. Setting the wired remote as Follower and
+leaving the component on `0x50` does not work: the Follower remote waits for data
+from a real Header remote, shows an empty display for a while and then check
+code 30.
+
+Tested on RAS-M10U2DVG-E + RAS-3M26U2AVG-E with an RB-RWS21-E wired remote:
+with the component on `0x51`, registration, commands (power, mode, setpoint, fan
+level), monitor queries and room temperature are accepted (the control temperature
+follows the reported value within one status frame) and the wired remote shows no
+check code.
+
+### Filter reset
+
+The wired remote's filter reset sends a short frame, with no ACK from the unit:
+
+```text
+F0:F0:0A:50:90:C0:08:2B:DD:A0
+```
+
+The filter hours (monitor code `F3`) then drop to 0. The optional `filter_reset`
+button sends the same frame from the component's address.
+
+### Fan levels
+
+Units with five fan levels (the wired remote shows 1 to 5 bars) use the three
+standard codes plus a half step for levels 2 and 4. Captured from an RB-RWS21-E on a
+RAS-M10U2DVG-E:
+
+| Level | Command fan byte | Status fan/vent byte, high nibble | Fan mode |
+|---|---|---|---|
+| Auto | `0x24` | `0x4_` | `AUTO` |
+| 1 | `0x2A` | `0xA_` | `LOW` |
+| 2 | `0x2B` | `0xB_` | `Low-Medium` (custom) |
+| 3 | `0x28` | `0x8_` | `MEDIUM` |
+| 4 | `0x29` | `0x9_` | `Medium-High` (custom) |
+| 5 | `0x26` | `0x6_` | `HIGH` |
+
+The half step is bit 0 of the command byte and bit 4 of the status byte. Set
+`fan_levels: 5` to expose the two custom fan modes. The half step is always taken
+from the last status and sent back in the fan byte of every TU2C parameter command,
+so the byte matches the current level also with the default `fan_levels: 3`. Quiet
+is not a fan level: the remote sends it as preset `0x10`.
+
 ### Auto-detection
 
 No. The component knows how to interpret this format when selected, but `auto` does

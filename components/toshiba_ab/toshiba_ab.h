@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esphome/components/binary_sensor/binary_sensor.h"
+#include "esphome/components/button/button.h"
 #include "esphome/components/climate/climate.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/select/select.h"
@@ -33,6 +34,15 @@ class ToshibaAbRemoteAddressSelect : public select::Select {
 
  protected:
   void control(const std::string &value) override;
+  ToshibaAbClimate *parent_;
+};
+
+class ToshibaAbFilterResetButton : public button::Button {
+ public:
+  explicit ToshibaAbFilterResetButton(ToshibaAbClimate *parent) : parent_(parent) {}
+
+ protected:
+  void press_action() override;
   ToshibaAbClimate *parent_;
 };
 
@@ -105,6 +115,14 @@ const uint8_t STATUS_DATA_FAN_MASK = 0b11100000;
 const uint8_t STATUS_DATA_FAN_SHIFT_BITS = 5;
 const uint8_t STATUS_DATA_VENT_MASK = 0b00000100;
 const uint8_t STATUS_DATA_VENT_SHIFT_BITS = 2;
+// TU2C units with five fan levels add a half step to the three standard codes:
+// level 2 = LOW + half, level 4 = MED + half. Status: bit 4 of the fan/vent byte;
+// command: bit 0 of the fan byte (see encode_tu2c_fan()).
+const uint8_t TU2C_STATUS_FAN_HALF_MASK = 0b00010000;
+const uint8_t TU2C_COMMAND_FAN_HALF_BIT = 0b00000001;
+// Custom fan modes for the two intermediate levels (fan_levels: 5).
+static const char *const TU2C_FAN_LOW_MEDIUM = "Low-Medium";
+static const char *const TU2C_FAN_MEDIUM_HIGH = "Medium-High";
 const uint8_t STATUS_DATA_TARGET_TEMP_BYTE = 6;
 // TU2C's regular and extended status payloads place the preset at different
 // offsets. Extended status inserts room-temperature/status fields before it.
@@ -843,6 +861,7 @@ private:
 struct TccState {
   uint8_t mode;
   uint8_t fan;
+  bool fan_half = false;  // TU2C intermediate fan level (2 or 4 of 5)
   uint8_t vent;
   float room_temp = NAN;
   float target_temp = NAN;
@@ -859,6 +878,7 @@ struct TccState {
   TccState(const struct TccState *src) {
     mode = src->mode;
     fan = src->fan;
+    fan_half = src->fan_half;
     vent = src->vent;
     room_temp = src->room_temp;
     target_temp = src->target_temp;
@@ -901,6 +921,10 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
     estia_source_address_ = remote_address_;
     remote_address_auto_ = false;
   }
+  // TU2C source address: 0x50 = header wired remote (default), 0x51 = follower.
+  // Use 0x51 when a wired remote is also connected (see docs/frame_formats.md).
+  void set_tu2c_remote_address(uint8_t address);
+  uint8_t get_tu2c_remote_address() const { return tu2c_remote_address_; }
   void set_remote_address_select(ToshibaAbRemoteAddressSelect *address_select) {
     remote_address_select_ = address_select;
   }
@@ -1089,6 +1113,11 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_ext_temp_source(sensor::Sensor *s) { ext_temp_sensor_ = s; }
   void set_ext_temp_interval(uint32_t ms) { ext_temp_interval_ms_ = ms; }
   void set_ext_temp_enabled(bool en) { ext_temp_enabled_ = en; }
+  // 3 (default) or 5: TU2C units with five fan levels also expose the custom fan
+  // modes "Low-Medium" (level 2) and "Medium-High" (level 4).
+  void set_fan_levels(uint8_t levels) { fan_levels_ = levels; }
+  // TU2C: reset the filter timer, as the wired remote's filter reset does.
+  void reset_filter();
   void send_remote_temp(float temp_c);  // builds & enqueues remote-temp frame
   void set_ext_temp_sensor_name(const std::string &name) { this->ext_temp_sensor_name_ = name; }
   
@@ -1249,6 +1278,11 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   uint8_t last_sensor_query_id_{0xFF};     // 0xFF = invalid / none
   bool    sensor_query_outstanding_{false}; // true after send, cleared on reply
   uint32_t last_sensor_query_ms_{0};
+  // TU2C monitor-function queries ("41 5C <unit> <code>"): the reply carries only the
+  // value, so it is matched to the last query seen on the bus (ours or the remote's).
+  uint8_t tu2c_last_monitor_code_{0xFF};
+  void send_tu2c_monitor_query_(uint8_t code);
+  void publish_tu2c_monitor_value_(uint8_t code, int16_t raw);
   uint32_t sensor_query_timeout_ms_{2500};  // Give busy HM buses time to answer before releasing the guard.
   uint32_t sensor_query_timeouts_{0};       // (optional) stats
 
@@ -1277,6 +1311,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   sensor::Sensor *ext_temp_sensor_{nullptr};
   uint32_t ext_temp_interval_ms_{300000};  // 5 min default
   bool ext_temp_enabled_{false};
+  uint8_t fan_levels_{3};
   // Flag set when a broadcast announce ACK containing 0x0D is received
   bool announce_ack_received_{false};
   // Keep announcing after an automatic address change until the newly selected
