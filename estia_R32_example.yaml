@@ -59,7 +59,7 @@ climate:
 
 
     # Zone 1 thermostat defaults to enabled; set zone1_climate: false to omit it.
-    # Auto uses Toshiba's heating curve, so it intentionally has no target temperature.
+    # When in Auto, it uses Toshiba's heating curve, so it intentionally has no target temperature.
     # Off disables heating/cooling operation only; it leaves DHW enabled.
     # Optionally the name and id can be overriden
 
@@ -80,15 +80,10 @@ climate:
     # remote: 0x40
     # master: 0x00
 
-    # Autonomous polling: query E8:C0 (temperatures) and E8:C1 (operating hours) regularly
-    # This is the default setting and can be omitted, uncomment and change to false if you need it for some reason
-    # autonomous: true
-
     # Optional Diagnostic sensors
     connected:
       name: "Estia Connected"  #sensor that monitors the connection to the master is alive
-    failed_crcs:
-      name: "Estia Failed CRCs"  #sensor that counts failed frames
+
       
     #read-only enables putting the esp in read-only mode for experimentation or diagnosing, with no comms being sent
     # read_only: true           # Optional: listen without sending commands or polls
@@ -96,32 +91,35 @@ climate:
       name: "Read only"         # optional switch to turn on and off read only mode while the esp is running
 
     # Optional R32 feature switches: omit any entry to avoid creating that switch.
+    
     # Anti Bacteria enables the DHW antibacterial function. Configure its
     # schedule and temperature on the Toshiba wired remote.
     antibacteria:
       name: "Estia Anti Bacteria"
+    
     # Frost Protection is intended for an otherwise idle installation; the
     # heat pump uses low-temperature heating (15 C) and displays F on the remote.
     frost_protection:
       name: "Estia Frost Protection"
+    
     # Night Setback enables Toshiba's night temperature reduction. Configure
     # its schedule and reduction on the wired remote.
     # Zone thermostats report the "Night setback" preset only while the
-    # reduction is applied. The preset is feedback, not a schedule control.
-    # DHW keeps its independent Boost preset.
+    # reduction is applied. The preset on the thermostat is read only, not a control.
+    # Does not affect DHW.
     night_setback:
       name: "Estia Night Setback"
 
     # Optional standalone setpoints (also shown by the thermostats).
-    dhw_setpoint:
-      name: "Estia DHW Setpoint"
-    zone1_setpoint:
-      name: "Estia Zone 1 Setpoint"
-    zone2_setpoint:
-      name: "Estia Zone 2 Setpoint"
+    #dhw_setpoint:
+    #  name: "Estia DHW Setpoint"
+    #zone1_setpoint:
+    #  name: "Estia Zone 1 Setpoint"
+    #zone2_setpoint:
+    #  name: "Estia Zone 2 Setpoint"
 
-    # Temperatures from E8:C0. TWI, TTW and TFI also update from STATUS.
-    # autonomous: false stops polling; received bus data still updates sensors.
+    # Temperatures from E8:C0 and STATUS.
+
     
     compressor_discharge_temperature:  # TD
       name: "Estia Compressor Discharge Temperature"
@@ -170,23 +168,57 @@ climate:
     backup_heater_hours:
       name: "Estia Backup Heater Hours"
 
-    # Optional individual queries for values absent from the E8 responses.
-    # EF:2C hour counters (0xF0-0xF7) use 100-hour units and change slowly.
-    # sensors:
-    #   - address: 0xF2
-    #     scale: 100
-    #     sensor:
-    #       name: "Estia Cooling Compressor Hours"
-    #       unit_of_measurement: "h"
-    #       accuracy_decimals: 0
-    #       device_class: duration
-    #       state_class: total_increasing
-    # Other query scales: 0x7A pressure x0.01 MPa; 0x74 valve x10 pulses.
-    # Current 0x6A uses x0.1 A but may be inaccurate at low load.
+    # Optional individual queries for values absent from regular updates.
+    
+    sensors:
+       - address: 0x6A                   #required, scroll down for address list
+         scale: 0.1                      # optional, 0.1 as the value is read in deciAmps
+         sensor:
+          name: "Estia System Current"   #required
 
-    # 0-10V demand sensor (shows current demand value 0..15)
-    # demand:
-    #   name: "Estia 0-10V Demand"
+    # all other available options of sensor in esphome:
+
+          unit_of_measurement: "A"       #optional, defaults none
+          accuracy_decimals: 2           #optional
+          device_class: current          #optional but recommended for HA
+          state_class: measurement       #optional but recommended for HA
+    
+    # Other query scales: 0x7A pressure x0.01 MPa; 0x74 valve x10 pulses.
+
+
+################# Available Sensors for ESTIA R32 ##################################
+# Most of these sensors are regularly updated by the system automatically
+# and don't require extra queries and unnecesary traffic on the bus
+#
+#  Address            Description
+#
+#  0x0B	            	Mixing-valve position	
+#  0x0E	            	Low pressure
+#  0x0F	          		Software version 
+#  0x60               Heat exchanger temperature
+#  0x63               Compressor Suction Temperature TS
+#  0x65               Heat Sink Temperature
+#  0x6A	            	Compressor electrical current
+#  0x6D               Heat Exchanger Coil Temperature
+#  0x70	              Compressor frequency
+#  0x72	        	   	Outdoor Fan 1 speed	
+#  0x73	        	  	Outdoor Fan 2 speed 
+#  0x74	            	Expansion-valve position	
+#  0x7A	            	High pressure	
+#  0xC0	            	Water flow
+#  0xF0               Micro Computer Energized hours
+#  0xF1               Hot Water Compressor hours (might be the same as compressor_hours from E8:C1 response)
+#  0XF2               Cooling Compressor hours (in 100s of hours)
+#  0xF3               Heating Compressor hours (in 100s of hours)
+#  0XF5               Hot Water E Heater hours?? not sure what it means (in 100s of hours)
+#  0xF6               Back Up Heater hours (in 100s of hours)
+#  0xF7               Booster Heater On hours (in 100s of hours)
+#
+#  Use the logs to determine which sensors report valid data for your unit
+#  everytime a sensor response is received, it is logged,
+#  an invalid response means sensor is not available
+###########################################################################
+
 
 # Optional: 0-10V demand emulation
 # Uncomment the sections below to emulate the physical 0-10V interface
