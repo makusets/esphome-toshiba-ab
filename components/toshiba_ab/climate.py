@@ -50,6 +50,7 @@ CONF_INDOOR_UNITS = "indoor_units"
 CONF_REMOTE_COUNT = "remote_count"
 CONF_REMOTE_ADDRESSES = "remote_addresses"
 CONF_REMOTE_ADDRESS_SELECT = "remote_address_select"
+CONF_HEATING_CURVE_SHIFT = "heating_curve_shift"
 
 CONF_ON_DATA_RECEIVED = "on_data_received"
 CONF_MASTER = "master"
@@ -135,6 +136,9 @@ ToshibaAbEstiaZone1Climate = toshiba_ab_ns.class_(
 )
 ToshibaAbRemoteAddressSelect = toshiba_ab_ns.class_(
     "ToshibaAbRemoteAddressSelect", select.Select
+)
+ToshibaAbEstiaCurveShiftSelect = toshiba_ab_ns.class_(
+    "ToshibaAbEstiaCurveShiftSelect", select.Select
 )
 
 ToshibaAbVentSwitch =  toshiba_ab_ns.class_(
@@ -281,6 +285,8 @@ def _validate_wall_mounted_louvre(config):
         raise cv.Invalid("wall_mounted_louvre requires classic TCC-Link (auto or normal frame_format)")
     if config.get(CONF_ZONE2_CLIMATE) and config[CONF_FRAME_FORMAT] != "a0":
         raise cv.Invalid("zone2_climate requires frame_format: a0")
+    if CONF_HEATING_CURVE_SHIFT in config and config[CONF_FRAME_FORMAT] != "estia":
+        raise cv.Invalid("heating_curve_shift requires frame_format: estia (first-generation R410A Estia)")
     return config
 
 
@@ -294,6 +300,11 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_REMOTE_ADDRESS_SELECT): select.select_schema(
             ToshibaAbRemoteAddressSelect,
             entity_category=ENTITY_CATEGORY_CONFIG,
+        ),
+        cv.Optional(CONF_HEATING_CURVE_SHIFT): select.select_schema(
+            ToshibaAbEstiaCurveShiftSelect,
+            entity_category=ENTITY_CATEGORY_CONFIG,
+            icon="mdi:chart-bell-curve-cumulative",
         ),
         cv.Optional(CONF_COMMAND_MODE_READ, default=0x08): cv.uint8_t,
         cv.Optional(CONF_COMMAND_MODE_WRITE, default=0x80): cv.uint8_t,
@@ -718,6 +729,16 @@ async def to_code(config):
         config[CONF_REMOTE_ADDRESS_SELECT], var, options=["0x40", "0x41"]
     )
     cg.add(var.set_remote_address_select(remote_address_select))
+
+    if CONF_HEATING_CURVE_SHIFT in config:
+        # Installer curve-shift (DN 27) range, in K. Toshiba accepts the shift
+        # as a signed value; -5..+5 covers the observed installer range.
+        curve_shift = await select.new_select(
+            config[CONF_HEATING_CURVE_SHIFT],
+            var,
+            options=["-5", "-4", "-3", "-2", "-1", "0", "1", "2", "3", "4", "5"],
+        )
+        cg.add(var.set_heating_curve_shift_select(curve_shift))
 
     if CONF_COMMAND_MODE_READ in config:
         cg.add(var.set_command_mode_read(config[CONF_COMMAND_MODE_READ]))

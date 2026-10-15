@@ -113,6 +113,15 @@ climate:
     # first-generation remote error reset command after error 0x49.
     autoreset_errors: false
 
+    # Optional: installer heating-curve shift (DN 27), first-generation R410A only.
+    # Written with the field-setting frame (0x1C) and read back with the
+    # field-setting query (0x1A:F1), so the entity reports the shift the hydrobox
+    # actually applies (not an optimistic echo of the command). The options are
+    # the signed K value; -5..+5 covers the observed installer range.
+    # Uncomment to expose the select.
+    # heating_curve_shift:
+    #   name: "Estia Heating Curve Shift"
+
     # Switch to activate boost mode for domestic-hot-water operation.
     dhw_boost:
       name: "Estia DHW Boost"
