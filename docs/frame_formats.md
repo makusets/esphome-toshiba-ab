@@ -219,6 +219,17 @@ level), monitor queries and room temperature are accepted (the control temperatu
 follows the reported value within one status frame) and the wired remote shows no
 check code.
 
+### Filter reset
+
+The wired remote's filter reset sends a short frame, with no ACK from the unit:
+
+```text
+F0:F0:0A:50:90:C0:08:2B:DD:A0
+```
+
+The filter hours (monitor code `F3`) then drop to 0. The optional `filter_reset`
+button sends the same frame from the component's address.
+
 ### Fan levels
 
 Units with five fan levels (the wired remote shows 1 to 5 bars) use the three

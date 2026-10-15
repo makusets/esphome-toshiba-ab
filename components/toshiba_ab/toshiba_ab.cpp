@@ -1429,6 +1429,8 @@ bool ToshibaAbClimate::control_wall_mounted_louvre(uint8_t position) {
   return true;
 }
 
+void ToshibaAbFilterResetButton::press_action() { this->parent_->reset_filter(); }
+
 void ToshibaAbRemoteAddressSelect::control(const std::string &value) {
   // Options are 0x50/0x51 with frame_format: tu2c and 0x40/0x41 otherwise.
   if (value == "0x50" || value == "0x51") {
@@ -4623,6 +4625,27 @@ void ToshibaAbReadOnlySwitch::write_state(bool state) {
   this->climate_->set_read_only(state);
   // Publish the new state so Home Assistant UI reflects the change immediately
   this->publish_state(state);
+}
+
+// TU2C filter-timer reset, as sent by the wired remote's filter reset:
+// LEN SRC DST C0 08 2B CRC. The unit sends no ACK for it; the filter hours
+// (monitor code F3) drop to 0.
+void ToshibaAbClimate::reset_filter() {
+  if (this->data_reader.frame_format() != FrameFormat::TU2C) {
+    ESP_LOGW(TAG, "Filter reset is only implemented for TU2C");
+    return;
+  }
+  DataFrame cmd{};
+  cmd.set_tu2c(true);
+  cmd.raw[0] = 0x0A;
+  cmd.raw[1] = this->tu2c_remote_address_;
+  cmd.raw[2] = this->tu2c_master_address_;
+  cmd.raw[3] = TU2C_FRAME_MARKER;
+  cmd.raw[4] = 0x08;
+  cmd.raw[5] = 0x2B;
+  cmd.raw[6] = calculate_tu2c_crc(cmd.raw, 6);
+  ESP_LOGI(TAG, "TU2C: resetting the filter timer");
+  this->send_command(cmd);  // dropped in read-only mode
 }
 
 void ToshibaAbClimate::set_tu2c_remote_address(uint8_t address) {
