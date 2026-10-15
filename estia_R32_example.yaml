@@ -57,6 +57,14 @@ climate:
     name: "Toshiba Estia DHW"
     id: toshiba_estia
 
+    # Optional DHW thermostat display limits; defaults: 20–65 °C in 0.5 °C steps.
+    # visual sets the Home Assistant display range, not the system's operating limits.
+    # Uncomment to override the defaults; rebuild/upload after edits.
+    # visual:
+    #   min_temperature: 20
+    #   max_temperature: 65
+    #   temperature_step: 0.5
+
 
     # Zone 1 thermostat defaults to enabled; set zone1_climate: false to omit it.
     # When in Auto, it uses Toshiba's heating curve, so it intentionally has no target temperature.
@@ -66,6 +74,21 @@ climate:
     zone1_climate:      # Optionally override thermostat naming and id
       name: "Toshiba Estia Zone 1"
       id: estia_zone1
+
+      # Optional Zone 1 thermostat display limits; defaults: 20–65 °C in 0.5 °C steps.
+      # visual sets one fixed Home Assistant display range for both Heat and Cool;
+      # the range does not change with mode and does not set operating limits.
+      # Typical Toshiba operating ranges: heating 20–65 °C; cooling 7–25 °C.
+      # Heating installations can choose a lower maximum for their emitters;
+      # underfloor heating is often limited to 40–45 °C. Underfloor cooling is
+      # typically limited to a minimum of 18–20 °C to help avoid condensation.
+      # For heating and cooling, a combined display range can be 7–65 °C;
+      # 18–40 °C is recommended for underfloor systems. Auto has no fixed target.
+      # Uncomment to override the defaults; rebuild/upload after edits.
+      # visual:
+      #   min_temperature: 20
+      #   max_temperature: 65
+      #   temperature_step: 0.5
 
     # Zone 2 defaults to disabled; use true or a block to enable it.
     # Operating mode is shared with Zone 1.
