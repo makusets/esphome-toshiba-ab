@@ -591,11 +591,15 @@ struct DataFrameReader {
     }
 
     if (!use_tu2c && data_index_ == 1) {
-      // ignore frames where source == dest (likely noise or corrupted)
+      // Reject equal-address header candidates, but retain the second byte:
+      // it may be the source of a valid frame after a stray leading byte.
       if (!allow_same_source_dest_ && frame.raw[0] == frame.raw[1]) {
-          ESP_LOGV("READER", "Ignoring packet where source == dest: 0x%02X", frame.raw[0]);
-          // reset reader state so next byte is treated as new frame start
+          ESP_LOGV("READER", "Rejecting header candidate %02X:%02X (source == dest); retaining possible source",
+                   frame.raw[0], frame.raw[1]);
+          const uint8_t candidate_source = frame.raw[1];
           reset(true);
+          frame.raw[0] = candidate_source;
+          data_index_ = 1;
           return false;
       }
     }
