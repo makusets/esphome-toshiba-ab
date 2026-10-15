@@ -36,6 +36,19 @@ class ToshibaAbRemoteAddressSelect : public select::Select {
   ToshibaAbClimate *parent_;
 };
 
+// First-generation Estia (R410A) installer curve shift (DN 27). Written with the
+// field-setting write frame (0x1C) and read back with the field-setting query
+// (0x1A:F1), so the published state is the value the hydrobox reports and not an
+// optimistic echo of the command.
+class ToshibaAbEstiaCurveShiftSelect : public select::Select {
+ public:
+  explicit ToshibaAbEstiaCurveShiftSelect(ToshibaAbClimate *parent) : parent_(parent) {}
+
+ protected:
+  void control(const std::string &value) override;
+  ToshibaAbClimate *parent_;
+};
+
 class ToshibaAbEstiaZone1Climate : public climate::Climate {
  public:
   explicit ToshibaAbEstiaZone1Climate(ToshibaAbClimate *parent, uint8_t zone = 1) : parent_(parent), zone_(zone) {}
@@ -66,6 +79,7 @@ const uint32_t FRAME_SEND_MILLIS_FROM_LAST_SEND = 500;
 const uint32_t INITIAL_FRAME_SEND_BLOCK_MILLIS = 30000;
 const uint32_t REMOTE_REANNOUNCE_TIMEOUT_MILLIS = 30000;
 const uint32_t BUS_DISCOVERY_PERIOD_MILLIS = 180000;
+const uint32_t ESTIA_CURVE_SHIFT_POLL_MILLIS = 60000;
 
 // const uint8_t TOSHIBA_MASTER = 0x00;  replaced by master_address_ which is set up in yaml
 const uint8_t TOSHIBA_MASTER_DEFAULT = 0x00;
@@ -76,6 +90,7 @@ const uint8_t TOSHIBA_TU2C_MASTER_DEFAULT = 0x90;
 const uint8_t TOSHIBA_ESTIA_REMOTE_DEFAULT = 0x60;
 const uint8_t TOSHIBA_ESTIA_REMOTE_MAX = 0x69;
 const uint8_t TOSHIBA_ESTIA_MASTER_DEFAULT = 0x70;
+const uint8_t ESTIA_FIRST_GEN_DN_CURVE_SHIFT = 0x27;  // installer "Auto curve shift" field-setting
 const uint8_t TOSHIBA_TEMP_SENSOR = 0x42;
 const uint8_t TOSHIBA_BROADCAST = 0xF0;
 const uint8_t TOSHIBA_REPORT = 0x52;
@@ -904,6 +919,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_remote_address_select(ToshibaAbRemoteAddressSelect *address_select) {
     remote_address_select_ = address_select;
   }
+  void set_heating_curve_shift_select(select::Select *curve_shift_select) {
+    heating_curve_shift_select_ = curve_shift_select;
+  }
   bool get_master_address_auto() const { return master_address_auto_; }
   void set_filter_frames(bool filter_frames) {
     filter_frames_ = filter_frames;
@@ -1031,6 +1049,10 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_remote_addresses_text_sensor(text_sensor::TextSensor *sensor) { this->remote_addresses_text_sensor_ = sensor; }
 
   ToshibaAbRemoteAddressSelect *remote_address_select_{nullptr};
+  select::Select *heating_curve_shift_select_{nullptr};
+  uint32_t last_curve_shift_request_ms_{0};
+  bool has_curve_shift_value_{false};
+  int8_t last_curve_shift_value_{0};
 
   void send_command(struct DataFrame command);
   bool send_raw_frame_from_text(const std::string &frame_text);
@@ -1080,6 +1102,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void send_estia_first_gen_antibacteria(bool on);
   void send_estia_first_gen_auto_mode(bool on);
   void send_estia_first_gen_request_data(uint8_t request_code);
+  void send_estia_first_gen_curve_shift(int8_t shift);   // DN 27 write (0x1C)
+  void request_estia_first_gen_curve_shift();            // DN 27 read (0x1A:F1)
+  void decode_estia_first_gen_curve_shift_(const DataFrame *frame);
   void send_estia_tracked_(const uint8_t *frame, size_t len, uint16_t ack_dtype);
   
   // Reporting external sensor temperature to AC *************************

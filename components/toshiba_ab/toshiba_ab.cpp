@@ -1363,6 +1363,19 @@ void ToshibaAbRemoteAddressSelect::control(const std::string &value) {
   ESP_LOGI(TAG, "Remote address changed at runtime to %s", value.c_str());
 }
 
+void ToshibaAbEstiaCurveShiftSelect::control(const std::string &value) {
+  // Parse the numeric option (the YAML options are plain K values, e.g. "-2", "0", "3").
+  char *end = nullptr;
+  const long parsed = std::strtol(value.c_str(), &end, 10);
+  if (end == value.c_str() || *end != '\0') {
+    ESP_LOGW(TAG, "Ignoring curve shift request with non-numeric value '%s'", value.c_str());
+    return;
+  }
+  this->parent_->send_estia_first_gen_curve_shift(static_cast<int8_t>(parsed));
+  // Do not publish the requested value: the state is published from the DN 27
+  // read-back so the entity never shows an unconfirmed (optimistic) value.
+}
+
 climate::ClimateTraits ToshibaAbEstiaZone1Climate::traits() {
   climate::ClimateTraits traits;
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
@@ -1448,6 +1461,7 @@ void ToshibaAbClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "  Reader diagnostics: enabled (30s updates)");
   ESP_LOGCONFIG(TAG, "  Filter alert sensor: %s", this->filter_alert_sensor_ ? "yes" : "no");
   LOG_SELECT("  ", "Wall-mounted louvre", this->wall_mounted_louvre_select_);
+  LOG_SELECT("  ", "Heating curve shift (DN 27)", this->heating_curve_shift_select_);
   ESP_LOGCONFIG(TAG, "  Vent switch: %s", this->vent_switch_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Read-only switch: %s", this->read_only_switch_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Remote address select: %s", this->remote_address_select_ ? "yes" : "no");
@@ -2894,6 +2908,18 @@ void ToshibaAbClimate::publish_reader_diagnostics_() {
 
 void ToshibaAbClimate::loop() {
   if (millis() - this->last_diagnostics_publish_ms_ >= 30000) this->publish_reader_diagnostics_();
+
+  // Poll the installer curve shift (DN 27) so the select reflects the unit's
+  // actual state rather than an optimistic echo. Gated on first-generation
+  // Estia framing, the read-only switch and the initial boot send block.
+  if (this->heating_curve_shift_select_ != nullptr && this->is_estia_first_gen() && !this->read_only_ &&
+      millis() >= INITIAL_FRAME_SEND_BLOCK_MILLIS) {
+    const uint32_t now_ms = millis();
+    if (this->last_curve_shift_request_ms_ == 0 ||
+        now_ms - this->last_curve_shift_request_ms_ >= ESTIA_CURVE_SHIFT_POLL_MILLIS) {
+      this->request_estia_first_gen_curve_shift();
+    }
+  }
   // TODO: check if last_unconfirmed_command_ was not confirmed after a timeout
   // and log warning/error
 
@@ -3478,7 +3504,7 @@ void ToshibaAbClimate::publish_estia_telemetry_(const DataFrame *frame) {
     publish(sensor, value);
     return value;
   };
-  const auto word = [&](size_t index, sensor::Sensor *sensor, float scale) {
+  const auto word_at = [&](size_t index, sensor::Sensor *sensor, float scale) {
     if (has(index + 1))
       publish(sensor, ((uint16_t(frame->raw[index]) << 8) | frame->raw[index + 1]) * scale);
   };
@@ -3525,15 +3551,15 @@ void ToshibaAbClimate::publish_estia_telemetry_(const DataFrame *frame) {
     if (!std::isnan(zone2)) this->publish_estia_zone_temperature_(2, zone2);
     const float dhw = temperature(24, nullptr, 23.5f);
     if (!std::isnan(dhw)) this->publish_dhw_current_temperature_(dhw);
-    word(26, this->water_flow_sensor_, 0.1f);
+    word_at(26, this->water_flow_sensor_, 0.1f);
   } else if (frame->raw[9] == 0xC1) {
-    word(14, this->dhw_compressor_hours_sensor_, 1.0f);
-    word(18, this->compressor_hours_sensor_, 1.0f);  // heating only
-    word(20, this->waterpump_hours_sensor_, 1.0f);
-    word(26, this->backup_heater_hours_sensor_, 1.0f);
+    word_at(14, this->dhw_compressor_hours_sensor_, 1.0f);
+    word_at(18, this->compressor_hours_sensor_, 1.0f);  // heating only
+    word_at(20, this->waterpump_hours_sensor_, 1.0f);
+    word_at(26, this->backup_heater_hours_sensor_, 1.0f);
     byte(29, this->mixing_valve_position_sensor_);
     byte(31, this->compressor_frequency_sensor_);
-    word(32, this->fan_speed_sensor_, 1.0f);
+    word_at(32, this->fan_speed_sensor_, 1.0f);
     byte(37, this->waterpump_duty_sensor_);
   }
 }
@@ -4231,6 +4257,48 @@ void ToshibaAbClimate::send_estia_first_gen_request_data(uint8_t request_code) {
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
+void ToshibaAbClimate::send_estia_first_gen_curve_shift(int8_t shift) {
+  if (this->read_only_) return;
+  if (!this->is_estia_first_gen()) {
+    ESP_LOGW(TAG, "Curve shift (DN 27) requires first-generation Estia framing");
+    return;
+  }
+  // Field-setting write captured in issue #242:
+  //   F0:F0:0C:<src>:<dst>:E0:01:1C:27:<val>:<chk>:A0
+  const uint8_t payload[] = {0xE0, 0x01, 0x1C, ESTIA_FIRST_GEN_DN_CURVE_SHIFT,
+                             static_cast<uint8_t>(shift)};
+  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+  ESP_LOGI(TAG, "Curve shift (DN 27) write requested: %+d K", static_cast<int>(shift));
+  // Refresh the entity from the unit once the write has settled.
+  this->request_estia_first_gen_curve_shift();
+}
+
+void ToshibaAbClimate::request_estia_first_gen_curve_shift() {
+  if (this->read_only_ || !this->is_estia_first_gen()) return;
+  // Field-setting query captured in issue #242:
+  //   F0:F0:0D:<src>:<dst>:E0:41:1A:F1:27:00:<chk>:A0
+  const uint8_t payload[] = {0xE0, 0x41, 0x1A, 0xF1, ESTIA_FIRST_GEN_DN_CURVE_SHIFT, 0x00};
+  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+  this->last_curve_shift_request_ms_ = millis();
+}
+
+void ToshibaAbClimate::decode_estia_first_gen_curve_shift_(const DataFrame *frame) {
+  if (frame == nullptr || this->heating_curve_shift_select_ == nullptr) return;
+  // Master reply: 0C:70:60:E0:80:1A:27:<val>:<chk> (raw[6]=DN, raw[7]=signed value)
+  if (frame->raw[0] < 0x0C) return;
+  if (frame->raw[4] != 0x80 || frame->raw[5] != 0x1A) return;
+  if (frame->raw[6] != ESTIA_FIRST_GEN_DN_CURVE_SHIFT) return;
+  const int8_t shift = static_cast<int8_t>(frame->raw[7]);
+  if (!this->has_curve_shift_value_ || this->last_curve_shift_value_ != shift) {
+    this->has_curve_shift_value_ = true;
+    this->last_curve_shift_value_ = shift;
+    char text[8];
+    std::snprintf(text, sizeof(text), "%d", static_cast<int>(shift));
+    this->heating_curve_shift_select_->publish_state(text);
+    ESP_LOGD(TAG, "Curve shift (DN 27) read-back: %s K", text);
+  }
+}
+
 void ToshibaAbClimate::estia_first_gen_reset_remote_error_() {
   if (!this->begin_remote_error_autoreset_()) return;
   ESP_LOGI(TAG, "Estia first-gen remote error reset: resending last known DHW state (%s)",
@@ -4257,6 +4325,9 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
   const bool is_master_source = src == this->master_address_ ||
                                 (this->master_address_auto_ && !this->master_address_confirmed_ &&
                                  is_possible_master_source && has_master_keepalive_signature);
+  if (is_master_source && frame->raw[4] == 0x80 && frame->raw[5] == 0x1A) {
+    this->decode_estia_first_gen_curve_shift_(frame);
+  }
   auto unknown_label = [&]() -> std::string {
     char buf[40];
     if (is_master_source) {
