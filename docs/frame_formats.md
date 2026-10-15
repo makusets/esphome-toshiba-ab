@@ -186,6 +186,38 @@ with `flag = 01`. The indoor unit uses it as control temperature only when FC 32
 0000, and falls back to its return-air sensor (TA) a few minutes after the frames
 stop. The control temperature in use is the room byte of the status frames.
 
+### Addresses and wired remotes
+
+The indoor unit is `0x90`. A wired remote set as *Header* (the factory default)
+uses `0x50`; a remote set as *Follower* uses `0x51`. The component uses `0x50` by
+default, so with a wired remote on the bus both transmit as `0x50`. Commands and
+monitor queries work like that, but as soon as the component also sends the room
+temperature (`report_sensor_temp`) the wired remote shows check code 30 or 32
+(*Header/Follower remote controller settings are not set correctly*) and blocks
+its menus until the frames stop.
+
+With a wired remote installed, set the component to `0x51` and leave the remote
+as Header:
+
+```yaml
+climate:
+  - platform: toshiba_ab
+    frame_format: tu2c
+    remote: 0x51
+```
+
+The *Toshiba Remote Address* select offers `0x50`/`0x51` with `frame_format: tu2c`
+and switches at runtime; in autonomous mode the component registers again with
+the indoor unit under the new address. Setting the wired remote as Follower and
+leaving the component on `0x50` does not work: the Follower remote waits for data
+from a real Header remote, shows an empty display for a while and then check
+code 30.
+
+Tested on RAS-M10U2DVG-E + RAS-3M26U2AVG-E with an RB-RWS21-E wired remote:
+with the component on `0x51`, registration, monitor queries and room temperature
+are accepted (the control temperature follows the reported value within one
+status frame) and the wired remote shows no check code.
+
 ### Auto-detection
 
 No. The component knows how to interpret this format when selected, but `auto` does

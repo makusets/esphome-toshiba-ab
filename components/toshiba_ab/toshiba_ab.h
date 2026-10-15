@@ -901,6 +901,10 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
     estia_source_address_ = remote_address_;
     remote_address_auto_ = false;
   }
+  // TU2C source address: 0x50 = header wired remote (default), 0x51 = follower.
+  // Use 0x51 when a wired remote is also connected (see docs/frame_formats.md).
+  void set_tu2c_remote_address(uint8_t address);
+  uint8_t get_tu2c_remote_address() const { return tu2c_remote_address_; }
   void set_remote_address_select(ToshibaAbRemoteAddressSelect *address_select) {
     remote_address_select_ = address_select;
   }
