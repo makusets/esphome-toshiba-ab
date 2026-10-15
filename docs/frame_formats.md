@@ -156,6 +156,36 @@ F0:F0:0A:50:90:C0:49:0D:00:A0     # registration/query example
 F0:F0:0C:50:90:C0:41:5C:90:F3:CC:A0  # keepalive example
 ```
 
+### Monitor function (`sensors:`)
+
+The wired remote's field menu (MENU + DOWN for 4 s, *Monitor function*) reads unit
+data with a query per code. The component sends the same query for each entry in
+`sensors:`:
+
+```text
+F0:F0:0C:50:90:C0:41:5C:90:<code>:CRC:A0   # query (the keepalive is code F3)
+F0:F0:0C:90:50:C0:80:5C:<hi>:<lo>:CRC:A0   # reply: signed 16-bit value
+F0:F0:0A:90:50:C0:80:A2:CRC:A0             # no data for this code (---- on the remote)
+```
+
+The reply does not repeat the code, so it is matched to the last query seen on the
+bus, whether sent by the component or by the wired remote.
+
+### Room temperature
+
+The wired remote sends its room temperature every 30 s:
+
+```text
+F0:F0:0D:50:90:C0:61:38:<flag>:<raw>:00:CRC:A0   # raw = (°C + 35) * 2
+```
+
+`flag` is `01` when the remote's own sensor is selected (function code FC 32 =
+0001) and `00` when it is not (FC 32 = 0000); with `00` the value is only an echo of
+the control temperature. With `report_sensor_temp`, the component sends this frame
+with `flag = 01`. The indoor unit uses it as control temperature only when FC 32 =
+0000, and falls back to its return-air sensor (TA) a few minutes after the frames
+stop. The control temperature in use is the room byte of the status frames.
+
 ### Auto-detection
 
 No. The component knows how to interpret this format when selected, but `auto` does

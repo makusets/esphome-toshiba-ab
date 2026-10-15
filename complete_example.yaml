@@ -166,6 +166,12 @@ climate:
 #  Use the logs to determine which sensors report valid data for your unit
 #  everytime a sensor response is received, it is logged,
 #  an invalid response means sensor is not available
+#
+#  TU2C: the same codes are read with the wired remote's "Monitor function" query.
+#  Verified on RAS-M10U2DVG-E + RAS-3M26U2AVG-E: 0x02 0x03 0x04 0x07 0x08 0x60 0x61 0x62 0x63
+#  0x6A (x0.1 A) 0xF0 0xF1 0xF2 0xF3. 0x00 and 0x01 are computed by the wired remote itself and
+#  are not served by the unit; 0x70 is not available on this unit. Unavailable codes are logged
+#  as "not available on this unit".
 ###########################################################################
 
 

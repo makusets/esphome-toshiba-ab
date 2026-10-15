@@ -1249,6 +1249,11 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   uint8_t last_sensor_query_id_{0xFF};     // 0xFF = invalid / none
   bool    sensor_query_outstanding_{false}; // true after send, cleared on reply
   uint32_t last_sensor_query_ms_{0};
+  // TU2C monitor-function queries ("41 5C <unit> <code>"): the reply carries only the
+  // value, so it is matched to the last query seen on the bus (ours or the remote's).
+  uint8_t tu2c_last_monitor_code_{0xFF};
+  void send_tu2c_monitor_query_(uint8_t code);
+  void publish_tu2c_monitor_value_(uint8_t code, int16_t raw);
   uint32_t sensor_query_timeout_ms_{2500};  // Give busy HM buses time to answer before releasing the guard.
   uint32_t sensor_query_timeouts_{0};       // (optional) stats
 
