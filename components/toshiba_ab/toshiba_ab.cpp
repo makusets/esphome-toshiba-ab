@@ -3478,7 +3478,7 @@ void ToshibaAbClimate::publish_estia_telemetry_(const DataFrame *frame) {
     publish(sensor, value);
     return value;
   };
-  const auto word = [&](size_t index, sensor::Sensor *sensor, float scale) {
+  const auto publish_word = [&](size_t index, sensor::Sensor *sensor, float scale) {
     if (has(index + 1))
       publish(sensor, ((uint16_t(frame->raw[index]) << 8) | frame->raw[index + 1]) * scale);
   };
@@ -3525,15 +3525,15 @@ void ToshibaAbClimate::publish_estia_telemetry_(const DataFrame *frame) {
     if (!std::isnan(zone2)) this->publish_estia_zone_temperature_(2, zone2);
     const float dhw = temperature(24, nullptr, 23.5f);
     if (!std::isnan(dhw)) this->publish_dhw_current_temperature_(dhw);
-    word(26, this->water_flow_sensor_, 0.1f);
+    publish_word(26, this->water_flow_sensor_, 0.1f);
   } else if (frame->raw[9] == 0xC1) {
-    word(14, this->dhw_compressor_hours_sensor_, 1.0f);
-    word(18, this->compressor_hours_sensor_, 1.0f);  // heating only
-    word(20, this->waterpump_hours_sensor_, 1.0f);
-    word(26, this->backup_heater_hours_sensor_, 1.0f);
+    publish_word(14, this->dhw_compressor_hours_sensor_, 1.0f);
+    publish_word(18, this->compressor_hours_sensor_, 1.0f);  // heating only
+    publish_word(20, this->waterpump_hours_sensor_, 1.0f);
+    publish_word(26, this->backup_heater_hours_sensor_, 1.0f);
     byte(29, this->mixing_valve_position_sensor_);
     byte(31, this->compressor_frequency_sensor_);
-    word(32, this->fan_speed_sensor_, 1.0f);
+    publish_word(32, this->fan_speed_sensor_, 1.0f);
     byte(37, this->waterpump_duty_sensor_);
   }
 }
