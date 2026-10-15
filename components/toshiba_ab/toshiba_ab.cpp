@@ -747,6 +747,30 @@ void ToshibaAbClimate::send_remote_temp(float temp_c) {
   const uint8_t raw = static_cast<uint8_t>(
       std::lround((temp_c + TEMPERATURE_CONVERSION_OFFSET) * TEMPERATURE_CONVERSION_RATIO));
   const float rounded_temp_c = static_cast<float>(raw) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
+
+  if (this->data_reader.frame_format() == FrameFormat::TU2C) {
+    // TU2C has no separate external-sensor address: send the frame a wired remote
+    // sends every 30 s with its own sensor reading, with the "remote sensor" flag set:
+    // LEN SRC DST C0 61 38 01 <raw> 00 CRC, raw = (°C + 35) * 2 (0.5 °C resolution).
+    // The indoor unit uses it as control temperature when FC 32 = 0000 on the wired
+    // remote; if the frames stop it falls back to its return-air sensor (TA).
+    DataFrame tu2c{};
+    tu2c.set_tu2c(true);
+    tu2c.raw[0] = 0x0D;
+    tu2c.raw[1] = this->tu2c_remote_address_;
+    tu2c.raw[2] = this->tu2c_master_address_;
+    tu2c.raw[3] = TU2C_FRAME_MARKER;
+    tu2c.raw[4] = 0x61;
+    tu2c.raw[5] = 0x38;
+    tu2c.raw[6] = 0x01;
+    tu2c.raw[7] = raw;
+    tu2c.raw[8] = 0x00;
+    tu2c.raw[9] = calculate_tu2c_crc(tu2c.raw, 9);
+    ESP_LOGD(TAG, "TU2C: sending room temperature %.1f°C (raw=0x%02X)", rounded_temp_c, raw);
+    this->send_command(tu2c);
+    return;
+  }
+
   DataFrame cmd{};
   cmd.source      = TOSHIBA_TEMP_SENSOR;
   cmd.dest        = this->master_address_;  // usually 0x00
@@ -1655,8 +1679,12 @@ void ToshibaAbClimate::setup() {
     // frame format is: 42:00:11:04:08:89:<raw>:46:<crc> for temp in celcius
     // in autonomous mode the same sensor is used for the regular temp reporting with ping above
 
-  if (this->ext_temp_enabled_ && this->ext_temp_sensor_ && this->ext_temp_interval_ms_ > 0) {
+  // Registered whenever a source sensor is configured, so reporting can be switched
+  // on and off at runtime with set_ext_temp_enabled() (e.g. from a template switch).
+  if (this->ext_temp_sensor_ && this->ext_temp_interval_ms_ > 0) {
     this->set_interval(this->ext_temp_interval_ms_, [this]() {
+      if (!this->ext_temp_enabled_)
+        return;
       float t = NAN;
       if (this->ext_temp_sensor_->has_state())
         t = this->ext_temp_sensor_->state;
