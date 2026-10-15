@@ -71,6 +71,7 @@ climate:
 
     master: 0x00                # optional, will autodetect if omitted (recommended)
     remote: 0x40                # optional, will autoassign if omitted (recommended)
+                                # TU2C: 0x50 (default) or 0x51; use 0x51 when a wired remote is also on the bus
     
     command_mode_read: 0x08     # optional, defaults to 0x08 if omitted; use 0x0D for some commercial systems
     command_mode_write: 0x80    # optional, defaults to 0x80 if omitted; use 0xD0 for some commercial systems

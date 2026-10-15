@@ -180,7 +180,8 @@ For byte-level differences, aliases and detection behavior, read
 
 This is the complete component-specific portion for TCC-Link and HM. Add your normal
 ESPHome device, Wi-Fi, API and OTA sections. For TU2C, change both highlighted
-settings to `parity: NONE` and `frame_format: tu2c`.
+settings to `parity: NONE` and `frame_format: tu2c`. If a TU2C wired remote is also
+connected, add `remote: 0x51` (see [TU2C addresses](docs/frame_formats.md#addresses-and-wired-remotes)).
 
 ```yaml
 logger:

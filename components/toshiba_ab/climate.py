@@ -274,6 +274,22 @@ def _water_thermostat(default_name):
     return validate
 
 
+TU2C_FRAME_FORMATS = ("u", "wrapped", "tu2c")
+TU2C_REMOTE_ADDRESSES = (0x50, 0x51)  # header / follower wired remote
+
+
+def _is_tu2c(config):
+    return str(config.get(CONF_FRAME_FORMAT, "auto")).lower() in TU2C_FRAME_FORMATS
+
+
+def _validate_remote_address(config):
+    if _is_tu2c(config) and CONF_REMOTE in config and config[CONF_REMOTE] not in TU2C_REMOTE_ADDRESSES:
+        raise cv.Invalid(
+            "With frame_format: tu2c, remote must be 0x50 (header wired remote) or 0x51 (follower wired remote)"
+        )
+    return config
+
+
 def _validate_wall_mounted_louvre(config):
     if CONF_WALL_MOUNTED_LOUVRE in config and config[CONF_FRAME_FORMAT] not in (
         "auto", "n", "normal", "tcc-link"
@@ -614,6 +630,7 @@ CONFIG_SCHEMA = cv.All(
     }
     ).extend(uart.UART_DEVICE_SCHEMA).extend(cv.COMPONENT_SCHEMA),
     _validate_wall_mounted_louvre,
+    _validate_remote_address,
 )
 
 
@@ -712,10 +729,15 @@ async def to_code(config):
     if CONF_MASTER in config:
         cg.add(var.set_master_address(config[CONF_MASTER]))
     if CONF_REMOTE in config:
-        cg.add(var.set_remote_address(config[CONF_REMOTE]))
+        if _is_tu2c(config):
+            cg.add(var.set_tu2c_remote_address(config[CONF_REMOTE]))
+        else:
+            cg.add(var.set_remote_address(config[CONF_REMOTE]))
 
+    # TU2C remotes are 0x50 (header) and 0x51 (follower); other formats use 0x40/0x41.
+    remote_address_options = ["0x50", "0x51"] if _is_tu2c(config) else ["0x40", "0x41"]
     remote_address_select = await select.new_select(
-        config[CONF_REMOTE_ADDRESS_SELECT], var, options=["0x40", "0x41"]
+        config[CONF_REMOTE_ADDRESS_SELECT], var, options=remote_address_options
     )
     cg.add(var.set_remote_address_select(remote_address_select))
 

@@ -954,7 +954,10 @@ bool ToshibaAbClimate::is_tu2c_registration_ack_(const DataFrame *frame) const {
     return false;
   }
 
-  return frame->raw[1] == this->tu2c_master_address_ && frame->raw[4] == 0x80 && frame->raw[5] == 0x0D;
+  // Must be addressed to this board: a wired remote on the bus registers too, and its
+  // ACK must not count as ours when the two use different addresses.
+  return frame->raw[1] == this->tu2c_master_address_ && frame->raw[2] == this->tu2c_remote_address_ &&
+         frame->raw[4] == 0x80 && frame->raw[5] == 0x0D;
 }
 
 bool ToshibaAbClimate::is_tu2c_registration_query_(const DataFrame &frame) const {
@@ -1426,8 +1429,12 @@ bool ToshibaAbClimate::control_wall_mounted_louvre(uint8_t position) {
 }
 
 void ToshibaAbRemoteAddressSelect::control(const std::string &value) {
-  const uint8_t address = value == "0x41" ? 0x41 : 0x40;
-  this->parent_->set_remote_address(address);
+  // Options are 0x50/0x51 with frame_format: tu2c and 0x40/0x41 otherwise.
+  if (value == "0x50" || value == "0x51") {
+    this->parent_->set_tu2c_remote_address(value == "0x51" ? 0x51 : 0x50);
+  } else {
+    this->parent_->set_remote_address(value == "0x41" ? 0x41 : 0x40);
+  }
   this->publish_state(value);
   ESP_LOGI(TAG, "Remote address changed at runtime to %s", value.c_str());
 }
@@ -1520,11 +1527,17 @@ void ToshibaAbClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "  Vent switch: %s", this->vent_switch_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Read-only switch: %s", this->read_only_switch_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Remote address select: %s", this->remote_address_select_ ? "yes" : "no");
+  if (this->data_reader.frame_format() == FrameFormat::TU2C) {
+    ESP_LOGCONFIG(TAG, "  TU2C remote address: 0x%02X (%s)", this->tu2c_remote_address_,
+                  this->tu2c_remote_address_ == 0x51 ? "follower" : "header");
+  }
 }
 
 void ToshibaAbClimate::setup() {
   this->boot_millis_ = millis();
-  if (this->remote_address_select_ != nullptr &&
+  if (this->remote_address_select_ != nullptr && this->data_reader.frame_format() == FrameFormat::TU2C) {
+    this->remote_address_select_->publish_state(this->tu2c_remote_address_ == 0x51 ? "0x51" : "0x50");
+  } else if (this->remote_address_select_ != nullptr &&
       (this->remote_address_ == 0x40 || this->remote_address_ == 0x41)) {
     this->remote_address_select_->publish_state(this->remote_address_ == 0x41 ? "0x41" : "0x40");
   }
@@ -4579,6 +4592,16 @@ void ToshibaAbReadOnlySwitch::write_state(bool state) {
   this->climate_->set_read_only(state);
   // Publish the new state so Home Assistant UI reflects the change immediately
   this->publish_state(state);
+}
+
+void ToshibaAbClimate::set_tu2c_remote_address(uint8_t address) {
+  if (address == this->tu2c_remote_address_) {
+    return;
+  }
+  this->tu2c_remote_address_ = address;
+  // In autonomous mode, register again with the indoor unit under the new address
+  // (the registration interval retries until the ACK arrives).
+  this->announce_ack_received_ = false;
 }
 
 void ToshibaAbClimate::set_master_address(uint8_t address) {
