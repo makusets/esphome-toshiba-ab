@@ -1,6 +1,7 @@
 #pragma once
 
 #include "esphome/components/binary_sensor/binary_sensor.h"
+#include "esphome/components/button/button.h"
 #include "esphome/components/climate/climate.h"
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/select/select.h"
@@ -33,6 +34,15 @@ class ToshibaAbRemoteAddressSelect : public select::Select {
 
  protected:
   void control(const std::string &value) override;
+  ToshibaAbClimate *parent_;
+};
+
+class ToshibaAbFilterResetButton : public button::Button {
+ public:
+  explicit ToshibaAbFilterResetButton(ToshibaAbClimate *parent) : parent_(parent) {}
+
+ protected:
+  void press_action() override;
   ToshibaAbClimate *parent_;
 };
 
@@ -1106,6 +1116,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   // 3 (default) or 5: TU2C units with five fan levels also expose the custom fan
   // modes "Low-Medium" (level 2) and "Medium-High" (level 4).
   void set_fan_levels(uint8_t levels) { fan_levels_ = levels; }
+  // TU2C: reset the filter timer, as the wired remote's filter reset does.
+  void reset_filter();
   void send_remote_temp(float temp_c);  // builds & enqueues remote-temp frame
   void set_ext_temp_sensor_name(const std::string &name) { this->ext_temp_sensor_name_ = name; }
   

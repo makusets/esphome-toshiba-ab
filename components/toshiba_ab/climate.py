@@ -4,7 +4,7 @@ import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome import automation
 import esphome.final_validate as fv
-from esphome.components import climate, uart, binary_sensor, sensor, select, switch, text_sensor, template
+from esphome.components import climate, uart, binary_sensor, button, sensor, select, switch, text_sensor, template
 from esphome.const import (
     CONF_ID,
     CONF_NAME,
@@ -33,7 +33,7 @@ from esphome.const import (
 from esphome.core import CORE
 
 DEPENDENCIES = ["uart"]
-AUTO_LOAD = ["climate", "binary_sensor", "sensor", "select", "switch", "text_sensor"]
+AUTO_LOAD = ["climate", "binary_sensor", "button", "sensor", "select", "switch", "text_sensor"]
 CODEOWNERS = ["@muxa"]
 
 toshiba_ab_ns = cg.esphome_ns.namespace("toshiba_ab")
@@ -59,6 +59,7 @@ CONF_COMMAND_MODE_WRITE = "command_mode_write"
 CONF_FRAME_FORMAT = "frame_format"
 CONF_FILTER_FRAMES = "filter_frames"
 CONF_FAN_LEVELS = "fan_levels"
+CONF_FILTER_RESET = "filter_reset"
 CONF_PACKET_MIN_WAIT = "packet_min_wait"
 CONF_AUTORESET_ERRORS = "autoreset_errors"
 CONF_FRAME = "frame"
@@ -136,6 +137,9 @@ ToshibaAbEstiaZone1Climate = toshiba_ab_ns.class_(
 )
 ToshibaAbRemoteAddressSelect = toshiba_ab_ns.class_(
     "ToshibaAbRemoteAddressSelect", select.Select
+)
+ToshibaAbFilterResetButton = toshiba_ab_ns.class_(
+    "ToshibaAbFilterResetButton", button.Button
 )
 
 ToshibaAbVentSwitch =  toshiba_ab_ns.class_(
@@ -283,6 +287,12 @@ def _is_tu2c(config):
     return str(config.get(CONF_FRAME_FORMAT, "auto")).lower() in TU2C_FRAME_FORMATS
 
 
+def _validate_filter_reset(config):
+    if CONF_FILTER_RESET in config and not _is_tu2c(config):
+        raise cv.Invalid("filter_reset is only supported with frame_format: tu2c")
+    return config
+
+
 def _validate_fan_levels(config):
     if config.get(CONF_FAN_LEVELS, 3) == 5 and not _is_tu2c(config):
         raise cv.Invalid("fan_levels: 5 is only supported with frame_format: tu2c")
@@ -312,6 +322,11 @@ CONFIG_SCHEMA = cv.All(
     climate._CLIMATE_SCHEMA.extend(
     {
         cv.Optional(CONF_WALL_MOUNTED_LOUVRE): select.select_schema(ToshibaAbWallMountedLouvreSelect),
+        cv.Optional(CONF_FILTER_RESET): button.button_schema(
+            ToshibaAbFilterResetButton,
+            icon="mdi:air-filter",
+            entity_category=ENTITY_CATEGORY_CONFIG,
+        ),
         cv.Optional(CONF_MASTER): cv.uint8_t,
         cv.Optional(CONF_REMOTE): cv.uint8_t,
         cv.Optional(CONF_REMOTE_ADDRESS_SELECT): select.select_schema(
@@ -640,6 +655,7 @@ CONFIG_SCHEMA = cv.All(
     _validate_wall_mounted_louvre,
     _validate_remote_address,
     _validate_fan_levels,
+    _validate_filter_reset,
 )
 
 
@@ -728,6 +744,9 @@ async def to_code(config):
         zone1_climate = cg.new_Pvariable(config[CONF_ZONE1_CLIMATE][CONF_ID], var)
         await climate.register_climate(zone1_climate, config[CONF_ZONE1_CLIMATE])
         cg.add(var.set_zone1_climate(zone1_climate))
+
+    if CONF_FILTER_RESET in config:
+        await button.new_button(config[CONF_FILTER_RESET], var)
 
     if CONF_WALL_MOUNTED_LOUVRE in config:
         louvre = await select.new_select(

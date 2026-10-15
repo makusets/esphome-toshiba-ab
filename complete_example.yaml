@@ -94,6 +94,9 @@ climate:
     filter_alert:               # Optional binary sensor to report filter alert status if available
       name: "Filter Alert"
 
+    filter_reset:               # Optional button, TU2C only: resets the filter timer like the wired remote does
+      name: "Filter Reset"
+
     wall_mounted_louvre:        # Optional addon to select the louvre position, used for wall mounted units with this capability
       name: "AC Louvre"
       id: ac_louvre
