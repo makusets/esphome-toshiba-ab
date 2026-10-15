@@ -102,6 +102,10 @@ climate:
     # regardless of settings in the AC system
     # If "enabled: false" or enabled is omitted, the AC unit will use its internal sensor or the remote controller temperature, depending on settings
     # If the esp is the only remote or setup as header, a sensor should ideally be configured here, regardless of enabled setting.
+    # Reporting can also be switched at runtime from a template switch: id(my_ac_system)->set_ext_temp_enabled(true / false)
+    # TU2C: the temperature is sent in the wired remote's room-temperature frame (61 38, 0.5 °C steps). The indoor unit
+    # only uses it when the wired remote's sensor is disabled (function code FC 32 = 0000); if the frames stop, the unit
+    # falls back to its return-air sensor (TA) after a few minutes. With a wired remote on the bus, also set remote: 0x51.
 
     report_sensor_temp:         # optional
       enabled: true             # default false, when "true" forces AC unit to use this temperature as room temperature control regardless of AC unit settings
