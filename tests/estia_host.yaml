@@ -1,0 +1,21 @@
+esphome:
+  name: estia-tests
+  build_path: ../../work/estia-host
+host:
+logger:
+  baud_rate: 0
+external_components:
+  - source:
+      type: local
+      path: ../components
+uart:
+  port: /dev/null
+  baud_rate: 2400
+  parity: EVEN
+climate:
+  - platform: toshiba_ab
+    name: Estia DHW
+    frame_format: a0
+    zone2_climate: true
+    night_setback:
+      name: Night Setback

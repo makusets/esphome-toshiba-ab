@@ -58,7 +58,7 @@ climate:
     id: toshiba_estia
 
 
-    # A second thermostat is created automatically for Zone 1 heat/cool/auto/off and water-outlet temperature.
+    # Zone 1 thermostat defaults to enabled; set zone1_climate: false to omit it.
     # Auto uses Toshiba's heating curve, so it intentionally has no target temperature.
     # Off disables heating/cooling operation only; it leaves DHW enabled.
     # Optionally the name and id can be overriden
@@ -66,6 +66,11 @@ climate:
     zone1_climate:      # Optionally override thermostat naming and id
       name: "Toshiba Estia Zone 1"
       id: estia_zone1
+
+    # Zone 2 defaults to disabled; use true or a block to enable it.
+    # Operating mode is shared with Zone 1.
+    # zone2_climate:
+    #   name: "Toshiba Estia Zone 2"
 
     # A0-protocol (used by R32 Estia/heat pump models, NOT TCC-Link or TU2C)
 
@@ -86,7 +91,7 @@ climate:
       name: "Estia Failed CRCs"  #sensor that counts failed frames
       
     #read-only enables putting the esp in read-only mode for experimentation or diagnosing, with no comms being sent
-    read_only: true             # optional, defaults to false; used for debugging to listen to the traffic on the bus without sending
+    # read_only: true           # Optional: listen without sending commands or polls
     read_only_switch:
       name: "Read only"         # optional switch to turn on and off read only mode while the esp is running
 
@@ -101,10 +106,13 @@ climate:
       name: "Estia Frost Protection"
     # Night Setback enables Toshiba's night temperature reduction. Configure
     # its schedule and reduction on the wired remote.
+    # Zone thermostats report the "Night setback" preset only while the
+    # reduction is applied. The preset is feedback, not a schedule control.
+    # DHW keeps its independent Boost preset.
     night_setback:
       name: "Estia Night Setback"
 
-    # Setpoints reported by the periodic 03:C6 status frame.
+    # Optional standalone setpoints (also shown by the thermostats).
     dhw_setpoint:
       name: "Estia DHW Setpoint"
     zone1_setpoint:
@@ -112,9 +120,8 @@ climate:
     zone2_setpoint:
       name: "Estia Zone 2 Setpoint"
 
-    # System temperatures reported by the periodic E8:C0 response from master
-    # These do not need to be queried individually as separate sensors
-    # This will not fill if autonomous is set to false
+    # Temperatures from E8:C0. TWI, TTW and TFI also update from STATUS.
+    # autonomous: false stops polling; received bus data still updates sensors.
     
     compressor_discharge_temperature:  # TD
       name: "Estia Compressor Discharge Temperature"
@@ -133,62 +140,49 @@ climate:
     dhw_current_temperature:  # TTW; also used by the DHW climate entity
       name: "Estia DHW Temperature"
 
-    # Estia-specific runtime sensors
-    # This will not fill if autonomous is set to false
+    suction_temperature:  # TS
+      name: "Estia Suction Temperature"
+    outdoor_coil_temperature:  # TE
+      name: "Estia Outdoor Coil Temperature"
+    outdoor_pipe_temperature:  # TL
+      name: "Estia Outdoor Pipe Temperature"
+    low_pressure:
+      name: "Estia Low Pressure"
+    water_flow:
+      name: "Estia Water Flow"
+
+    # E8:C1 operating values and counters (already in hours; no scale needed).
+    compressor_frequency:
+      name: "Estia Compressor Frequency"
+    fan_speed:
+      name: "Estia Fan Speed"
+    mixing_valve_position:
+      name: "Estia Mixing Valve Position"
+    waterpump_duty:
+      name: "Estia Water Pump Duty"
+    dhw_compressor_hours:
+      name: "Estia DHW Compressor Hours"
     
     compressor_hours:
-      name: "Estia Compressor Hours"
+      name: "Estia Heating Compressor Hours"
     waterpump_hours:
       name: "Estia Water Pump Hours"
     backup_heater_hours:
       name: "Estia Backup Heater Hours"
 
-    sensors:
-      - address: 0x6A           # Required for every sensor added, in this case, electrical current sensor of the external unit
-        scale: 0.1              # default 1.0; here we decode raw/10 as current is reported in deciAmps
-        interval: 30s           # default 5min
-        sensor:
-          name: "Estia System Current"  #required
-
-          #all other available options of sensor in esphome:
-
-          unit_of_measurement: "A"  #optional, defaults none
-          accuracy_decimals: 2  #optional
-          device_class: current  #optional but recommended for HA
-          state_class: measurement  #optional but recommended for HA
-
-
-################# Available Sensors for ESTIA R32 ##################################
-#
-#  Address            Description
-#
-#  0x0B	            	Mixing-valve position	
-#  0x0E	            	Low pressure
-#  0x0F	          		Software version 
-#  0x60               Heat exchanger temperature
-#  0x63               Compressor Suction Temperature TS
-#  0x65               Heat Sink Temperature
-#  0x6A	            	Compressor electrical current
-#  0x6D               Heat Exchanger Coil Temperature
-#  0x70	              Compressor frequency
-#  0x72	        	   	Outdoor Fan 1 speed	
-#  0x73	        	  	Outdoor Fan 2 speed 
-#  0x74	            	Expansion-valve position	
-#  0x7A	            	High pressure	
-#  0xC0	            	Water flow
-#  0xF0               Micro Computer Energized hours
-#  0xF1               Hot Water Compressor hours (might be the same as compressor_hours from E8:C1 response)
-#  0XF2               Cooling Compressor hours
-#  0xF3               Heating Compressor hours
-#  0XF5               Hot Water E Heater hours?? not sure what it means
-#  0xF6               Back Up Heater hours
-#  0xF7               Booster Heater On hours
-#
-#  Use the logs to determine which sensors report valid data for your unit
-#  everytime a sensor response is received, it is logged,
-#  an invalid response means sensor is not available
-###########################################################################
-
+    # Optional individual queries for values absent from the E8 responses.
+    # EF:2C hour counters (0xF0-0xF7) use 100-hour units and change slowly.
+    # sensors:
+    #   - address: 0xF2
+    #     scale: 100
+    #     sensor:
+    #       name: "Estia Cooling Compressor Hours"
+    #       unit_of_measurement: "h"
+    #       accuracy_decimals: 0
+    #       device_class: duration
+    #       state_class: total_increasing
+    # Other query scales: 0x7A pressure x0.01 MPa; 0x74 valve x10 pulses.
+    # Current 0x6A uses x0.1 A but may be inaccurate at low load.
 
     # 0-10V demand sensor (shows current demand value 0..15)
     # demand:

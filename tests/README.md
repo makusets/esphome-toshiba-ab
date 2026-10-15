@@ -17,3 +17,18 @@ work/test_reader_resync
 ```
 
 Keep assertions enabled (do not define `NDEBUG`). No hardware is needed.
+
+## Estia R32 telemetry
+
+Generate a host source tree and run the integration checks with ESPHome 2026.9.1
+and a C++20 compiler:
+
+```sh
+esphome compile --only-generate tests/estia_host.yaml
+python3 tests/run_estia_telemetry.py work/estia-host/src
+```
+
+Checks cover temperature conversions, STATUS and event offsets, missing sensors,
+truncated payloads, extra E8 values, zone traits, zone-only setback feedback,
+and the CRC-validated receive path. The host GPIO shims replace only the existing board
+setup calls; decoding and ESPHome sensor/climate publishing use production code.
