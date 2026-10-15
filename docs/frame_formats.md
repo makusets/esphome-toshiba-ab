@@ -214,9 +214,31 @@ from a real Header remote, shows an empty display for a while and then check
 code 30.
 
 Tested on RAS-M10U2DVG-E + RAS-3M26U2AVG-E with an RB-RWS21-E wired remote:
-with the component on `0x51`, registration, monitor queries and room temperature
-are accepted (the control temperature follows the reported value within one
-status frame) and the wired remote shows no check code.
+with the component on `0x51`, registration, commands (power, mode, setpoint, fan
+level), monitor queries and room temperature are accepted (the control temperature
+follows the reported value within one status frame) and the wired remote shows no
+check code.
+
+### Fan levels
+
+Units with five fan levels (the wired remote shows 1 to 5 bars) use the three
+standard codes plus a half step for levels 2 and 4. Captured from an RB-RWS21-E on a
+RAS-M10U2DVG-E:
+
+| Level | Command fan byte | Status fan/vent byte, high nibble | Fan mode |
+|---|---|---|---|
+| Auto | `0x24` | `0x4_` | `AUTO` |
+| 1 | `0x2A` | `0xA_` | `LOW` |
+| 2 | `0x2B` | `0xB_` | `Low-Medium` (custom) |
+| 3 | `0x28` | `0x8_` | `MEDIUM` |
+| 4 | `0x29` | `0x9_` | `Medium-High` (custom) |
+| 5 | `0x26` | `0x6_` | `HIGH` |
+
+The half step is bit 0 of the command byte and bit 4 of the status byte. Set
+`fan_levels: 5` to expose the two custom fan modes. The half step is always taken
+from the last status and sent back in the fan byte of every TU2C parameter command,
+so the byte matches the current level also with the default `fan_levels: 3`. Quiet
+is not a fan level: the remote sends it as preset `0x10`.
 
 ### Auto-detection
 

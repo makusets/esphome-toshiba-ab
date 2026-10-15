@@ -105,6 +105,14 @@ const uint8_t STATUS_DATA_FAN_MASK = 0b11100000;
 const uint8_t STATUS_DATA_FAN_SHIFT_BITS = 5;
 const uint8_t STATUS_DATA_VENT_MASK = 0b00000100;
 const uint8_t STATUS_DATA_VENT_SHIFT_BITS = 2;
+// TU2C units with five fan levels add a half step to the three standard codes:
+// level 2 = LOW + half, level 4 = MED + half. Status: bit 4 of the fan/vent byte;
+// command: bit 0 of the fan byte (see encode_tu2c_fan()).
+const uint8_t TU2C_STATUS_FAN_HALF_MASK = 0b00010000;
+const uint8_t TU2C_COMMAND_FAN_HALF_BIT = 0b00000001;
+// Custom fan modes for the two intermediate levels (fan_levels: 5).
+static const char *const TU2C_FAN_LOW_MEDIUM = "Low-Medium";
+static const char *const TU2C_FAN_MEDIUM_HIGH = "Medium-High";
 const uint8_t STATUS_DATA_TARGET_TEMP_BYTE = 6;
 // TU2C's regular and extended status payloads place the preset at different
 // offsets. Extended status inserts room-temperature/status fields before it.
@@ -843,6 +851,7 @@ private:
 struct TccState {
   uint8_t mode;
   uint8_t fan;
+  bool fan_half = false;  // TU2C intermediate fan level (2 or 4 of 5)
   uint8_t vent;
   float room_temp = NAN;
   float target_temp = NAN;
@@ -859,6 +868,7 @@ struct TccState {
   TccState(const struct TccState *src) {
     mode = src->mode;
     fan = src->fan;
+    fan_half = src->fan_half;
     vent = src->vent;
     room_temp = src->room_temp;
     target_temp = src->target_temp;
@@ -1093,6 +1103,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_ext_temp_source(sensor::Sensor *s) { ext_temp_sensor_ = s; }
   void set_ext_temp_interval(uint32_t ms) { ext_temp_interval_ms_ = ms; }
   void set_ext_temp_enabled(bool en) { ext_temp_enabled_ = en; }
+  // 3 (default) or 5: TU2C units with five fan levels also expose the custom fan
+  // modes "Low-Medium" (level 2) and "Medium-High" (level 4).
+  void set_fan_levels(uint8_t levels) { fan_levels_ = levels; }
   void send_remote_temp(float temp_c);  // builds & enqueues remote-temp frame
   void set_ext_temp_sensor_name(const std::string &name) { this->ext_temp_sensor_name_ = name; }
   
@@ -1286,6 +1299,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   sensor::Sensor *ext_temp_sensor_{nullptr};
   uint32_t ext_temp_interval_ms_{300000};  // 5 min default
   bool ext_temp_enabled_{false};
+  uint8_t fan_levels_{3};
   // Flag set when a broadcast announce ACK containing 0x0D is received
   bool announce_ack_received_{false};
   // Keep announcing after an automatic address change until the newly selected
