@@ -96,6 +96,17 @@ CONF_WATER_INLET_TEMPERATURE = "water_inlet_temperature"
 CONF_WATER_OUTLET_TEMPERATURE = "water_outlet_temperature"
 CONF_WATER_HEATER_OUTLET_TEMPERATURE = "water_heater_outlet_temperature"
 CONF_ZONE2_WATER_TEMPERATURE = "zone2_water_temperature"
+CONF_SUCTION_TEMPERATURE = "suction_temperature"
+CONF_OUTDOOR_COIL_TEMPERATURE = "outdoor_coil_temperature"
+CONF_OUTDOOR_PIPE_TEMPERATURE = "outdoor_pipe_temperature"
+CONF_LOW_PRESSURE = "low_pressure"
+CONF_WATER_FLOW = "water_flow"
+CONF_COMPRESSOR_FREQUENCY = "compressor_frequency"
+CONF_FAN_SPEED = "fan_speed"
+CONF_MIXING_VALVE_POSITION = "mixing_valve_position"
+CONF_WATERPUMP_DUTY = "waterpump_duty"
+CONF_DHW_COMPRESSOR_HOURS = "dhw_compressor_hours"
+CONF_ZONE2_CLIMATE = "zone2_climate"
 CONF_ZONE1_CLIMATE = "zone1_climate"
 CONF_HOTWATER_PUMP_HEATING = "hotwater_pump_heating"
 CONF_HOTWATER_RESISTOR_HEATING = "hotwater_resistor_heating"
@@ -243,10 +254,24 @@ def _add_automatic_entities(config):
     )
 
     if str(config.get(CONF_FRAME_FORMAT, "auto")).lower() == "a0":
-        config.setdefault(
-            CONF_ZONE1_CLIMATE, {CONF_NAME: "Toshiba Estia Zone 1 Water"}
-        )
+        config.setdefault(CONF_ZONE1_CLIMATE, True)
     return config
+
+
+def _water_thermostat(default_name):
+    schema = climate.climate_schema(ToshibaAbEstiaZone1Climate)
+
+    def validate(value):
+        if value is False:
+            return False
+        if value is True:
+            value = {CONF_NAME: default_name}
+        elif isinstance(value, dict):
+            value = dict(value)
+            value.setdefault(CONF_NAME, default_name)
+        return schema(value)
+
+    return validate
 
 
 def _validate_wall_mounted_louvre(config):
@@ -254,6 +279,8 @@ def _validate_wall_mounted_louvre(config):
         "auto", "n", "normal", "tcc-link"
     ):
         raise cv.Invalid("wall_mounted_louvre requires classic TCC-Link (auto or normal frame_format)")
+    if config.get(CONF_ZONE2_CLIMATE) and config[CONF_FRAME_FORMAT] != "a0":
+        raise cv.Invalid("zone2_climate requires frame_format: a0")
     return config
 
 
@@ -400,9 +427,55 @@ CONFIG_SCHEMA = cv.All(
             device_class=DEVICE_CLASS_TEMPERATURE,
             state_class=STATE_CLASS_MEASUREMENT,
         ),
-        cv.Optional(CONF_ZONE1_CLIMATE): climate.climate_schema(
-            ToshibaAbEstiaZone1Climate
+        cv.Optional(CONF_SUCTION_TEMPERATURE): sensor.sensor_schema(
+            unit_of_measurement="°C", accuracy_decimals=1,
+            device_class="temperature",
+            state_class=STATE_CLASS_MEASUREMENT,
         ),
+        cv.Optional(CONF_OUTDOOR_COIL_TEMPERATURE): sensor.sensor_schema(
+            unit_of_measurement="°C", accuracy_decimals=1,
+            device_class="temperature",
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_OUTDOOR_PIPE_TEMPERATURE): sensor.sensor_schema(
+            unit_of_measurement="°C", accuracy_decimals=1,
+            device_class="temperature",
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_LOW_PRESSURE): sensor.sensor_schema(
+            unit_of_measurement="MPa", accuracy_decimals=2,
+            device_class="pressure",
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_WATER_FLOW): sensor.sensor_schema(
+            unit_of_measurement="L/min", accuracy_decimals=1,
+            device_class="volume_flow_rate",
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_COMPRESSOR_FREQUENCY): sensor.sensor_schema(
+            unit_of_measurement="Hz", accuracy_decimals=0,
+            device_class="frequency",
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_FAN_SPEED): sensor.sensor_schema(
+            unit_of_measurement="rpm", accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_MIXING_VALVE_POSITION): sensor.sensor_schema(
+            unit_of_measurement="steps", accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_WATERPUMP_DUTY): sensor.sensor_schema(
+            unit_of_measurement="%", accuracy_decimals=0,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
+        cv.Optional(CONF_DHW_COMPRESSOR_HOURS): sensor.sensor_schema(
+            unit_of_measurement="h", accuracy_decimals=0,
+            device_class="duration",
+            state_class=STATE_CLASS_TOTAL_INCREASING,
+        ),
+        cv.Optional(CONF_ZONE2_CLIMATE, default=False): _water_thermostat("Toshiba Estia Zone 2 Water"),
+        cv.Optional(CONF_ZONE1_CLIMATE): _water_thermostat("Toshiba Estia Zone 1 Water"),
         cv.Optional(CONF_HOTWATER_PUMP_HEATING): binary_sensor.binary_sensor_schema(),
         cv.Optional(CONF_HOTWATER_RESISTOR_HEATING): binary_sensor.binary_sensor_schema(),
         cv.Optional(CONF_REMOTE_ERROR): binary_sensor.binary_sensor_schema(
@@ -620,7 +693,12 @@ async def to_code(config):
     await climate.register_climate(var, config)
     await uart.register_uart_device(var, config)
 
-    if CONF_ZONE1_CLIMATE in config:
+    if config.get(CONF_ZONE2_CLIMATE):
+        zone2 = cg.new_Pvariable(config[CONF_ZONE2_CLIMATE][CONF_ID], var, 2)
+        await climate.register_climate(zone2, config[CONF_ZONE2_CLIMATE])
+        cg.add(var.set_zone2_climate(zone2))
+
+    if config.get(CONF_ZONE1_CLIMATE):
         zone1_climate = cg.new_Pvariable(config[CONF_ZONE1_CLIMATE][CONF_ID], var)
         await climate.register_climate(zone1_climate, config[CONF_ZONE1_CLIMATE])
         cg.add(var.set_zone1_climate(zone1_climate))
@@ -730,6 +808,37 @@ async def to_code(config):
     if CONF_ZONE1_TARGET_TEMPERATURE in config:
         sens = await sensor.new_sensor(config[CONF_ZONE1_TARGET_TEMPERATURE])
         cg.add(var.set_zone1_target_temperature_sensor(sens))
+
+    if CONF_SUCTION_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_SUCTION_TEMPERATURE])
+        cg.add(var.set_suction_temperature_sensor(sens))
+    if CONF_OUTDOOR_COIL_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_OUTDOOR_COIL_TEMPERATURE])
+        cg.add(var.set_outdoor_coil_temperature_sensor(sens))
+    if CONF_OUTDOOR_PIPE_TEMPERATURE in config:
+        sens = await sensor.new_sensor(config[CONF_OUTDOOR_PIPE_TEMPERATURE])
+        cg.add(var.set_outdoor_pipe_temperature_sensor(sens))
+    if CONF_LOW_PRESSURE in config:
+        sens = await sensor.new_sensor(config[CONF_LOW_PRESSURE])
+        cg.add(var.set_low_pressure_sensor(sens))
+    if CONF_WATER_FLOW in config:
+        sens = await sensor.new_sensor(config[CONF_WATER_FLOW])
+        cg.add(var.set_water_flow_sensor(sens))
+    if CONF_COMPRESSOR_FREQUENCY in config:
+        sens = await sensor.new_sensor(config[CONF_COMPRESSOR_FREQUENCY])
+        cg.add(var.set_compressor_frequency_sensor(sens))
+    if CONF_FAN_SPEED in config:
+        sens = await sensor.new_sensor(config[CONF_FAN_SPEED])
+        cg.add(var.set_fan_speed_sensor(sens))
+    if CONF_MIXING_VALVE_POSITION in config:
+        sens = await sensor.new_sensor(config[CONF_MIXING_VALVE_POSITION])
+        cg.add(var.set_mixing_valve_position_sensor(sens))
+    if CONF_WATERPUMP_DUTY in config:
+        sens = await sensor.new_sensor(config[CONF_WATERPUMP_DUTY])
+        cg.add(var.set_waterpump_duty_sensor(sens))
+    if CONF_DHW_COMPRESSOR_HOURS in config:
+        sens = await sensor.new_sensor(config[CONF_DHW_COMPRESSOR_HOURS])
+        cg.add(var.set_dhw_compressor_hours_sensor(sens))
 
     if CONF_DHW_CURRENT_TEMPERATURE in config:
         dhw_current_sens = await sensor.new_sensor(config[CONF_DHW_CURRENT_TEMPERATURE])

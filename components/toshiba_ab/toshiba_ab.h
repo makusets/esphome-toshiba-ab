@@ -38,12 +38,23 @@ class ToshibaAbRemoteAddressSelect : public select::Select {
 
 class ToshibaAbEstiaZone1Climate : public climate::Climate {
  public:
-  explicit ToshibaAbEstiaZone1Climate(ToshibaAbClimate *parent) : parent_(parent) {}
+  explicit ToshibaAbEstiaZone1Climate(ToshibaAbClimate *parent, uint8_t zone = 1) : parent_(parent), zone_(zone) {}
   climate::ClimateTraits traits() override;
   void control(const climate::ClimateCall &call) override;
+  void report_night_setback(bool applied) {
+    if (applied) {
+      this->preset.reset();
+      this->set_custom_preset_("Night setback");
+    } else {
+      this->clear_custom_preset_();
+      this->preset = climate::CLIMATE_PRESET_NONE;
+    }
+    this->publish_state();
+  }
 
  protected:
   ToshibaAbClimate *parent_;
+  uint8_t zone_;
 };
 
 const uint32_t ALIVE_MESSAGE_PERIOD_MILLIS = 5000;
@@ -916,6 +927,16 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_compressor_hours_sensor(sensor::Sensor *sensor) { compressor_hours_sensor_ = sensor; }
   void set_waterpump_hours_sensor(sensor::Sensor *sensor) { waterpump_hours_sensor_ = sensor; }
   void set_backup_heater_hours_sensor(sensor::Sensor *sensor) { backup_heater_hours_sensor_ = sensor; }
+  void set_suction_temperature_sensor(sensor::Sensor *sensor) { suction_temperature_sensor_ = sensor; }
+  void set_outdoor_coil_temperature_sensor(sensor::Sensor *sensor) { outdoor_coil_temperature_sensor_ = sensor; }
+  void set_outdoor_pipe_temperature_sensor(sensor::Sensor *sensor) { outdoor_pipe_temperature_sensor_ = sensor; }
+  void set_low_pressure_sensor(sensor::Sensor *sensor) { low_pressure_sensor_ = sensor; }
+  void set_water_flow_sensor(sensor::Sensor *sensor) { water_flow_sensor_ = sensor; }
+  void set_compressor_frequency_sensor(sensor::Sensor *sensor) { compressor_frequency_sensor_ = sensor; }
+  void set_fan_speed_sensor(sensor::Sensor *sensor) { fan_speed_sensor_ = sensor; }
+  void set_mixing_valve_position_sensor(sensor::Sensor *sensor) { mixing_valve_position_sensor_ = sensor; }
+  void set_waterpump_duty_sensor(sensor::Sensor *sensor) { waterpump_duty_sensor_ = sensor; }
+  void set_dhw_compressor_hours_sensor(sensor::Sensor *sensor) { dhw_compressor_hours_sensor_ = sensor; }
   void set_demand_sensor(sensor::Sensor *sensor) { demand_sensor_ = sensor; }
   void set_zone1_water_temp_sensor(sensor::Sensor *sensor) { zone1_water_temp_sensor_ = sensor; }
   void set_zone1_target_temperature_sensor(sensor::Sensor *sensor) { zone1_target_temperature_sensor_ = sensor; }
@@ -926,6 +947,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_water_outlet_temp_sensor(sensor::Sensor *sensor) { water_outlet_temp_sensor_ = sensor; }
   void set_water_heater_outlet_temp_sensor(sensor::Sensor *sensor) { water_heater_outlet_temp_sensor_ = sensor; }
   void set_zone2_water_temp_sensor(sensor::Sensor *sensor) { zone2_water_temp_sensor_ = sensor; }
+  bool is_estia_r32() const { return data_reader.frame_format() == FrameFormat::A0; }
+  void set_zone2_climate(ToshibaAbEstiaZone1Climate *zone) { zone2_climate_ = zone; }
+  void control_estia_zone2(const climate::ClimateCall &call);
   void set_zone1_climate(ToshibaAbEstiaZone1Climate *zone1_climate) { zone1_climate_ = zone1_climate; }
   void set_hotwater_pump_heating_binary_sensor(binary_sensor::BinarySensor *sensor) { hotwater_pump_heating_binary_sensor_ = sensor; }
   void set_hotwater_resistor_heating_binary_sensor(binary_sensor::BinarySensor *sensor) { hotwater_resistor_heating_binary_sensor_ = sensor; }
@@ -1029,7 +1053,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_autoreset_errors(bool en) { autoreset_errors_ = en; }
   void set_remote_error_binary_sensor(binary_sensor::BinarySensor *sensor) { remote_error_binary_sensor_ = sensor; }
   void set_estia_source_address(uint16_t addr) { estia_source_address_ = addr; }
-  void send_estia_setpoint(float target_temp, climate::ClimateMode mode);
+  void send_estia_setpoint(float target_temp, climate::ClimateMode mode, uint8_t zone = 1);
   void control_estia_zone1(const climate::ClimateCall &call);
   void send_estia_dhw_setpoint(float target_temp);
   // A0 heating/cooling operation switch (00:41, 23/22). This is independent
@@ -1180,6 +1204,16 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   sensor::Sensor *compressor_hours_sensor_{nullptr};
   sensor::Sensor *waterpump_hours_sensor_{nullptr};
   sensor::Sensor *backup_heater_hours_sensor_{nullptr};
+  sensor::Sensor *suction_temperature_sensor_{nullptr};
+  sensor::Sensor *outdoor_coil_temperature_sensor_{nullptr};
+  sensor::Sensor *outdoor_pipe_temperature_sensor_{nullptr};
+  sensor::Sensor *low_pressure_sensor_{nullptr};
+  sensor::Sensor *water_flow_sensor_{nullptr};
+  sensor::Sensor *compressor_frequency_sensor_{nullptr};
+  sensor::Sensor *fan_speed_sensor_{nullptr};
+  sensor::Sensor *mixing_valve_position_sensor_{nullptr};
+  sensor::Sensor *waterpump_duty_sensor_{nullptr};
+  sensor::Sensor *dhw_compressor_hours_sensor_{nullptr};
   sensor::Sensor *demand_sensor_{nullptr};  // 0-10V interface demand (0..15)
   sensor::Sensor *zone1_water_temp_sensor_{nullptr};
   sensor::Sensor *zone1_target_temperature_sensor_{nullptr};
@@ -1191,6 +1225,10 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   sensor::Sensor *water_heater_outlet_temp_sensor_{nullptr};
   sensor::Sensor *zone2_water_temp_sensor_{nullptr};
   ToshibaAbEstiaZone1Climate *zone1_climate_{nullptr};
+  ToshibaAbEstiaZone1Climate *zone2_climate_{nullptr};
+  void publish_estia_telemetry_(const DataFrame *frame);
+  void publish_estia_zone_temperature_(uint8_t zone, float temperature);
+  bool estia_night_setback_applied_{false};
   binary_sensor::BinarySensor *hotwater_pump_heating_binary_sensor_{nullptr};
   binary_sensor::BinarySensor *hotwater_resistor_heating_binary_sensor_{nullptr};
   binary_sensor::BinarySensor *remote_error_binary_sensor_{nullptr};
