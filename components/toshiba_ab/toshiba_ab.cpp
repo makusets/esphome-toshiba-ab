@@ -1363,7 +1363,7 @@ void ToshibaAbRemoteAddressSelect::control(const std::string &value) {
   ESP_LOGI(TAG, "Remote address changed at runtime to %s", value.c_str());
 }
 
-climate::ClimateTraits ToshibaAbEstiaZone1Climate::traits() {
+climate::ClimateTraits ToshibaAbEstiaZoneClimate::traits() {
   climate::ClimateTraits traits;
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
   traits.set_supported_modes(
@@ -1372,13 +1372,13 @@ climate::ClimateTraits ToshibaAbEstiaZone1Climate::traits() {
     traits.set_supported_presets({climate::CLIMATE_PRESET_NONE});
     this->set_supported_custom_presets({"Night setback"});
   }
-  traits.set_visual_min_temperature(20);
-  traits.set_visual_max_temperature(this->zone_ == 2 ? 40 : 65);
+  traits.set_visual_min_temperature(7);
+  traits.set_visual_max_temperature(65);
   traits.set_visual_temperature_step(0.5);
   return traits;
 }
 
-void ToshibaAbEstiaZone1Climate::control(const climate::ClimateCall &call) {
+void ToshibaAbEstiaZoneClimate::control(const climate::ClimateCall &call) {
   if (call.get_preset().has_value() || call.has_custom_preset())
     ESP_LOGD(TAG, "Night setback preset is reported by the controller; use the optional switch to enable its schedule");
   if (this->zone_ == 2) {
@@ -2508,13 +2508,7 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       bool dhw_boost = (frame->raw[10] & 0x40) != 0;
       this->publish_estia_feature_states_(frame->raw[10]);
       this->publish_estia_zone1_state_(zone1_on, is_cooling, is_heating, automatik, zone1_setpoint);
-      if (this->zone2_climate_ != nullptr) {
-        this->zone2_climate_->mode = !zone1_on ? climate::CLIMATE_MODE_OFF
-            : (automatik ? climate::CLIMATE_MODE_AUTO
-                         : (is_cooling ? climate::CLIMATE_MODE_COOL : climate::CLIMATE_MODE_HEAT));
-        this->zone2_climate_->target_temperature = automatik ? NAN : zone2_setpoint;
-        this->zone2_climate_->publish_state();
-      }
+      this->publish_estia_zone_state_(this->zone2_climate_, zone1_on, is_cooling, automatik, zone2_setpoint);
 
       ESP_LOGV(TAG, "Status: power=%s flags=0x%02X %s DHW=%.1f°C zone1=%.1f°C zone2=%.1f°C",
                zone1_on ? "ON" : "OFF", flags,
@@ -2612,13 +2606,7 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       float zone2_setpoint = frame->raw[14] / 2.0f - 16.0f;
 
       this->publish_estia_zone1_state_(zone1_on, is_cooling, is_heating, automatik, zone1_setpoint);
-      if (this->zone2_climate_ != nullptr) {
-        this->zone2_climate_->mode = !zone1_on ? climate::CLIMATE_MODE_OFF
-            : (automatik ? climate::CLIMATE_MODE_AUTO
-                         : (is_cooling ? climate::CLIMATE_MODE_COOL : climate::CLIMATE_MODE_HEAT));
-        this->zone2_climate_->target_temperature = automatik ? NAN : zone2_setpoint;
-        this->zone2_climate_->publish_state();
-      }
+      this->publish_estia_zone_state_(this->zone2_climate_, zone1_on, is_cooling, automatik, zone2_setpoint);
 
       climate::ClimateMode new_mode = dhw_active ? climate::CLIMATE_MODE_HEAT : climate::CLIMATE_MODE_OFF;
 
@@ -3478,7 +3466,7 @@ void ToshibaAbClimate::publish_estia_telemetry_(const DataFrame *frame) {
     publish(sensor, value);
     return value;
   };
-  const auto word = [&](size_t index, sensor::Sensor *sensor, float scale) {
+  const auto word_at = [&](size_t index, sensor::Sensor *sensor, float scale) {
     if (has(index + 1))
       publish(sensor, ((uint16_t(frame->raw[index]) << 8) | frame->raw[index + 1]) * scale);
   };
@@ -3525,15 +3513,15 @@ void ToshibaAbClimate::publish_estia_telemetry_(const DataFrame *frame) {
     if (!std::isnan(zone2)) this->publish_estia_zone_temperature_(2, zone2);
     const float dhw = temperature(24, nullptr, 23.5f);
     if (!std::isnan(dhw)) this->publish_dhw_current_temperature_(dhw);
-    word(26, this->water_flow_sensor_, 0.1f);
+    word_at(26, this->water_flow_sensor_, 0.1f);
   } else if (frame->raw[9] == 0xC1) {
-    word(14, this->dhw_compressor_hours_sensor_, 1.0f);
-    word(18, this->compressor_hours_sensor_, 1.0f);  // heating only
-    word(20, this->waterpump_hours_sensor_, 1.0f);
-    word(26, this->backup_heater_hours_sensor_, 1.0f);
+    word_at(14, this->dhw_compressor_hours_sensor_, 1.0f);
+    word_at(18, this->compressor_hours_sensor_, 1.0f);  // heating only
+    word_at(20, this->waterpump_hours_sensor_, 1.0f);
+    word_at(26, this->backup_heater_hours_sensor_, 1.0f);
     byte(29, this->mixing_valve_position_sensor_);
     byte(31, this->compressor_frequency_sensor_);
-    word(32, this->fan_speed_sensor_, 1.0f);
+    word_at(32, this->fan_speed_sensor_, 1.0f);
     byte(37, this->waterpump_duty_sensor_);
   }
 }
@@ -3562,27 +3550,33 @@ void ToshibaAbClimate::control_estia_zone2(const climate::ClimateCall &call) {
   }
 }
 
-void ToshibaAbClimate::publish_estia_zone1_state_(bool zone1_on, bool is_cooling, bool is_heating, bool automatik,
-                                                  float setpoint) {
-  if (this->zone1_climate_ == nullptr)
+void ToshibaAbClimate::publish_estia_zone_state_(ToshibaAbEstiaZoneClimate *zone, bool zone1_on,
+                                                bool is_cooling, bool automatik, float setpoint) {
+  if (zone == nullptr)
     return;
   climate::ClimateMode mode = climate::CLIMATE_MODE_OFF;
   if (zone1_on) {
     mode = automatik ? climate::CLIMATE_MODE_AUTO
                      : (is_cooling ? climate::CLIMATE_MODE_COOL : climate::CLIMATE_MODE_HEAT);
-    this->estia_last_active_mode_ = is_cooling ? climate::CLIMATE_MODE_COOL : climate::CLIMATE_MODE_HEAT;
-    if (!is_cooling && !is_heating)
-      ESP_LOGV(TAG, "Zone 1 is powered without an explicit heat/cool status; retaining heat mode");
   }
   const float published_setpoint = mode == climate::CLIMATE_MODE_AUTO ? NAN : setpoint;
-  const bool setpoint_changed = (std::isnan(published_setpoint) && !std::isnan(this->zone1_climate_->target_temperature)) ||
+  const bool setpoint_changed = (std::isnan(published_setpoint) && !std::isnan(zone->target_temperature)) ||
                                 (!std::isnan(published_setpoint) &&
-                                 this->zone1_climate_->target_temperature != published_setpoint);
-  if (this->zone1_climate_->mode != mode || setpoint_changed) {
-    this->zone1_climate_->mode = mode;
-    this->zone1_climate_->target_temperature = published_setpoint;
-    this->zone1_climate_->publish_state();
+                                 zone->target_temperature != published_setpoint);
+  if (zone->mode != mode || setpoint_changed) {
+    zone->mode = mode;
+    zone->target_temperature = published_setpoint;
+    zone->publish_state();
   }
+}
+
+void ToshibaAbClimate::publish_estia_zone1_state_(bool zone1_on, bool is_cooling, bool is_heating, bool automatik,
+                                                  float setpoint) {
+  if (zone1_on && !is_cooling && !is_heating)
+    ESP_LOGV(TAG, "Zone 1 is powered without an explicit heat/cool status; retaining heat mode");
+  if (zone1_on)
+    this->estia_last_active_mode_ = is_cooling ? climate::CLIMATE_MODE_COOL : climate::CLIMATE_MODE_HEAT;
+  this->publish_estia_zone_state_(this->zone1_climate_, zone1_on, is_cooling, automatik, setpoint);
 }
 
 bool ToshibaAbClimate::enqueue_command_(const DataFrame &command) {
@@ -3741,6 +3735,12 @@ void ToshibaAbClimate::send_estia_tracked_(const uint8_t *frame, size_t len, uin
 void ToshibaAbClimate::send_estia_setpoint(float target_temp, climate::ClimateMode mode, uint8_t zone) {
   if (this->read_only_) {
     ESP_LOGW(TAG, "Read-only mode: not sending Estia setpoint");
+    return;
+  }
+
+  // Visual limits are frontend preferences; validate against the full water target range.
+  if (!std::isfinite(target_temp) || target_temp < 7.0f || target_temp > 65.0f) {
+    ESP_LOGW(TAG, "Ignoring Estia water target outside 7–65 °C");
     return;
   }
 
@@ -3996,7 +3996,8 @@ void ToshibaAbClimate::send_estia_automatik_mode(bool on) {
 }
 
 void ToshibaAbClimate::set_estia_zone1_operating_mode_(climate::ClimateMode mode) {
-  if (this->zone1_climate_ != nullptr && this->zone1_climate_->mode == climate::CLIMATE_MODE_OFF) {
+  const auto *zone = this->zone1_climate_ != nullptr ? this->zone1_climate_ : this->zone2_climate_;
+  if (zone != nullptr && zone->mode == climate::CLIMATE_MODE_OFF) {
     const climate::ClimateMode last_mode = this->estia_last_active_mode_;
     if (mode != last_mode) {
       this->estia_pending_mode_cmd_ = mode == climate::CLIMATE_MODE_COOL ? 0x01 : 0x02;

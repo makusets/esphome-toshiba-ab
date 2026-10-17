@@ -32,3 +32,18 @@ Checks cover temperature conversions, STATUS and event offsets, missing sensors,
 truncated payloads, extra E8 values, zone traits, zone-only setback feedback,
 and the CRC-validated receive path. The host GPIO shims replace only the existing board
 setup calls; decoding and ESPHome sensor/climate publishing use production code.
+
+Zone control checks verify CRC-valid outgoing frames, full 7–65 °C targets with
+20–40 °C visuals, read-only mode, Automatik suppression, late ACK handling and
+Zone-2-only mode/power sequencing. The runner uses GCC's `-fno-access-control`
+only for tests to inspect the production send queue. The host shim also defines
+the ESP8266 Arduino `word(...)` macro to catch naming collisions.
+
+Configuration/default/visual override checks:
+
+```sh
+python3 tests/test_estia_config.py
+esphome compile tests/estia_esp8266.yaml
+```
+
+GitHub Actions runs these checks and the ESP8266 build for pull requests.

@@ -1,0 +1,22 @@
+esphome:
+  name: estia-esp8266-test
+  build_path: ../../work/estia-esp8266
+  compile_process_limit: 2
+esp8266:
+  board: esp12e
+logger:
+  baud_rate: 0
+external_components:
+  - source:
+      type: local
+      path: ../components
+uart:
+  tx_pin: GPIO12
+  rx_pin: GPIO13
+  baud_rate: 2400
+  parity: EVEN
+climate:
+  - platform: toshiba_ab
+    name: Estia DHW
+    frame_format: a0
+    zone2_climate: true

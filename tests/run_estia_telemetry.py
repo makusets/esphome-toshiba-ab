@@ -15,7 +15,7 @@ sources = [p for p in root.rglob("*.cpp")
 sources.append(tests / "test_estia_telemetry.cpp")
 flags = ["g++", "-std=c++20", "-DUSE_HOST", "-DESPHOME_LOG_LEVEL=0",
          "-include", str(tests / "host_gpio.h"), "-I" + str(root),
-         "-ffunction-sections", "-fdata-sections", "-pthread"]
+         "-fno-access-control", "-ffunction-sections", "-fdata-sections", "-pthread"]
 with tempfile.TemporaryDirectory(prefix="estia-tests-") as temp:
     def compile_source(item):
         index, source = item

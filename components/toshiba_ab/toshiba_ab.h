@@ -36,9 +36,9 @@ class ToshibaAbRemoteAddressSelect : public select::Select {
   ToshibaAbClimate *parent_;
 };
 
-class ToshibaAbEstiaZone1Climate : public climate::Climate {
+class ToshibaAbEstiaZoneClimate : public climate::Climate {
  public:
-  explicit ToshibaAbEstiaZone1Climate(ToshibaAbClimate *parent, uint8_t zone = 1) : parent_(parent), zone_(zone) {}
+  explicit ToshibaAbEstiaZoneClimate(ToshibaAbClimate *parent, uint8_t zone = 1) : parent_(parent), zone_(zone) {}
   climate::ClimateTraits traits() override;
   void control(const climate::ClimateCall &call) override;
   void report_night_setback(bool applied) {
@@ -948,9 +948,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_water_heater_outlet_temp_sensor(sensor::Sensor *sensor) { water_heater_outlet_temp_sensor_ = sensor; }
   void set_zone2_water_temp_sensor(sensor::Sensor *sensor) { zone2_water_temp_sensor_ = sensor; }
   bool is_estia_r32() const { return data_reader.frame_format() == FrameFormat::A0; }
-  void set_zone2_climate(ToshibaAbEstiaZone1Climate *zone) { zone2_climate_ = zone; }
+  void set_zone2_climate(ToshibaAbEstiaZoneClimate *zone) { zone2_climate_ = zone; }
   void control_estia_zone2(const climate::ClimateCall &call);
-  void set_zone1_climate(ToshibaAbEstiaZone1Climate *zone1_climate) { zone1_climate_ = zone1_climate; }
+  void set_zone1_climate(ToshibaAbEstiaZoneClimate *zone1_climate) { zone1_climate_ = zone1_climate; }
   void set_hotwater_pump_heating_binary_sensor(binary_sensor::BinarySensor *sensor) { hotwater_pump_heating_binary_sensor_ = sensor; }
   void set_hotwater_resistor_heating_binary_sensor(binary_sensor::BinarySensor *sensor) { hotwater_resistor_heating_binary_sensor_ = sensor; }
   void set_frame_format(FrameFormat format) {
@@ -1224,10 +1224,12 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   sensor::Sensor *water_outlet_temp_sensor_{nullptr};
   sensor::Sensor *water_heater_outlet_temp_sensor_{nullptr};
   sensor::Sensor *zone2_water_temp_sensor_{nullptr};
-  ToshibaAbEstiaZone1Climate *zone1_climate_{nullptr};
-  ToshibaAbEstiaZone1Climate *zone2_climate_{nullptr};
+  ToshibaAbEstiaZoneClimate *zone1_climate_{nullptr};
+  ToshibaAbEstiaZoneClimate *zone2_climate_{nullptr};
   void publish_estia_telemetry_(const DataFrame *frame);
   void publish_estia_zone_temperature_(uint8_t zone, float temperature);
+  void publish_estia_zone_state_(ToshibaAbEstiaZoneClimate *zone, bool zone1_on, bool is_cooling,
+                                 bool automatik, float setpoint);
   bool estia_night_setback_applied_{false};
   binary_sensor::BinarySensor *hotwater_pump_heating_binary_sensor_{nullptr};
   binary_sensor::BinarySensor *hotwater_resistor_heating_binary_sensor_{nullptr};
