@@ -55,3 +55,12 @@ and transitional releases exposing both):
 g++ -std=c++17 -Wall -Wextra -Werror -I. tests/test_climate_compat.cpp -o /tmp/test_climate_compat
 /tmp/test_climate_compat
 ```
+
+The host suite also checks first-generation DN read/write frames, query
+serialization, timeout recovery, reply checksums/addresses/codes, signed curve
+shift values and read-only/boot guards. Configuration checks cover the optional
+`curve_shift` entity and reject other frame formats. Compile its ESP8266 path with:
+
+```sh
+esphome compile tests/estia_curve_esp8266.yaml
+```

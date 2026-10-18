@@ -27,3 +27,4 @@ jobs:
           python-version: '3.12'
       - run: pip install esphome==2026.9.1
       - run: esphome compile tests/estia_esp8266.yaml
+      - run: esphome compile tests/estia_curve_esp8266.yaml

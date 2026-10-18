@@ -50,6 +50,7 @@ CONF_INDOOR_UNITS = "indoor_units"
 CONF_REMOTE_COUNT = "remote_count"
 CONF_REMOTE_ADDRESSES = "remote_addresses"
 CONF_REMOTE_ADDRESS_SELECT = "remote_address_select"
+CONF_CURVE_SHIFT = "curve_shift"
 
 CONF_ON_DATA_RECEIVED = "on_data_received"
 CONF_MASTER = "master"
@@ -132,6 +133,9 @@ ToshibaAbClimate =  toshiba_ab_ns.class_(
 )
 ToshibaAbEstiaZoneClimate = toshiba_ab_ns.class_(
     "ToshibaAbEstiaZoneClimate", climate.Climate
+)
+ToshibaAbEstiaCurveShiftSelect = toshiba_ab_ns.class_(
+    "ToshibaAbEstiaCurveShiftSelect", select.Select
 )
 ToshibaAbRemoteAddressSelect = toshiba_ab_ns.class_(
     "ToshibaAbRemoteAddressSelect", select.Select
@@ -286,6 +290,8 @@ def _validate_wall_mounted_louvre(config):
         raise cv.Invalid("wall_mounted_louvre requires classic TCC-Link (auto or normal frame_format)")
     if config.get(CONF_ZONE2_CLIMATE) and config[CONF_FRAME_FORMAT] != "a0":
         raise cv.Invalid("zone2_climate requires frame_format: a0")
+    if CONF_CURVE_SHIFT in config and config[CONF_FRAME_FORMAT] != "estia":
+        raise cv.Invalid("curve_shift requires frame_format: estia (first-generation R410A)")
     return config
 
 
@@ -294,6 +300,11 @@ CONFIG_SCHEMA = cv.All(
     climate._CLIMATE_SCHEMA.extend(
     {
         cv.Optional(CONF_WALL_MOUNTED_LOUVRE): select.select_schema(ToshibaAbWallMountedLouvreSelect),
+        cv.Optional(CONF_CURVE_SHIFT): select.select_schema(
+            ToshibaAbEstiaCurveShiftSelect,
+            entity_category=ENTITY_CATEGORY_CONFIG,
+            icon="mdi:chart-bell-curve-cumulative",
+        ),
         cv.Optional(CONF_MASTER): cv.uint8_t,
         cv.Optional(CONF_REMOTE): cv.uint8_t,
         cv.Optional(CONF_REMOTE_ADDRESS_SELECT): select.select_schema(
@@ -723,6 +734,12 @@ async def to_code(config):
         config[CONF_REMOTE_ADDRESS_SELECT], var, options=["0x40", "0x41"]
     )
     cg.add(var.set_remote_address_select(remote_address_select))
+
+    if CONF_CURVE_SHIFT in config:
+        curve_shift = await select.new_select(
+            config[CONF_CURVE_SHIFT], var, options=[str(i) for i in range(-5, 6)]
+        )
+        cg.add(var.set_curve_shift_select(curve_shift))
 
     if CONF_COMMAND_MODE_READ in config:
         cg.add(var.set_command_mode_read(config[CONF_COMMAND_MODE_READ]))
