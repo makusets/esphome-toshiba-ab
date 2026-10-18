@@ -94,9 +94,7 @@ climate:
 
     # Required for R410A Estia frames.
     # This format is not auto-detected, so set it explicitly.
-    # Optional installer Auto curve shift (DN 0x27), -5..5 K.
-    # curve_shift:
-    #   name: "Heating Curve Shift"
+
     frame_format: estia
 
     # Optional diagnostic binary sensor: true when valid traffic has been seen.
@@ -127,6 +125,12 @@ climate:
       name: "Toshiba Estia Zone 1 Water Temperature"
     zone1_target_temperature:
       name: "Toshiba Estia Zone 1 Target Temperature"
+
+    # Optional Auto curve shift (DN 0x27), -5..5 K.
+    # Creates a select entity that lets the frontend adjust the
+    # heating curve in Auto mode from +5 to -5 degrees.
+    curve_shift:
+      name: "Heating Curve Shift"
 
 
     # Heating-state binary sensors decoded from hot-water status flags.
