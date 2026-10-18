@@ -122,5 +122,51 @@ int main() {
   assert(unit.receive_data_frame(&c0));
   near(to.state, 31);
 
+  // Curve shift (DN 27) read-back. The DN reply's raw[6] is a navigation
+  // reference (current/next code), not an echo of the queried code, so a read
+  // is bound to the requested code and the value is taken from raw[7].
+  ToshibaAbClimate dn;
+  select::Select shift_select;
+  shift_select.traits.set_options({"-5", "-4", "-3", "-2", "-1", "0", "1", "2", "3", "4", "5"});
+  dn.set_heating_curve_shift_select(&shift_select);
+  auto dn_reply = [](uint8_t ref, uint8_t value) {
+    DataFrame f{};
+    f.raw[0] = 0x0C;
+    f.raw[1] = 0x70;
+    f.raw[4] = 0x80;
+    f.raw[5] = 0x1A;
+    f.raw[6] = ref;
+    f.raw[7] = value;
+    return f;
+  };
+  // No read outstanding: an unsolicited DN reply must be ignored.
+  dn.curve_shift_query_outstanding_ = false;
+  dn.last_curve_shift_query_code_ = 0x27;
+  {
+    auto f = dn_reply(0x27, 0x03);
+    dn.decode_estia_first_gen_curve_shift_(&f);
+  }
+  assert(!shift_select.has_state());
+  auto read_back = [&](uint8_t value) -> std::string {
+    dn.last_curve_shift_query_code_ = 0x27;
+    dn.curve_shift_query_outstanding_ = true;
+    auto f = dn_reply(0x27, value);
+    dn.decode_estia_first_gen_curve_shift_(&f);
+    return shift_select.current_option().str();
+  };
+  assert(read_back(0x02) == "2");
+  assert(read_back(0xFE) == "-2");
+  assert(read_back(0x00) == "0");
+  // A reply for a different outstanding code must not be published and must
+  // leave the guard set so the real reply can still be matched.
+  dn.last_curve_shift_query_code_ = 0x28;
+  dn.curve_shift_query_outstanding_ = true;
+  {
+    auto f = dn_reply(0x28, 0x05);
+    dn.decode_estia_first_gen_curve_shift_(&f);
+  }
+  assert(shift_select.current_option().str() == "0");
+  assert(dn.curve_shift_query_outstanding_);
+
   std::cout << "Estia telemetry checks passed\n";
 }

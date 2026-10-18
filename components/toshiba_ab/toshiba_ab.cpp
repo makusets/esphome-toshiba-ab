@@ -2915,6 +2915,12 @@ void ToshibaAbClimate::loop() {
   if (this->heating_curve_shift_select_ != nullptr && this->is_estia_first_gen() && !this->read_only_ &&
       millis() >= INITIAL_FRAME_SEND_BLOCK_MILLIS) {
     const uint32_t now_ms = millis();
+    if (this->curve_shift_query_outstanding_ &&
+        now_ms - this->last_curve_shift_request_ms_ >= this->curve_shift_query_timeout_ms_) {
+      ESP_LOGD(TAG, "Curve shift (DN 27) read timed out; releasing query guard");
+      this->curve_shift_query_outstanding_ = false;
+      this->last_curve_shift_query_code_ = 0xFF;
+    }
     if (this->last_curve_shift_request_ms_ == 0 ||
         now_ms - this->last_curve_shift_request_ms_ >= ESTIA_CURVE_SHIFT_POLL_MILLIS) {
       this->request_estia_first_gen_curve_shift();
@@ -4275,20 +4281,38 @@ void ToshibaAbClimate::send_estia_first_gen_curve_shift(int8_t shift) {
 
 void ToshibaAbClimate::request_estia_first_gen_curve_shift() {
   if (this->read_only_ || !this->is_estia_first_gen()) return;
-  // Field-setting query captured in issue #242:
-  //   F0:F0:0D:<src>:<dst>:E0:41:1A:F1:27:00:<chk>:A0
-  const uint8_t payload[] = {0xE0, 0x41, 0x1A, 0xF1, ESTIA_FIRST_GEN_DN_CURVE_SHIFT, 0x00};
+  // Field-setting query. The four bytes after the 0xE0 transport prefix are the
+  // TCC-link "OpCode2 / Mode / Code / Offset" tuple (see issalig/toshiba_air_cond):
+  //   0x1A  = DN-code selector in A0 framing (0x02 in TCC-link)
+  //   0xF5  = request the *current* value of a specific code (0xF1/0xF2 navigate)
+  //   0x27  = installer "Auto curve shift" DN
+  //   0x00  = offset, 0x00 for a current-value read
+  //   F0:F0:0D:<src>:<dst>:E0:41:1A:F5:27:00:<chk>:A0
+  const uint8_t payload[] = {0xE0, 0x41, 0x1A, 0xF5, ESTIA_FIRST_GEN_DN_CURVE_SHIFT, 0x00};
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
   this->last_curve_shift_request_ms_ = millis();
+  this->last_curve_shift_query_code_ = ESTIA_FIRST_GEN_DN_CURVE_SHIFT;
+  this->curve_shift_query_outstanding_ = true;
 }
 
 void ToshibaAbClimate::decode_estia_first_gen_curve_shift_(const DataFrame *frame) {
   if (frame == nullptr || this->heating_curve_shift_select_ == nullptr) return;
-  // Master reply: 0C:70:60:E0:80:1A:27:<val>:<chk> (raw[6]=DN, raw[7]=signed value)
   if (frame->raw[0] < 0x0C) return;
   if (frame->raw[4] != 0x80 || frame->raw[5] != 0x1A) return;
-  if (frame->raw[6] != ESTIA_FIRST_GEN_DN_CURVE_SHIFT) return;
+  // A DN reply does not reliably echo the queried code in raw[6]: that byte is a
+  // navigation reference (the current/next code), so it "walks" with mode 0xF1/0xF2.
+  // Bind the reply to the code we actually requested and take the value from raw[7].
+  if (!this->curve_shift_query_outstanding_ ||
+      this->last_curve_shift_query_code_ != ESTIA_FIRST_GEN_DN_CURVE_SHIFT) {
+    return;
+  }
+  this->curve_shift_query_outstanding_ = false;
+  const uint8_t ref_code = frame->raw[6];
   const int8_t shift = static_cast<int8_t>(frame->raw[7]);
+  if (ref_code != ESTIA_FIRST_GEN_DN_CURVE_SHIFT) {
+    ESP_LOGD(TAG, "Curve shift (DN 27) reply ref byte 0x%02X (expected 0x%02X), value 0x%02X",
+             ref_code, ESTIA_FIRST_GEN_DN_CURVE_SHIFT, frame->raw[7]);
+  }
   if (!this->has_curve_shift_value_ || this->last_curve_shift_value_ != shift) {
     this->has_curve_shift_value_ = true;
     this->last_curve_shift_value_ = shift;

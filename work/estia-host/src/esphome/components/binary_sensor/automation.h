@@ -1,0 +1,192 @@
+#pragma once
+
+#include <array>
+#include <cinttypes>
+#include <utility>
+
+#include "esphome/core/component.h"
+#include "esphome/core/automation.h"
+#include "esphome/core/hal.h"
+#include "esphome/core/helpers.h"
+#include "esphome/components/binary_sensor/binary_sensor.h"
+
+namespace esphome::binary_sensor {
+
+struct MultiClickTriggerEvent {
+  bool state;
+  uint32_t min_length;
+  uint32_t max_length;
+};
+
+class PressTrigger final : public Trigger<> {
+ public:
+  explicit PressTrigger(BinarySensor *parent) {
+    parent->add_on_state_callback([this](bool state) {
+      if (state)
+        this->trigger();
+    });
+  }
+};
+
+class ReleaseTrigger final : public Trigger<> {
+ public:
+  explicit ReleaseTrigger(BinarySensor *parent) {
+    parent->add_on_state_callback([this](bool state) {
+      if (!state)
+        this->trigger();
+    });
+  }
+};
+
+bool match_interval(uint32_t min_length, uint32_t max_length, uint32_t length);
+
+class ClickTrigger final : public Trigger<> {
+ public:
+  explicit ClickTrigger(BinarySensor *parent, uint32_t min_length, uint32_t max_length)
+      : min_length_(min_length), max_length_(max_length) {
+    parent->add_on_state_callback([this](bool state) {
+      if (state) {
+        this->start_time_ = millis();
+      } else {
+        const uint32_t length = millis() - this->start_time_;
+        if (match_interval(this->min_length_, this->max_length_, length))
+          this->trigger();
+      }
+    });
+  }
+
+ protected:
+  uint32_t start_time_{0};  /// The millis() time when the click started.
+  uint32_t min_length_;     /// Minimum length of click. 0 means no minimum.
+  uint32_t max_length_;     /// Maximum length of click. 0 means no maximum.
+};
+
+class DoubleClickTrigger final : public Trigger<> {
+ public:
+  explicit DoubleClickTrigger(BinarySensor *parent, uint32_t min_length, uint32_t max_length)
+      : min_length_(min_length), max_length_(max_length) {
+    parent->add_on_state_callback([this](bool state) {
+      const uint32_t now = millis();
+
+      if (state && this->start_time_ != 0 && this->end_time_ != 0) {
+        if (match_interval(this->min_length_, this->max_length_, this->end_time_ - this->start_time_) &&
+            match_interval(this->min_length_, this->max_length_, now - this->end_time_)) {
+          this->trigger();
+          this->start_time_ = 0;
+          this->end_time_ = 0;
+          return;
+        }
+      }
+
+      this->start_time_ = this->end_time_;
+      this->end_time_ = now;
+    });
+  }
+
+ protected:
+  uint32_t start_time_{0};
+  uint32_t end_time_{0};
+  uint32_t min_length_;  /// Minimum length of click. 0 means no minimum.
+  uint32_t max_length_;  /// Maximum length of click. 0 means no maximum.
+};
+
+/// Non-template base for MultiClickTrigger (keeps large method bodies out of the header).
+class MultiClickTriggerBase : public Trigger<>, public Component {
+ public:
+  explicit MultiClickTriggerBase(BinarySensor *parent) : parent_(parent) {}
+
+  void setup() override {
+    this->last_state_ = this->parent_->get_state_default(false);
+    this->parent_->add_on_state_callback([this](bool state) { this->on_state_(state); });
+  }
+
+  float get_setup_priority() const override { return setup_priority::HARDWARE; }
+
+  void set_invalid_cooldown(uint32_t invalid_cooldown) { this->invalid_cooldown_ = invalid_cooldown; }
+
+  void cancel();
+  MultiClickTriggerBase(const MultiClickTriggerBase &) = delete;
+  MultiClickTriggerBase &operator=(const MultiClickTriggerBase &) = delete;
+
+ protected:
+  void on_state_(bool state);
+  void schedule_cooldown_();
+  void schedule_is_valid_(uint32_t min_length);
+  void schedule_is_not_valid_(uint32_t max_length);
+  void trigger_();
+
+  BinarySensor *parent_;
+  const MultiClickTriggerEvent *timing_{nullptr};
+  uint32_t invalid_cooldown_{1000};
+  optional<size_t> at_index_{};
+  uint8_t timing_count_{0};
+  bool last_state_{false};
+  bool is_in_cooldown_{false};
+  bool is_valid_{false};
+};
+
+/// Template wrapper that provides inline std::array storage for timing events.
+/// N is set by code generation to match the exact number of timing events configured in YAML.
+template<size_t N> class MultiClickTrigger final : public MultiClickTriggerBase {
+ public:
+  MultiClickTrigger(BinarySensor *parent, std::initializer_list<MultiClickTriggerEvent> timing)
+      : MultiClickTriggerBase(parent) {
+    init_array_from(this->timing_storage_, timing);
+    this->timing_ = this->timing_storage_.data();
+    this->timing_count_ = N;
+  }
+
+ protected:
+  std::array<MultiClickTriggerEvent, N> timing_storage_{};
+};
+
+class StateTrigger final : public Trigger<bool> {
+ public:
+  explicit StateTrigger(BinarySensor *parent) {
+    parent->add_on_state_callback([this](bool state) { this->trigger(state); });
+  }
+};
+
+class StateChangeTrigger final : public Trigger<optional<bool>, optional<bool> > {
+ public:
+  explicit StateChangeTrigger(BinarySensor *parent) {
+    parent->add_full_state_callback(
+        [this](optional<bool> old_state, optional<bool> state) { this->trigger(old_state, state); });
+  }
+};
+
+template<typename... Ts> class BinarySensorCondition final : public Condition<Ts...> {
+ public:
+  BinarySensorCondition(BinarySensor *parent, bool state) : parent_(parent), state_(state) {}
+  bool check(const Ts &...x) override { return this->parent_->state == this->state_; }
+
+ protected:
+  BinarySensor *parent_;
+  bool state_;
+};
+
+template<typename... Ts> class BinarySensorPublishAction final : public Action<Ts...> {
+ public:
+  explicit BinarySensorPublishAction(BinarySensor *sensor) : sensor_(sensor) {}
+  TEMPLATABLE_VALUE(bool, state)
+
+  void play(const Ts &...x) override {
+    auto val = this->state_.value(x...);
+    this->sensor_->publish_state(val);
+  }
+
+ protected:
+  BinarySensor *sensor_;
+};
+
+template<typename... Ts> class BinarySensorInvalidateAction final : public Action<Ts...> {
+ public:
+  explicit BinarySensorInvalidateAction(BinarySensor *sensor) : sensor_(sensor) {}
+
+  void play(const Ts &...x) override { this->sensor_->invalidate_state(); }
+
+ protected:
+  BinarySensor *sensor_;
+};
+
+}  // namespace esphome::binary_sensor

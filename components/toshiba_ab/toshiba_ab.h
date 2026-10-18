@@ -1053,6 +1053,11 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   uint32_t last_curve_shift_request_ms_{0};
   bool has_curve_shift_value_{false};
   int8_t last_curve_shift_value_{0};
+  // The DN reply's raw[6] is a navigation reference, not an echo of the queried
+  // code, so a read is bound to the code we actually requested.
+  uint8_t last_curve_shift_query_code_{0xFF};   // 0xFF = none
+  bool curve_shift_query_outstanding_{false};   // true after read request, cleared on reply
+  uint32_t curve_shift_query_timeout_ms_{10000};
 
   void send_command(struct DataFrame command);
   bool send_raw_frame_from_text(const std::string &frame_text);
@@ -1103,7 +1108,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void send_estia_first_gen_auto_mode(bool on);
   void send_estia_first_gen_request_data(uint8_t request_code);
   void send_estia_first_gen_curve_shift(int8_t shift);   // DN 27 write (0x1C)
-  void request_estia_first_gen_curve_shift();            // DN 27 read (0x1A:F1)
+  void request_estia_first_gen_curve_shift();            // DN 27 read (0x1A:F5, current value)
   void decode_estia_first_gen_curve_shift_(const DataFrame *frame);
   void send_estia_tracked_(const uint8_t *frame, size_t len, uint16_t ack_dtype);
   
