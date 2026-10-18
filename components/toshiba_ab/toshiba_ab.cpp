@@ -1364,6 +1364,16 @@ void ToshibaAbRemoteAddressSelect::control(const std::string &value) {
   ESP_LOGI(TAG, "Remote address changed at runtime to %s", value.c_str());
 }
 
+void ToshibaAbEstiaCurveShiftSelect::control(const std::string &value) {
+  // Accept only the configured options, before any narrowing conversion.
+  for (int shift = -5; shift <= 5; ++shift) {
+    if (value == std::to_string(shift)) {
+      this->parent_->set_curve_shift(shift);
+      return;
+    }
+  }
+}
+
 climate::ClimateTraits ToshibaAbEstiaZoneClimate::traits() {
   climate::ClimateTraits traits;
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
@@ -1449,6 +1459,7 @@ void ToshibaAbClimate::dump_config() {
   ESP_LOGCONFIG(TAG, "  Reader diagnostics: enabled (30s updates)");
   ESP_LOGCONFIG(TAG, "  Filter alert sensor: %s", this->filter_alert_sensor_ ? "yes" : "no");
   LOG_SELECT("  ", "Wall-mounted louvre", this->wall_mounted_louvre_select_);
+  LOG_SELECT("  ", "Curve shift (DN 27)", this->curve_shift_select_);
   ESP_LOGCONFIG(TAG, "  Vent switch: %s", this->vent_switch_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Read-only switch: %s", this->read_only_switch_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Remote address select: %s", this->remote_address_select_ ? "yes" : "no");
@@ -2882,6 +2893,7 @@ void ToshibaAbClimate::publish_reader_diagnostics_() {
 }
 
 void ToshibaAbClimate::loop() {
+  this->update_estia_dn_();
   if (millis() - this->last_diagnostics_publish_ms_ >= 30000) this->publish_reader_diagnostics_();
   // TODO: check if last_unconfirmed_command_ was not confirmed after a timeout
   // and log warning/error
@@ -2990,6 +3002,14 @@ void ToshibaAbClimate::loop() {
         last_tu2c_sent_frame_millis_ = last_sent_frame_millis_;
       }
       auto frame = frame_to_send.value();
+      if (this->is_estia_first_gen() && this->estia_dn_pending_ && !this->estia_dn_sent_ &&
+          frame.raw[0] == 0x0D && frame.raw[1] == this->estia_dn_source_ &&
+          frame.raw[2] == this->estia_dn_dest_ && frame.raw[3] == 0xE0 &&
+          frame.raw[4] == 0x41 && frame.raw[5] == 0x1A && frame.raw[6] == 0xF5 &&
+          frame.raw[7] == this->estia_dn_code_ && frame.raw[8] == 0x00) {
+        this->estia_dn_sent_ = true;
+        this->estia_dn_sent_ms_ = now;
+      }
       if (frame.is_tu2c()) {
         log_tu2c_data_frame("Write frame", &frame);
       } else {
@@ -4233,6 +4253,74 @@ void ToshibaAbClimate::send_estia_first_gen_request_data(uint8_t request_code) {
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
+bool ToshibaAbClimate::read_estia_first_gen_dn(uint8_t code, EstiaDnReadCallback callback) {
+  if (this->read_only_ || !this->is_estia_first_gen() || this->estia_dn_pending_ ||
+      this->is_initial_frame_send_block_active_(millis())) return false;
+  // F5 reads this code; F1/F2 navigate to the next/previous code.
+  const uint8_t payload[] = {0xE0, 0x41, 0x1A, 0xF5, code, 0x00};
+  auto frame = make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload));
+  if (!this->enqueue_command_(frame)) return false;
+  this->estia_dn_pending_ = true;
+  this->estia_dn_sent_ = false;
+  this->estia_dn_code_ = code;
+  this->estia_dn_source_ = this->remote_address_;
+  this->estia_dn_dest_ = this->master_address_;
+  this->estia_dn_callback_ = std::move(callback);
+  return true;
+}
+
+bool ToshibaAbClimate::write_estia_first_gen_dn(uint8_t code, uint8_t value) {
+  if (this->read_only_ || !this->is_estia_first_gen() ||
+      this->is_initial_frame_send_block_active_(millis())) return false;
+  const uint8_t payload[] = {0xE0, 0x01, 0x1C, code, value};
+  return this->enqueue_command_(
+      make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+}
+
+void ToshibaAbClimate::set_curve_shift(int shift) {
+  if (shift < -5 || shift > 5) return;
+  if (this->write_estia_first_gen_dn(ESTIA_DN_CURVE_SHIFT, static_cast<uint8_t>(shift)))
+    this->curve_shift_refresh_ = true;
+}
+
+void ToshibaAbClimate::update_estia_dn_() {
+  const uint32_t now = millis();
+  if (this->estia_dn_pending_ && this->estia_dn_sent_ && now - this->estia_dn_sent_ms_ >= ESTIA_DN_READ_TIMEOUT_MILLIS) {
+    this->estia_dn_pending_ = false;
+    auto callback = std::move(this->estia_dn_callback_);
+    this->estia_dn_callback_ = {};
+    if (callback) callback(false, 0);
+  }
+  if (this->curve_shift_select_ == nullptr ||
+      (!this->curve_shift_refresh_ && now - this->last_curve_shift_poll_ms_ < ESTIA_CURVE_SHIFT_POLL_MILLIS)) return;
+  if (this->read_estia_first_gen_dn(ESTIA_DN_CURVE_SHIFT, [this](bool success, uint8_t value) {
+        if (!success) return;
+        const int shift = value < 128 ? value : int(value) - 256;
+        if (shift < -5 || shift > 5) {
+          ESP_LOGW(TAG, "Ignoring out-of-range curve shift %d", shift);
+          return;
+        }
+        this->curve_shift_select_->publish_state(std::to_string(shift));
+      })) {
+    this->curve_shift_refresh_ = false;
+    this->last_curve_shift_poll_ms_ = now;
+  }
+}
+
+void ToshibaAbClimate::decode_estia_first_gen_dn_(const DataFrame *frame) {
+  // Called only after checksum validation. Require a complete DN response,
+  // addressed to this request, and the exact code: unsupported codes may alias.
+  if (!this->estia_dn_pending_ || !this->estia_dn_sent_ ||
+      millis() - this->estia_dn_sent_ms_ >= ESTIA_DN_READ_TIMEOUT_MILLIS || frame->raw[0] != 0x0C ||
+      frame->raw[1] != this->estia_dn_dest_ || frame->raw[2] != this->estia_dn_source_ ||
+      frame->raw[3] != 0xE0 || frame->raw[4] != 0x80 || frame->raw[5] != 0x1A ||
+      frame->raw[6] != this->estia_dn_code_) return;
+  this->estia_dn_pending_ = false;
+  auto callback = std::move(this->estia_dn_callback_);
+  this->estia_dn_callback_ = {};
+  if (callback) callback(true, frame->raw[7]);
+}
+
 void ToshibaAbClimate::estia_first_gen_reset_remote_error_() {
   if (!this->begin_remote_error_autoreset_()) return;
   ESP_LOGI(TAG, "Estia first-gen remote error reset: resending last known DHW state (%s)",
@@ -4324,6 +4412,7 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     ESP_LOGD(TAG, "Estia first-gen checksum fail for %s", label.c_str());
     return;
   }
+  this->decode_estia_first_gen_dn_(frame);
   if (has_master_keepalive_signature && is_possible_master_source)
     this->record_discovered_address_(src, false);
   if (has_remote_ping_signature && is_remote_source) this->record_discovered_address_(src, true);

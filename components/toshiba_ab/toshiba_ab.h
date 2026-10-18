@@ -12,6 +12,7 @@
 #include <bitset>
 #include <cctype>
 #include <queue>
+#include <functional>
 
 namespace esphome {
 namespace toshiba_ab {
@@ -31,6 +32,14 @@ class ToshibaAbRemoteAddressSelect : public select::Select {
  public:
   explicit ToshibaAbRemoteAddressSelect(ToshibaAbClimate *parent) : parent_(parent) {}
 
+ protected:
+  void control(const std::string &value) override;
+  ToshibaAbClimate *parent_;
+};
+
+class ToshibaAbEstiaCurveShiftSelect : public select::Select {
+ public:
+  explicit ToshibaAbEstiaCurveShiftSelect(ToshibaAbClimate *parent) : parent_(parent) {}
  protected:
   void control(const std::string &value) override;
   ToshibaAbClimate *parent_;
@@ -66,6 +75,9 @@ const uint32_t FRAME_SEND_MILLIS_FROM_LAST_SEND = 500;
 const uint32_t INITIAL_FRAME_SEND_BLOCK_MILLIS = 30000;
 const uint32_t REMOTE_REANNOUNCE_TIMEOUT_MILLIS = 30000;
 const uint32_t BUS_DISCOVERY_PERIOD_MILLIS = 180000;
+const uint32_t ESTIA_DN_READ_TIMEOUT_MILLIS = 10000;
+const uint32_t ESTIA_CURVE_SHIFT_POLL_MILLIS = 60000;
+const uint8_t ESTIA_DN_CURVE_SHIFT = 0x27;
 
 // const uint8_t TOSHIBA_MASTER = 0x00;  replaced by master_address_ which is set up in yaml
 const uint8_t TOSHIBA_MASTER_DEFAULT = 0x00;
@@ -1080,6 +1092,13 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void send_estia_first_gen_antibacteria(bool on);
   void send_estia_first_gen_auto_mode(bool on);
   void send_estia_first_gen_request_data(uint8_t request_code);
+  // One DN read at a time. Callback receives (success, raw value); timeout is 10s
+  // from transmission. False means the request was not accepted.
+  using EstiaDnReadCallback = std::function<void(bool, uint8_t)>;
+  bool read_estia_first_gen_dn(uint8_t code, EstiaDnReadCallback callback);
+  bool write_estia_first_gen_dn(uint8_t code, uint8_t value);
+  void set_curve_shift_select(select::Select *entity) { curve_shift_select_ = entity; }
+  void set_curve_shift(int shift);
   void send_estia_tracked_(const uint8_t *frame, size_t len, uint16_t ack_dtype);
   
   // Reporting external sensor temperature to AC *************************
@@ -1134,6 +1153,18 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void sync_from_received_state();
   void autoreset_remote_error_();
   void estia_first_gen_reset_remote_error_();
+  void update_estia_dn_();
+  void decode_estia_first_gen_dn_(const DataFrame *frame);
+  select::Select *curve_shift_select_{nullptr};
+  bool curve_shift_refresh_{true};
+  uint32_t last_curve_shift_poll_ms_{0};
+  bool estia_dn_pending_{false};
+  bool estia_dn_sent_{false};
+  uint8_t estia_dn_code_{0};
+  uint8_t estia_dn_source_{0};
+  uint8_t estia_dn_dest_{0};
+  uint32_t estia_dn_sent_ms_{0};
+  EstiaDnReadCallback estia_dn_callback_;
   bool begin_remote_error_autoreset_();
   void update_remote_error_(bool active);
   bool is_own_tx_echo_(const DataFrame *f) const; //used to filter echo after sending frame

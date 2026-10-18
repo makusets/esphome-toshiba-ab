@@ -94,6 +94,9 @@ climate:
 
     # Required for R410A Estia frames.
     # This format is not auto-detected, so set it explicitly.
+    # Optional installer Auto curve shift (DN 0x27), -5..5 K.
+    # curve_shift:
+    #   name: "Heating Curve Shift"
     frame_format: estia
 
     # Optional diagnostic binary sensor: true when valid traffic has been seen.

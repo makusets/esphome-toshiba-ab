@@ -99,7 +99,88 @@ static void control_checks() {
   assert(unit.commands_empty());
 }
 
+static uint8_t dn_checksum(const uint8_t *bytes, size_t size) {
+  unsigned sum = 0;
+  for (size_t i = 0; i < size; ++i) sum += bytes[i];
+  return static_cast<uint8_t>(sum);
+}
+
+static void dn_checks() {
+  TestEstia unit;
+  unit.set_frame_format(FrameFormat::ESTIA);
+  unit.set_remote_address(0x61);
+  unit.set_master_address(0x70);
+  ToshibaAbEstiaCurveShiftSelect curve(&unit);
+  curve.traits.set_options({"-5", "-4", "-3", "-2", "-1", "0", "1", "2", "3", "4", "5"});
+  unit.set_curve_shift_select(&curve);
+  unit.boot_millis_ = millis();
+  assert(!unit.read_estia_first_gen_dn(0x27, {})); // Boot guard.
+  unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+  auto pop = [&]() {
+    assert(!unit.write_queue_.empty());
+    auto f = unit.write_queue_.front(); unit.write_queue_.pop();
+    assert(f.raw[f.size() - 1] == dn_checksum(f.raw, f.size() - 1));
+    return f;
+  };
+  curve.control("-2");
+  auto write = pop();
+  assert(write.raw[0] == 0x0C && write.raw[1] == 0x61 && write.raw[2] == 0x70);
+  assert(write.raw[3] == 0xE0 && write.raw[4] == 1 && write.raw[5] == 0x1C);
+  assert(write.raw[6] == 0x27 && write.raw[7] == 0xFE);
+  assert(!curve.has_state());
+  unit.update_estia_dn_();
+  auto read = pop();
+  assert(read.raw[0] == 0x0D && read.raw[4] == 0x41 && read.raw[5] == 0x1A);
+  assert(read.raw[6] == 0xF5 && read.raw[7] == 0x27 && read.raw[8] == 0);
+  assert(!unit.read_estia_first_gen_dn(0x21, {}));
+  DataFrame reply{};
+  reply.set_tu2c(true);
+  const uint8_t bytes[] = {0x0C, 0x70, 0x61, 0xE0, 0x80, 0x1A, 0x27, 0xFE, 0};
+  std::copy(std::begin(bytes), std::end(bytes), reply.raw);
+  auto receive = [&]() {
+    reply.raw[8] = dn_checksum(reply.raw, 8);
+    unit.process_received_data_estia_first_gen_(&reply);
+  };
+  receive(); assert(!curve.has_state()); // Query still queued, not transmitted.
+  // Simulate dispatch independently of host UART timing.
+  unit.estia_dn_sent_ = true; unit.estia_dn_sent_ms_ = millis();
+  reply.raw[2] = 0x62; receive(); assert(!curve.has_state());
+  reply.raw[2] = 0x61; reply.raw[1] = 0x71; receive(); assert(!curve.has_state());
+  reply.raw[1] = 0x70; reply.raw[6] = 0x29; receive(); assert(!curve.has_state());
+  reply.raw[6] = 0x27; reply.raw[3] = 0xC0; receive(); assert(!curve.has_state());
+  reply.raw[3] = 0xE0; reply.raw[0] = 0x0B; receive(); assert(!curve.has_state());
+  reply.raw[0] = 0x0C; reply.raw[8] = 0;
+  unit.process_received_data_estia_first_gen_(&reply); assert(!curve.has_state());
+  receive(); assert(curve.current_option() == "-2" && !unit.estia_dn_pending_);
+  reply.raw[7] = 3; receive(); assert(curve.current_option() == "-2"); // Unsolicited.
+  curve.control("6"); curve.control("254"); curve.control("bad"); unit.set_curve_shift(-6);
+  assert(unit.write_queue_.empty());
+  bool completed = false;
+  assert(unit.read_estia_first_gen_dn(0x21, [&](bool ok, uint8_t value) {
+    assert(ok && value == 45); completed = true;
+  })); pop();
+  unit.estia_dn_sent_ = true; unit.estia_dn_sent_ms_ = millis();
+  reply.raw[6] = 0x21; reply.raw[7] = 45; receive(); assert(completed);
+  bool timed_out = false;
+  assert(unit.read_estia_first_gen_dn(0x28, [&](bool ok, uint8_t) { timed_out = !ok; })); pop();
+  unit.estia_dn_sent_ = true; unit.estia_dn_sent_ms_ = millis() - 10000;
+  unit.update_estia_dn_(); assert(timed_out && !unit.estia_dn_pending_);
+  assert(unit.read_estia_first_gen_dn(0x27, {})); pop();
+  unit.estia_dn_pending_ = false;
+  unit.curve_shift_refresh_ = true; unit.update_estia_dn_(); pop();
+  unit.estia_dn_sent_ = true; unit.estia_dn_sent_ms_ = millis();
+  reply.raw[6] = 0x27; reply.raw[7] = 0xF6; receive();
+  assert(curve.current_option() == "-2"); // Out-of-range response.
+  unit.set_read_only(true);
+  assert(!unit.read_estia_first_gen_dn(0x27, {}));
+  assert(!unit.write_estia_first_gen_dn(0x27, 0));
+  unit.set_read_only(false); unit.set_frame_format(FrameFormat::A0);
+  assert(!unit.read_estia_first_gen_dn(0x27, {}));
+  assert(!unit.write_estia_first_gen_dn(0x27, 0));
+}
+
 int main() {
+  dn_checks();
   new (&App) Application();
   control_checks();
   TestEstia unit;
