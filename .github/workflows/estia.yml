@@ -14,6 +14,7 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install esphome==2026.9.1
+      - run: g++ -std=c++17 -Wall -Wextra -Werror -I. tests/test_climate_compat.cpp -o /tmp/test_climate_compat && /tmp/test_climate_compat
       - run: python tests/test_estia_config.py
       - run: esphome compile --only-generate tests/estia_host.yaml
       - run: python tests/run_estia_telemetry.py work/estia-host/src

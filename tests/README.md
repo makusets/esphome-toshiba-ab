@@ -47,3 +47,11 @@ esphome compile tests/estia_esp8266.yaml
 ```
 
 GitHub Actions runs these checks and the ESP8266 build for pull requests.
+
+Custom preset API compatibility checks (legacy traits API, current entity API,
+and transitional releases exposing both):
+
+```sh
+g++ -std=c++17 -Wall -Wextra -Werror -I. tests/test_climate_compat.cpp -o /tmp/test_climate_compat
+/tmp/test_climate_compat
+```
