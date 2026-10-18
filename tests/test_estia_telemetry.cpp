@@ -1,4 +1,5 @@
 #include "esphome/components/toshiba_ab/toshiba_ab.h"
+#include "esphome/core/application.h"
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -8,6 +9,19 @@ using namespace esphome::toshiba_ab;
 
 struct TestEstia : ToshibaAbClimate {
   using ToshibaAbClimate::publish_estia_telemetry_;
+  // The host runner enables access to internal queues to verify exact wire commands.
+  std::vector<uint8_t> pop_command() {
+    assert(!raw_write_queue_.empty());
+    auto command = raw_write_queue_.front();
+    raw_write_queue_.pop();
+    DataFrame decoded{};
+    decoded.set_estia(true);
+    decoded.set_estia_len(command[3]);
+    std::copy(command.begin() + 2, command.end(), decoded.raw);
+    assert(decoded.validate_estia_crc());
+    return command;
+  }
+  bool commands_empty() const { return raw_write_queue_.empty(); }
 };
 
 static DataFrame frame(uint8_t type, uint16_t dtype, size_t payload_end) {
@@ -27,17 +41,77 @@ static void near(float actual, float expected) {
   }
 }
 
-int main() {
+static void acknowledge(TestEstia &unit, uint16_t dtype) {
+  auto ack = frame(0x18, 0x00A1, 11);
+  ack.raw[3] = 0x08;
+  ack.raw[5] = 0x00; ack.raw[6] = 0x40;
+  ack.raw[9] = dtype >> 8; ack.raw[10] = dtype;
+  const auto crc = ack.calculate_estia_crc();
+  ack.raw[11] = crc >> 8; ack.raw[12] = crc;
+  assert(unit.receive_data_frame(&ack));
+}
+
+static void control_checks() {
   TestEstia unit;
   unit.set_frame_format(FrameFormat::A0);
-  ToshibaAbEstiaZone1Climate z1(&unit), z2(&unit, 2);
+  ToshibaAbEstiaZoneClimate zone(&unit, 2);
+  unit.set_zone2_climate(&zone);  // Zone 2 must also work without a Zone 1 entity.
+  zone.mode = climate::CLIMATE_MODE_HEAT;
+  zone.set_visual_min_temperature_override(20);
+  zone.set_visual_max_temperature_override(40);
+  for (float target : {7.0f, 18.5f, 40.0f, 65.0f}) {
+    zone.make_call().set_target_temperature(target).perform();
+    auto command = unit.pop_command();
+    assert(command[9] == 0x03 && command[10] == 0xC1);
+    assert(command[11] == 0x04 && command[12] == static_cast<uint8_t>((target + 16) * 2));
+  }
+  for (float target : {6.5f, 65.5f, NAN, INFINITY, -INFINITY})
+    unit.send_estia_setpoint(target, climate::CLIMATE_MODE_HEAT, 2);
+  assert(unit.commands_empty());
+  unit.set_read_only(true);
+  zone.make_call().set_mode(climate::CLIMATE_MODE_COOL).set_target_temperature(18).perform();
+  assert(unit.commands_empty());
+  unit.set_read_only(false);
+  zone.make_call().set_mode(climate::CLIMATE_MODE_AUTO).set_target_temperature(35).perform();
+  auto automatic = unit.pop_command();
+  assert(automatic[10] == 0xC4 && automatic[12] == 1);
+  assert(unit.commands_empty());  // No fixed target in Auto.
+  acknowledge(unit, 0x03C4);
+  unit.pop_command();  // shared heating mode
+  zone.mode = climate::CLIMATE_MODE_AUTO;
+  zone.make_call().set_target_temperature(35).perform();
+  assert(unit.commands_empty());
+  zone.make_call().set_mode(climate::CLIMATE_MODE_OFF).perform();
+  auto off = unit.pop_command();
+  assert(off[9] == 0 && off[10] == 0x41 && off[11] == 0x22);
+  acknowledge(unit, 0x03C4);  // A late ACK cannot undo the newer Off request.
+  assert(unit.commands_empty());
+  zone.mode = climate::CLIMATE_MODE_OFF;
+  zone.make_call().set_mode(climate::CLIMATE_MODE_COOL).perform();
+  auto fixed = unit.pop_command();
+  assert(fixed[10] == 0xC4 && fixed[12] == 0);
+  acknowledge(unit, 0x03C4);
+  auto cool = unit.pop_command();
+  assert(cool[10] == 0xC0 && cool[11] == 0x01);
+  acknowledge(unit, 0x03C0);
+  auto on = unit.pop_command();
+  assert(on[10] == 0x41 && on[11] == 0x23);
+  assert(unit.commands_empty());
+}
+
+int main() {
+  new (&App) Application();
+  control_checks();
+  TestEstia unit;
+  unit.set_frame_format(FrameFormat::A0);
+  ToshibaAbEstiaZoneClimate z1(&unit), z2(&unit, 2);
   unit.set_zone1_climate(&z1);
   unit.set_zone2_climate(&z2);
   const auto traits1 = z1.traits();
   const auto traits2 = z2.traits();
-  assert(traits1.get_visual_min_temperature() == 20);
+  assert(traits1.get_visual_min_temperature() == 7);
   assert(traits1.get_visual_max_temperature() == 65);
-  assert(traits2.get_visual_max_temperature() == 40);
+  assert(traits2.get_visual_max_temperature() == 65);
   sensor::Sensor td, to, te, ts, tl, twi, tfi, ttw, flow, pressure, freq, fan, mix, duty, dhw_hours, heat_hours;
   unit.set_compressor_discharge_temp_sensor(&td);
   unit.set_outdoor_temp_sensor(&to);
@@ -114,6 +188,27 @@ int main() {
   near(flow.state, 30);
   TestEstia no_zones;
   no_zones.publish_estia_telemetry_(&status);
+  // STATUS and event frames use identical shared mode handling and independent targets.
+  for (uint8_t type : {0x58, 0x1C}) {
+    auto state = frame(type, 0x03C6, 18);
+    state.raw[9] = 0x21;  // heating/cooling operation on, cooling selected
+    state.raw[12] = 132; state.raw[13] = 68; state.raw[14] = 82;
+    auto receive = [&]() {
+      const auto crc = state.calculate_estia_crc();
+      state.raw[18] = crc >> 8; state.raw[19] = crc;
+      assert(unit.receive_data_frame(&state));
+    };
+    receive();
+    assert(z1.mode == climate::CLIMATE_MODE_COOL && z2.mode == z1.mode);
+    near(z1.target_temperature, 18); near(z2.target_temperature, 25);
+    state.raw[10] = 4;
+    receive();
+    assert(z1.mode == climate::CLIMATE_MODE_AUTO && z2.mode == z1.mode);
+    assert(std::isnan(z1.target_temperature) && std::isnan(z2.target_temperature));
+    state.raw[9] = 0; state.raw[10] = 0;
+    receive();
+    assert(z1.mode == climate::CLIMATE_MODE_OFF && z2.mode == z1.mode);
+  }
   // Full receive path validates CRC before publishing the decoded values.
   const size_t crc_offset = c0.estia_size() - 2;
   const uint16_t crc = c0.calculate_estia_crc();

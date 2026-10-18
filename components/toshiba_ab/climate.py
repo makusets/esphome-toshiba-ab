@@ -130,8 +130,8 @@ SENSOR_ITEM_SCHEMA = cv.Schema({
 ToshibaAbClimate =  toshiba_ab_ns.class_(
     "ToshibaAbClimate", climate.Climate, uart.UARTDevice, cg.Component
 )
-ToshibaAbEstiaZone1Climate = toshiba_ab_ns.class_(
-    "ToshibaAbEstiaZone1Climate", climate.Climate
+ToshibaAbEstiaZoneClimate = toshiba_ab_ns.class_(
+    "ToshibaAbEstiaZoneClimate", climate.Climate
 )
 ToshibaAbRemoteAddressSelect = toshiba_ab_ns.class_(
     "ToshibaAbRemoteAddressSelect", select.Select
@@ -258,8 +258,8 @@ def _add_automatic_entities(config):
     return config
 
 
-def _water_thermostat(default_name):
-    schema = climate.climate_schema(ToshibaAbEstiaZone1Climate)
+def _water_thermostat(default_name, default_max=65):
+    schema = climate.climate_schema(ToshibaAbEstiaZoneClimate)
 
     def validate(value):
         if value is False:
@@ -269,7 +269,12 @@ def _water_thermostat(default_name):
         elif isinstance(value, dict):
             value = dict(value)
             value.setdefault(CONF_NAME, default_name)
-        return schema(value)
+        value = schema(value)
+        visual = value.setdefault("visual", {})
+        visual.setdefault("min_temperature", 20)
+        visual.setdefault("max_temperature", default_max)
+        visual.setdefault("temperature_step", {"target_temperature": 0.5, "current_temperature": 0.5})
+        return value
 
     return validate
 
@@ -474,7 +479,7 @@ CONFIG_SCHEMA = cv.All(
             device_class="duration",
             state_class=STATE_CLASS_TOTAL_INCREASING,
         ),
-        cv.Optional(CONF_ZONE2_CLIMATE, default=False): _water_thermostat("Toshiba Estia Zone 2 Water"),
+        cv.Optional(CONF_ZONE2_CLIMATE, default=False): _water_thermostat("Toshiba Estia Zone 2 Water", 40),
         cv.Optional(CONF_ZONE1_CLIMATE): _water_thermostat("Toshiba Estia Zone 1 Water"),
         cv.Optional(CONF_HOTWATER_PUMP_HEATING): binary_sensor.binary_sensor_schema(),
         cv.Optional(CONF_HOTWATER_RESISTOR_HEATING): binary_sensor.binary_sensor_schema(),

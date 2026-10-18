@@ -94,6 +94,22 @@ climate:
     # Operating mode is shared with Zone 1.
     # zone2_climate:
     #   name: "Toshiba Estia Zone 2"
+    #   id: estia_zone2
+    #
+    #   Optional Zone 2 thermostat display limits; defaults: 20–40 °C in 0.5 °C steps.
+    #   visual sets one fixed Home Assistant display range for both Heat and Cool;
+    #   it does not restrict the component's accepted water targets (7–65 °C).
+    #   Typical Toshiba operating ranges: heating 20–65 °C; cooling 7–25 °C.
+    #   Choose limits suitable for the installed circuit and controller settings.
+    #   Underfloor heating is often limited to 40–45 °C; underfloor cooling is
+    #   typically limited to a minimum of 18–20 °C to help avoid condensation.
+    #   For heating and cooling, a combined display range can be 7–65 °C;
+    #   18–40 °C is recommended for underfloor systems. Auto has no fixed target.
+    #   Uncomment the block and visual settings to override; rebuild/upload after edits.
+    #   visual:
+    #     min_temperature: 20
+    #     max_temperature: 40
+    #     temperature_step: 0.5
 
     # A0-protocol (used by R32 Estia/heat pump models, NOT TCC-Link or TU2C)
 
