@@ -1,4 +1,5 @@
 #include "toshiba_ab.h"
+#include "climate_compat.h"
 #include "esphome.h"
 #include "esphome/components/network/util.h"
 #include <inttypes.h>
@@ -1370,7 +1371,7 @@ climate::ClimateTraits ToshibaAbEstiaZoneClimate::traits() {
       {climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_COOL, climate::CLIMATE_MODE_AUTO});
   if (this->parent_->is_estia_r32()) {
     traits.set_supported_presets({climate::CLIMATE_PRESET_NONE});
-    this->set_supported_custom_presets({"Night setback"});
+    detail::configure_night_setback(*this, traits, 0);
   }
   traits.set_visual_min_temperature(7);
   traits.set_visual_max_temperature(65);
