@@ -248,27 +248,8 @@ climate:
     frame_format: estia
 ```
 
-Use [`estia_R410A_example.yaml`](estia_R410A_example.yaml) for the complete R410A configuration.
-
-The optional `curve_shift` select adjusts installer Auto curve shift (DN `0x27`)
-from -5 to +5 K on first-generation R410A units:
-
-```yaml
-    curve_shift:
-      name: "Heating Curve Shift"
-```
-
-State comes from DN read-back after a write and from a 60-second poll, with no
-optimistic update. Requests respect read-only mode and the 30-second boot block.
-A read uses mode `0xF5` with offset `0x00`; `0xF1`/`0xF2` navigate between codes.
-Replies must pass checksum, address, code, and range checks. An unanswered read
-times out 10 seconds after transmission and leaves the last confirmed state.
-
-For future DN entities, `read_estia_first_gen_dn(code, callback)` returns whether
-it accepted the request and invokes `callback(success, raw_value)` on a valid
-reply or timeout. Only one read can be pending; callers retry when it returns
-false. `write_estia_first_gen_dn(code, raw_value)` queues a byte-valued setting;
-each entity is responsible for its own range, signed conversion and read-back.
+Use [`estia_R410A_example.yaml`](estia_R410A_example.yaml) for the complete R410A configuration,
+including auto curve adjustment, sensors and runtime switches.
 
 
 ### Minimal R32 configuration
