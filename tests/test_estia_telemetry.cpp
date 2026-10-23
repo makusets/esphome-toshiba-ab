@@ -229,6 +229,36 @@ static void first_gen_temperature_checks() {
 }
 
 int main() {
+  {
+    TestEstia unit;
+    unit.set_frame_format(FrameFormat::NORMAL);
+    unit.set_remote_address(0x40);
+    ToshibaAbBlockTemperatureReportsSwitch diagnostic(&unit);
+    DataFrame report{};
+    report.source = 0x40;
+    report.opcode1 = OPCODE_TEMPERATURE;
+    report.data_length = 5;
+    report.data[1] = 0x81;
+    assert(!unit.should_block_temperature_report_(report));
+    diagnostic.turn_on();
+    assert(diagnostic.state && unit.should_block_temperature_report_(report));
+    for (auto format : {FrameFormat::HM, FrameFormat::TU2C, FrameFormat::ESTIA, FrameFormat::A0}) {
+      unit.set_frame_format(format);
+      assert(!unit.should_block_temperature_report_(report));
+    }
+    unit.set_frame_format(FrameFormat::NORMAL);
+    unit.set_remote_address(0x41);
+    assert(!unit.should_block_temperature_report_(report));
+    unit.set_remote_address(0x40);
+    report.opcode1 = OPCODE_PARAMETER;
+    assert(!unit.should_block_temperature_report_(report));
+    report.opcode1 = OPCODE_TEMPERATURE;
+    report.data_length = 2; report.data[1] = 0x49;
+    assert(!unit.should_block_temperature_report_(report));
+    report.data_length = 5; report.data[1] = 0x81;
+    diagnostic.turn_off();
+    assert(!diagnostic.state && !unit.should_block_temperature_report_(report));
+  }
   first_gen_temperature_checks();
   dn_checks();
   new (&App) Application();

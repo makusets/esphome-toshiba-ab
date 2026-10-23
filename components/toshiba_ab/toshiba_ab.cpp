@@ -1594,6 +1594,8 @@ void ToshibaAbClimate::setup() {
       return;
     }
 
+    if (this->block_temperature_reports_ && format == FrameFormat::NORMAL) return;
+
     float t = NAN;
     if (this->ext_temp_sensor_ && this->ext_temp_sensor_->has_state()) {
       t = this->ext_temp_sensor_->state;
@@ -1700,6 +1702,8 @@ void ToshibaAbClimate::setup() {
   // Ensure the read-only switch reports its initial state on startup (default OFF)
   if (this->read_only_switch_)
     this->read_only_switch_->publish_state(this->read_only_);
+  if (this->block_temperature_reports_switch_)
+    this->block_temperature_reports_switch_->publish_state(this->block_temperature_reports_);
 
 }
 
@@ -2999,6 +3003,14 @@ void ToshibaAbClimate::loop() {
     }
 
     if (frame_to_send.has_value()) {
+      if (this->should_block_temperature_report_(*frame_to_send)) {
+        ESP_LOGD(TAG, "Diagnostic switch: dropping regular remote temperature report");
+        this->last_unconfirmed_command_.reset();
+        this->last_unconfirmed_command_attempts_ = 0;
+        this->resend_last_unconfirmed_command_ = false;
+        this->last_unconfirmed_command_sent_ms_ = 0;
+        return;
+      }
       if (frame_to_send->is_tu2c() && this->data_reader.frame_format() == FrameFormat::TU2C &&
           !this->has_tu2c_quiet_time_elapsed_(now)) {
           return;
