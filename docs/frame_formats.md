@@ -303,3 +303,29 @@ estia
 If you are unsure, start with the default `auto` and `parity: EVEN`. If your unit
 is known to be a U-series/TU2C system, use `parity: NONE` and
 `frame_format: tu2c`.
+
+## Remote address selection
+
+The component uses one remote address for the selected protocol. Without an
+explicit YAML `remote`, TCC-Link/HM starts at `0x40`, TU2C at `0x50`, and
+first-generation Estia at `0x60`. Setting `remote` explicitly disables automatic
+collision recovery.
+
+TU2C detects collisions from valid received remote frames after filtering its own
+TX echo. It advances through `0x50`–`0x59`, skipping reserved address `0x52`, and
+registers the replacement address. Like TCC-Link, it stops advancing at the upper
+address limit and suppresses remote transmissions if no unused address remains. Commands queued under the collided TU2C address are discarded.
+Registration ACKs must target the current remote address.
+
+TU2C remotes seen during the initial discovery period appear in the existing
+remote count and remote address text sensors, including remotes identified from
+frames other than keepalives.
+
+All protocols stay silent for the first 40 seconds after component startup while
+processing incoming bus traffic. TCC-Link/HM, TU2C, and first-generation Estia remember occupied remote
+addresses, including addresses heard before a collision at their current
+candidate. Automatic address selection skips those occupied addresses and the
+reserved temperature-sensor address where applicable (Estia retains its full
+`0x60`–`0x69` range). Registration is built using the selected
+address after the silent period; startup registration requests are not queued
+with an earlier candidate. Collision recovery stays active afterward.

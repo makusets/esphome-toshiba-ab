@@ -320,7 +320,7 @@ its frame format. For protocol layouts, see the
 The sender writes the complete frame **exactly as supplied**. Include the
 correct checksum/CRC and any protocol wrapper bytes; it does not calculate or
 validate them, substitute addresses, or track acknowledgements and retry raw
-commands. Frames are queued and sent after the initial 30-second boot block
+commands. Frames are queued and sent after the initial 40-second boot block
 and the normal bus quiet-time checks.
 **Raw-frame actions bypass `read_only`**
 You can use this approach to develop, test or implement new commands.

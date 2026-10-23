@@ -39,6 +39,21 @@ int main() {
   check_pings(0, 3);
   check_pings(3, 3);
 
+  // Rejecting equal addresses counts the discarded source byte as noise,
+  // while retaining the destination byte as the next possible source.
+  DataFrameReader rejected;
+  assert(!rejected.put(0x00));
+  assert(rejected.consume_reset_count() == 0);
+  assert(!rejected.put(0x00));
+  assert(rejected.consume_reset_count() == 1);
+  assert(rejected.consume_reset_count() == 0);
+  assert(rejected.data_index_ == 1);
+  for (size_t i = 1; i < PING.size(); ++i)
+    assert(rejected.put(PING[i]) == (i == PING.size() - 1));
+  assert(rejected.crc_valid);
+  assert(rejected.frame.get_data() == PING);
+  assert(rejected.consume_reset_count() == 0);
+
   // The exception for dialects that permit equal addresses still works.
   DataFrameReader allowed;
   allowed.set_allow_same_source_dest(true);

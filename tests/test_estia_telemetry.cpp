@@ -179,6 +179,144 @@ static void dn_checks() {
   assert(!unit.write_estia_first_gen_dn(0x27, 0));
 }
 
+static DataFrame tu2c_remote_frame(uint8_t source) {
+  DataFrame f{};
+  f.set_tu2c(true);
+  f.raw[0] = 0x0C;
+  f.raw[1] = source;
+  f.raw[2] = 0x90;
+  f.raw[3] = 0xC0;
+  f.raw[4] = 0x41;
+  f.raw[5] = 0x5C;
+  f.raw[6] = 0x90;
+  f.raw[7] = 0xF3;
+  for (size_t i = 0; i < 8; ++i) f.raw[8] += f.raw[i];
+  return f;
+}
+
+static void tu2c_address_checks() {
+  TestEstia unit;
+  unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+  unit.set_frame_format(FrameFormat::TU2C);
+  assert(unit.remote_address_ == 0x50);
+  text_sensor::TextSensor remotes;
+  unit.set_remote_addresses_text_sensor(&remotes);
+  auto f = tu2c_remote_frame(0x50);
+  // Own echoes must neither cause collisions nor appear in the inventory.
+  unit.remember_tx_frame_for_echo_(f.raw, f.size(), true);
+  assert(unit.receive_data_frame(&f));
+  assert(unit.remote_address_ == 0x50);
+  assert(unit.discovered_remotes_.none());
+  unit.last_tx_frame_for_echo_.reset();
+  assert(unit.receive_data_frame(&f));
+  assert(unit.remote_address_ == 0x51);
+  assert(remotes.state == "0x50");
+  assert(!unit.announce_ack_received_);
+  unit.tu2c_send_ping();  // Uses the same address as registration/control.
+  assert(unit.write_queue_.back().raw[1] == 0x51);
+  f = tu2c_remote_frame(0x51);
+  f.raw[8] ^= 1;
+  assert(!unit.receive_data_frame(&f));
+  assert(unit.remote_address_ == 0x51);
+  f.raw[8] ^= 1;
+  assert(unit.receive_data_frame(&f));
+  assert(unit.remote_address_ == 0x53);  // 0x52 is reserved.
+  assert(unit.write_queue_.size() == 1);  // No stale-address registrations.
+  assert(unit.write_queue_.back().raw[1] == 0x53);
+  assert(remotes.state == "0x50, 0x51");
+  for (uint8_t address = 0x53; address < 0x59; ++address) {
+    f = tu2c_remote_frame(address);
+    assert(unit.receive_data_frame(&f));
+    assert(unit.remote_address_ == address + 1);
+  }
+  f = tu2c_remote_frame(0x59);
+  assert(unit.receive_data_frame(&f));
+  assert(unit.remote_address_ == 0x59);
+  assert(!unit.remote_address_available_);
+  unit.tu2c_remote_announce();
+  assert(unit.write_queue_.empty());
+
+  // Discovery also recognizes non-keepalive remote traffic.
+  TestEstia discovery;
+  discovery.boot_millis_ = millis();
+  discovery.set_frame_format(FrameFormat::TU2C);
+  f = tu2c_remote_frame(0x57);
+  f.raw[4] = 0x61;
+  f.raw[8] += 0x20;
+  assert(discovery.receive_data_frame(&f));
+  assert(discovery.discovered_remotes_.test(0x57));
+  f = tu2c_remote_frame(0x52);
+  assert(discovery.receive_data_frame(&f));
+  assert(!discovery.discovered_remotes_.test(0x52));
+
+  // Explicit configuration uses the same address everywhere and disables auto movement.
+  TestEstia fixed;
+  fixed.set_remote_address(0x55);
+  fixed.set_frame_format(FrameFormat::TU2C);
+  f = tu2c_remote_frame(0x55);
+  assert(fixed.receive_data_frame(&f));
+  assert(fixed.remote_address_ == 0x55);
+  fixed.tu2c_remote_announce();
+  assert(fixed.write_queue_.back().raw[1] == 0x55);
+  auto ack = tu2c_remote_frame(0x90);
+  ack.raw[0] = 0x12;
+  ack.raw[2] = 0x54;
+  ack.raw[4] = 0x80;
+  ack.raw[5] = 0x0D;
+  assert(!fixed.is_tu2c_registration_ack_(&ack));
+  ack.raw[2] = 0x55;
+  assert(fixed.is_tu2c_registration_ack_(&ack));
+
+  TestEstia normal;
+  normal.set_frame_format(FrameFormat::NORMAL);
+  assert(normal.remote_address_ == 0x40);
+  normal.handle_remote_address_collision_(0x40, "test");
+  assert(normal.remote_address_ == 0x41);
+  normal.handle_remote_address_collision_(0x41, "test");
+  assert(normal.remote_address_ == 0x43);
+}
+
+static void startup_address_checks() {
+  static_assert(INITIAL_FRAME_SEND_BLOCK_MILLIS == 40000);
+  for (auto format : {FrameFormat::TU2C, FrameFormat::NORMAL, FrameFormat::HM, FrameFormat::ESTIA}) {
+    TestEstia unit;
+    unit.set_frame_format(format);
+    unit.boot_millis_ = millis();
+    const bool estia = format == FrameFormat::ESTIA;
+    const uint8_t base = estia ? 0x60 : format == FrameFormat::TU2C ? 0x50 : 0x40;
+    // Higher addresses arrive first; remember them before our candidate collides.
+    unit.handle_remote_address_collision_(base + 3, "test");
+    unit.handle_remote_address_collision_(base + 1, "test");
+    assert(unit.remote_address_ == base);
+    unit.handle_remote_address_collision_(base, "test");
+    assert(unit.remote_address_ == base + (estia ? 2 : 4));
+    if (estia) {
+      // Estia retains its existing range with no reserved address at +2.
+      unit.handle_remote_address_collision_(base + 2, "test");
+      assert(unit.remote_address_ == base + 4);
+    }
+    assert(unit.write_queue_.empty());
+    if (format == FrameFormat::TU2C) unit.tu2c_remote_announce();
+    else if (estia) unit.send_estia_first_gen_zone1(true);
+    else unit.remote_announce();
+    assert(unit.write_queue_.empty());  // No startup registrations queued.
+    assert(unit.is_initial_frame_send_block_active_(unit.boot_millis_ + 39999));
+    assert(!unit.is_initial_frame_send_block_active_(unit.boot_millis_ + 40000));
+    unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+    if (format == FrameFormat::TU2C) unit.tu2c_remote_announce();
+    else if (estia) unit.send_estia_first_gen_zone1(true);
+    else unit.remote_announce();
+    assert(unit.write_queue_.size() == 1);
+    const auto &registration = unit.write_queue_.front();
+    assert((registration.is_tu2c() ? registration.raw[1] : registration.source) == base + 4);
+    // Late collisions still skip addresses remembered during initial listening.
+    unit.handle_remote_address_collision_(base + 6, "test");
+    unit.handle_remote_address_collision_(base + 5, "test");
+    unit.handle_remote_address_collision_(base + 4, "test");
+    assert(unit.remote_address_ == base + 7);
+  }
+}
+
 static void first_gen_temperature_checks() {
   TestEstia unit;
   unit.set_frame_format(FrameFormat::ESTIA);
@@ -233,6 +371,8 @@ int main() {
   dn_checks();
   new (&App) Application();
   control_checks();
+  tu2c_address_checks();
+  startup_address_checks();
   TestEstia unit;
   unit.set_frame_format(FrameFormat::A0);
   ToshibaAbEstiaZoneClimate z1(&unit), z2(&unit, 2);

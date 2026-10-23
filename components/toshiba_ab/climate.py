@@ -50,7 +50,6 @@ CONF_INDOOR_UNIT_COUNT = "indoor_unit_count"
 CONF_INDOOR_UNITS = "indoor_units"
 CONF_REMOTE_COUNT = "remote_count"
 CONF_REMOTE_ADDRESSES = "remote_addresses"
-CONF_REMOTE_ADDRESS_SELECT = "remote_address_select"
 CONF_CURVE_SHIFT = "curve_shift"
 
 CONF_ON_DATA_RECEIVED = "on_data_received"
@@ -138,10 +137,6 @@ ToshibaAbEstiaZoneClimate = toshiba_ab_ns.class_(
 ToshibaAbEstiaCurveShiftSelect = toshiba_ab_ns.class_(
     "ToshibaAbEstiaCurveShiftSelect", select.Select
 )
-ToshibaAbRemoteAddressSelect = toshiba_ab_ns.class_(
-    "ToshibaAbRemoteAddressSelect", select.Select
-)
-
 ToshibaAbVentSwitch =  toshiba_ab_ns.class_(
     "ToshibaAbVentSwitch", switch.Switch, cg.Component
 )
@@ -253,14 +248,6 @@ def _hardware_uart_rx_pin(value):
 
 
 def _add_automatic_entities(config):
-    # Insert this before the component schema is evaluated rather than relying
-    # on a dictionary-valued cv.Optional default. This makes creation explicit
-    # and also supports ESPHome releases that do not materialize complex
-    # defaults for nested entity schemas.
-    config.setdefault(
-        CONF_REMOTE_ADDRESS_SELECT, {CONF_NAME: "Toshiba Remote Address"}
-    )
-
     if str(config.get(CONF_FRAME_FORMAT, "auto")).lower() == "a0":
         config.setdefault(CONF_ZONE1_CLIMATE, True)
     return config
@@ -311,10 +298,6 @@ CONFIG_SCHEMA = cv.All(
         ),
         cv.Optional(CONF_MASTER): cv.uint8_t,
         cv.Optional(CONF_REMOTE): cv.uint8_t,
-        cv.Optional(CONF_REMOTE_ADDRESS_SELECT): select.select_schema(
-            ToshibaAbRemoteAddressSelect,
-            entity_category=ENTITY_CATEGORY_CONFIG,
-        ),
         cv.Optional(CONF_COMMAND_MODE_READ, default=0x08): cv.uint8_t,
         cv.Optional(CONF_COMMAND_MODE_WRITE, default=0x80): cv.uint8_t,
         cv.Optional(CONF_FRAME_FORMAT, default="auto"): cv.one_of(*FRAME_FORMATS, lower=True),
@@ -738,11 +721,6 @@ async def to_code(config):
         cg.add(var.set_master_address(config[CONF_MASTER]))
     if CONF_REMOTE in config:
         cg.add(var.set_remote_address(config[CONF_REMOTE]))
-
-    remote_address_select = await select.new_select(
-        config[CONF_REMOTE_ADDRESS_SELECT], var, options=["0x40", "0x41"]
-    )
-    cg.add(var.set_remote_address_select(remote_address_select))
 
     if CONF_CURVE_SHIFT in config:
         curve_shift = await select.new_select(
