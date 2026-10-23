@@ -874,6 +874,50 @@ void ToshibaAbClimate::remote_announce() {
   this->send_command(cmd);
 }
 
+// Periodic wall-remote temperature report, distinct from the independent
+// sensor report sent by send_remote_temp(). Only the header remote sends it.
+void ToshibaAbClimate::send_regular_remote_temperature_() {
+  const FrameFormat format = this->data_reader.frame_format();
+  const bool tu2c = format == FrameFormat::TU2C;
+  if (!tu2c && format != FrameFormat::NORMAL && format != FrameFormat::HM) return;
+  if (this->remote_address_ != (tu2c ? TOSHIBA_TU2C_REMOTE_DEFAULT : TOSHIBA_REMOTE_DEFAULT)) return;
+
+  const bool sensor_reading = this->ext_temp_sensor_ && this->ext_temp_sensor_->has_state() &&
+                              std::isfinite(this->ext_temp_sensor_->state);
+  float temperature = 20.0f;
+  if (sensor_reading) temperature = this->ext_temp_sensor_->state;
+  else if (std::isfinite(this->current_temperature)) temperature = this->current_temperature - 0.5f;
+  else if (std::isfinite(this->target_temperature)) temperature = this->target_temperature;
+  const uint8_t raw = temp_celcius_to_payload(temperature);
+  DataFrame cmd{};
+  if (tu2c) {
+    // F0 F0 0D SRC DST C0 61 38 FLAG TEMP 00 CRC A0.
+    cmd.set_tu2c(true);
+    cmd.raw[0] = 0x0D;
+    cmd.raw[1] = this->remote_address_;
+    cmd.raw[2] = this->tu2c_master_address_;
+    cmd.raw[3] = TU2C_FRAME_MARKER;
+    cmd.raw[4] = 0x61;
+    cmd.raw[5] = 0x38;
+    cmd.raw[6] = 0x01;  // Regular TU2C header-remote report: 61 38 01.
+    cmd.raw[7] = raw;
+    cmd.raw[8] = 0x00;
+    cmd.raw[9] = calculate_tu2c_crc(cmd.raw, 9);
+  } else {
+    cmd.source = this->remote_address_;
+    cmd.dest = this->master_address_;
+    cmd.opcode1 = OPCODE_TEMPERATURE;
+    cmd.data_length = 5;
+    cmd.data[0] = this->command_mode_read_;
+    cmd.data[1] = 0x81;
+    cmd.data[2] = 0x00;
+    cmd.data[3] = raw;
+    cmd.data[4] = 0x00;
+    cmd.data[cmd.data_length] = cmd.calculate_crc();
+  }
+  this->send_command(cmd);
+}
+
 void ToshibaAbClimate::tu2c_remote_announce() {
   DataFrame cmd{};
   const uint8_t source = this->remote_address_;
@@ -1571,8 +1615,8 @@ void ToshibaAbClimate::setup() {
 #endif
 
   // Autonomous mode additionally needs TU2C registration.  Normal/HM
-  // autonomous temperature reporting is selected by using the default remote
-  // address (0x40), not by the autonomous option. Keep-alive and E8 polling are
+  // regular temperature reporting is selected by the header remote address
+  // (0x40 for Normal/HM, 0x50 for TU2C), not by the autonomous option. Keep-alive and E8 polling are
   // configured separately below because a wall remote also sends them when the
   // component is not autonomous.
   if (this->autonomous_) {
@@ -1599,46 +1643,8 @@ void ToshibaAbClimate::setup() {
     }
   }
 
-  this->set_interval(this->ping_interval_ms_, [this]() { //30s
-    const FrameFormat format = this->data_reader.frame_format();
-    if (format != FrameFormat::NORMAL && format != FrameFormat::HM) {
-      return;
-    }
-    if (this->remote_address_ != TOSHIBA_REMOTE_DEFAULT ||
-        (format == FrameFormat::NORMAL && this->block_temperature_reports_)) {
-      ESP_LOGV(TAG, "Remote temperature report skipped: address 0x%02X or diagnostic switch",
-               this->remote_address_);
-      return;
-    }
-
-    float t = NAN;
-    if (this->ext_temp_sensor_ && this->ext_temp_sensor_->has_state()) {
-      t = this->ext_temp_sensor_->state;
-    } else if (std::isfinite(this->current_temperature)) {
-      t = this->current_temperature - 0.5f;
-    } else if (!std::isnan(this->target_temperature)) {
-      t = this->target_temperature;
-    } else {
-      t = 20.0f;
-    }
-
-    if (std::isfinite(t)) {
-      const uint8_t raw = temp_celcius_to_payload(t);
-      ESP_LOGV(TAG, "Autonomous address: enqueuing remote temperature %.1f°C (raw=0x%02X)", t, raw);
-      DataFrame cmd{};
-      cmd.source = this->remote_address_;
-      cmd.dest = this->master_address_;
-      cmd.opcode1 = OPCODE_TEMPERATURE;
-      cmd.data_length = 5;
-      cmd.data[0] = this->command_mode_read_;
-      cmd.data[1] = 0x81;
-      cmd.data[2] = 0x00;
-      cmd.data[3] = raw;
-      cmd.data[4] = 0x00;
-      cmd.data[cmd.data_length] = cmd.calculate_crc();
-      this->send_command(cmd);
-      ESP_LOGV(TAG, "Autonomous address: remote temperature frame enqueued (dest=0x%02X)", this->master_address_);
-    }
+  this->set_interval(this->ping_interval_ms_, [this]() {
+    this->send_regular_remote_temperature_();
   });
 
   this->announce_ack_received_ = false;
@@ -1725,8 +1731,6 @@ void ToshibaAbClimate::setup() {
   // Ensure the read-only switch reports its initial state on startup (default OFF)
   if (this->read_only_switch_)
     this->read_only_switch_->publish_state(this->read_only_);
-  if (this->block_temperature_reports_switch_)
-    this->block_temperature_reports_switch_->publish_state(this->block_temperature_reports_);
 
 }
 
@@ -2245,8 +2249,8 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
     const uint8_t raw_temp = frame->raw[7];
     const float room_temp =
         static_cast<float>(raw_temp) / TEMPERATURE_CONVERSION_RATIO - TEMPERATURE_CONVERSION_OFFSET;
-    tcc_state.room_temp = room_temp;
-    ESP_LOGD(TAG, "Remote %02X room temp: %.1f", source, room_temp);
+    // The unit's status reports the actual control temperature, as on TCC-Link.
+    ESP_LOGD(TAG, "Remote %02X room temp: %.1f (sensor flag=%02X)", source, room_temp, frame->raw[6]);
     return;
   }
 
