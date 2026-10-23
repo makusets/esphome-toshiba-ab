@@ -399,7 +399,7 @@ static void regular_temperature_checks() {
   sensor::Sensor room;
   unit.set_ext_temp_source(&room);
   room.publish_state(22.5f);
-  auto f = report(0x01, 115);
+  auto f = report(0x00, 115);  // Configured sensors also use the regular report flag.
   // The decoder reads raw[7], while leaving control temperature to unit status.
   TestEstia receiver;
   receiver.set_frame_format(FrameFormat::TU2C);
