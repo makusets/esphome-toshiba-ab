@@ -251,7 +251,6 @@ climate:
 Use [`estia_R410A_example.yaml`](estia_R410A_example.yaml) for the complete R410A configuration,
 including auto curve adjustment, sensors and runtime switches.
 
-
 ### Minimal R32 configuration
 
 ```yaml
