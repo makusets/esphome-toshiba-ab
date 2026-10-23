@@ -1598,6 +1598,8 @@ void ToshibaAbClimate::setup() {
     float t = NAN;
     if (this->ext_temp_sensor_ && this->ext_temp_sensor_->has_state()) {
       t = this->ext_temp_sensor_->state;
+    } else if (std::isfinite(this->current_temperature)) {
+      t = this->current_temperature - 0.5f;
     } else if (!std::isnan(this->target_temperature)) {
       t = this->target_temperature;
     } else {
