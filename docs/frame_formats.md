@@ -329,3 +329,27 @@ reserved temperature-sensor address where applicable (Estia retains its full
 `0x60`–`0x69` range). Registration is built using the selected
 address after the silent period; startup registration requests are not queued
 with an earlier candidate. Collision recovery stays active afterward.
+
+### Regular TU2C remote temperature reports
+
+The header remote (`0x50`) sends a regular temperature report at `ping_interval`
+(default 30 seconds), independently of the independent-sensor reporting option:
+
+```text
+F0:F0:0D:50:<MASTER>:C0:61:38:<FLAG>:<TEMP>:00:<CRC>:A0
+```
+
+`TEMP = (°C + 35) × 2`; `CRC` is the additive checksum of the bytes from
+`0D` through the trailing `00`. A valid configured temperature sensor supplies
+the reading with `FLAG=01`. Otherwise the report uses current temperature minus
+0.5 °C, then target temperature, then 20 °C, with `FLAG=00`. The source priority
+matches the regular TCC-Link report. Only address `0x50` reports: automatic
+collision recovery to another address disables these reports. Startup silence,
+read-only mode, and autonomous registration gating also apply.
+
+Incoming `61 38` reports are logged with their sensor flag. The unit's status
+frames remain the source of control-temperature state. This regular report is
+distinct from the independent temperature sensor mechanism; it does not
+implement TU2C independent-sensor reporting. See
+[PR #256](https://github.com/makusets/esphome-toshiba-ab/pull/256) for the captured
+frame and sensor-flag evidence.

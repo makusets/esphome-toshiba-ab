@@ -42,7 +42,6 @@ CONF_CONNECTED = "connected"
 CONF_WALL_MOUNTED_LOUVRE = "wall_mounted_louvre"
 CONF_VENT = "vent"
 CONF_READ_ONLY_SWITCH = "read_only_switch"
-CONF_BLOCK_TEMPERATURE_REPORTS = "block_temperature_reports"
 CONF_FAILED_CRCS = "failed_crcs"
 CONF_NOISE_RATE = "noise_rate"
 CONF_CRC_FAILURES_5MIN = "crc_failures_5min"
@@ -143,9 +142,6 @@ ToshibaAbVentSwitch =  toshiba_ab_ns.class_(
 
 ToshibaAbReadOnlySwitch = toshiba_ab_ns.class_(
     "ToshibaAbReadOnlySwitch", switch.Switch, cg.Component
-)
-ToshibaAbBlockTemperatureReportsSwitch = toshiba_ab_ns.class_(
-    "ToshibaAbBlockTemperatureReportsSwitch", switch.Switch
 )
 ToshibaAbEstiaZone1Switch = toshiba_ab_ns.class_(
     "ToshibaAbEstiaZone1Switch", switch.Switch, cg.Component
@@ -322,11 +318,6 @@ CONFIG_SCHEMA = cv.All(
                 )
             ),
             key=CONF_NAME,
-        ),
-        cv.Optional(CONF_BLOCK_TEMPERATURE_REPORTS): switch.switch_schema(
-            ToshibaAbBlockTemperatureReportsSwitch,
-            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
-            default_restore_mode="ALWAYS_OFF",
         ),
         cv.Optional(CONF_READ_ONLY_SWITCH): cv.maybe_simple_value(
             switch._SWITCH_SCHEMA.extend(
@@ -775,9 +766,6 @@ async def to_code(config):
     if CONF_READ_ONLY_SWITCH in config:
         sw = await switch.new_switch(config[CONF_READ_ONLY_SWITCH], var)
         cg.add(var.set_read_only_switch(sw))
-    if CONF_BLOCK_TEMPERATURE_REPORTS in config:
-        sw = await switch.new_switch(config[CONF_BLOCK_TEMPERATURE_REPORTS], var)
-        cg.add(var.set_block_temperature_reports_switch(sw))
     if CONF_ZONE1_SWITCH in config:
         sw = await switch.new_switch(config[CONF_ZONE1_SWITCH], var)
         cg.add(var.set_zone1_switch(sw))

@@ -1022,8 +1022,6 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_vent_switch(switch_::Switch *vent_switch) { vent_switch_ = vent_switch; }
 
   void set_read_only_switch(switch_::Switch *read_only_switch) { read_only_switch_ = read_only_switch; }
-  void set_block_temperature_reports_switch(switch_::Switch *sw) { block_temperature_reports_switch_ = sw; }
-  void set_block_temperature_reports(bool block) { block_temperature_reports_ = block; }
   void set_zone1_switch(switch_::Switch *zone1_switch) { zone1_switch_ = zone1_switch; }
   void set_dhw_boost_switch(switch_::Switch *dhw_boost_switch) { dhw_boost_switch_ = dhw_boost_switch; }
   void set_frost_protection_switch(switch_::Switch *sw) { frost_protection_switch_ = sw; }
@@ -1050,6 +1048,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void remote_announce();
   void tu2c_remote_announce();
   void tu2c_send_ping();
+  void send_regular_remote_temperature_();
   bool is_tu2c_registration_ack_(const DataFrame *frame) const;
   bool is_tu2c_registration_query_(const DataFrame &frame) const;
   bool is_announce_ack_frame_(const DataFrame *frame) const;
@@ -1194,8 +1193,6 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void publish_estia_feature_states_(uint8_t mode);
   switch_::Switch *vent_switch_{nullptr};
   switch_::Switch *read_only_switch_{nullptr};
-  switch_::Switch *block_temperature_reports_switch_{nullptr};
-  bool block_temperature_reports_{false};
   switch_::Switch *zone1_switch_{nullptr};
   switch_::Switch *dhw_boost_switch_{nullptr};
   switch_::Switch *frost_protection_switch_{nullptr};
@@ -1470,17 +1467,6 @@ class ToshibaAbEstiaNightSetbackSwitch : public switch_::Switch, public Componen
   ToshibaAbEstiaNightSetbackSwitch(ToshibaAbClimate *climate) { climate_ = climate; }
  protected:
   void write_state(bool state) override;
-  ToshibaAbClimate *climate_;
-};
-
-class ToshibaAbBlockTemperatureReportsSwitch : public switch_::Switch {
- public:
-  explicit ToshibaAbBlockTemperatureReportsSwitch(ToshibaAbClimate *climate) : climate_(climate) {}
- protected:
-  void write_state(bool state) override {
-    climate_->set_block_temperature_reports(state);
-    this->publish_state(state);
-  }
   ToshibaAbClimate *climate_;
 };
 

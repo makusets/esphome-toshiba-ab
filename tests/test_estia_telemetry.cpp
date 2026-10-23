@@ -366,6 +366,85 @@ static void first_gen_temperature_checks() {
   near(dhw.state, 50.0f);
 }
 
+static void regular_temperature_checks() {
+  TestEstia unit;
+  unit.set_frame_format(FrameFormat::TU2C);
+  unit.boot_millis_ = millis();
+  unit.announce_ack_received_ = true;
+  unit.send_regular_remote_temperature_();
+  assert(unit.write_queue_.empty());  // Startup silence.
+  unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+  unit.announce_ack_received_ = false;
+  unit.send_regular_remote_temperature_();
+  assert(unit.write_queue_.empty());  // Must register first in autonomous mode.
+  unit.announce_ack_received_ = true;
+  unit.current_temperature = 24.0f;
+  auto report = [&](uint8_t flag, uint8_t temperature) {
+    unit.send_regular_remote_temperature_();
+    assert(unit.write_queue_.size() == 1);
+    auto f = unit.write_queue_.front(); unit.write_queue_.pop();
+    assert(f.is_tu2c());
+    assert(f.get_data() == std::vector<uint8_t>({0x0D, 0x50, 0x90, 0xC0, 0x61, 0x38,
+                                               flag, temperature, 0x00, f.raw[9]}));
+    assert(f.raw[9] == dn_checksum(f.raw, 9));
+    assert(!unit.should_track_command_ack_(f));
+    return f;
+  };
+  report(0x00, 117);  // Current 24 C minus 0.5 C.
+  unit.current_temperature = NAN;
+  unit.target_temperature = 25.0f;
+  report(0x00, 120);
+  unit.target_temperature = NAN;
+  report(0x00, 110);  // Default 20 C.
+  sensor::Sensor room;
+  unit.set_ext_temp_source(&room);
+  room.publish_state(22.5f);
+  auto f = report(0x01, 115);
+  // The decoder reads raw[7], while leaving control temperature to unit status.
+  TestEstia receiver;
+  receiver.set_frame_format(FrameFormat::TU2C);
+  receiver.set_remote_address(0x51);
+  receiver.tcc_state.room_temp = 19.0f;
+  assert(receiver.receive_data_frame(&f));
+  near(receiver.tcc_state.room_temp, 19.0f);
+  unit.set_read_only(true);
+  unit.send_regular_remote_temperature_();
+  assert(unit.write_queue_.empty());
+  unit.set_read_only(false);
+  for (uint8_t address = 0x51; address <= 0x59; ++address) {
+    unit.set_remote_address(address);
+    unit.send_regular_remote_temperature_();
+    assert(unit.write_queue_.empty());
+  }
+  TestEstia collided;
+  collided.set_frame_format(FrameFormat::TU2C);
+  collided.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+  collided.handle_remote_address_collision_(0x50, "test");
+  collided.write_queue_ = {};
+  collided.announce_ack_received_ = true;
+  collided.send_regular_remote_temperature_();
+  assert(collided.write_queue_.empty());
+  for (auto format : {FrameFormat::NORMAL, FrameFormat::HM}) {
+    TestEstia normal;
+    normal.set_frame_format(format);
+    normal.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+    normal.announce_ack_received_ = true;
+    normal.current_temperature = 24.0f;
+    normal.send_regular_remote_temperature_();
+    assert(normal.write_queue_.size() == 1);
+    const auto &command = normal.write_queue_.front();
+    assert(command.source == 0x40 && command.opcode1 == OPCODE_TEMPERATURE);
+    assert(command.data[1] == 0x81 && command.data[3] == 117);
+    assert(command.crc() == command.calculate_crc());
+  }
+  for (auto format : {FrameFormat::A0, FrameFormat::ESTIA}) {
+    TestEstia other;
+    other.set_frame_format(format);
+    other.send_regular_remote_temperature_();
+    assert(other.write_queue_.empty());
+  }
+}
+
 int main() {
   first_gen_temperature_checks();
   dn_checks();
@@ -373,6 +452,7 @@ int main() {
   control_checks();
   tu2c_address_checks();
   startup_address_checks();
+  regular_temperature_checks();
   TestEstia unit;
   unit.set_frame_format(FrameFormat::A0);
   ToshibaAbEstiaZoneClimate z1(&unit), z2(&unit, 2);
