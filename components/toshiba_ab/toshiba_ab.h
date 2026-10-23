@@ -28,15 +28,6 @@ class ToshibaAbWallMountedLouvreSelect : public select::Select {
   ToshibaAbClimate *parent_;
 };
 
-class ToshibaAbRemoteAddressSelect : public select::Select {
- public:
-  explicit ToshibaAbRemoteAddressSelect(ToshibaAbClimate *parent) : parent_(parent) {}
-
- protected:
-  void control(const std::string &value) override;
-  ToshibaAbClimate *parent_;
-};
-
 class ToshibaAbEstiaCurveShiftSelect : public select::Select {
  public:
   explicit ToshibaAbEstiaCurveShiftSelect(ToshibaAbClimate *parent) : parent_(parent) {}
@@ -72,7 +63,7 @@ const uint32_t LAST_ALIVE_TIMEOUT_MILLIS = ALIVE_MESSAGE_PERIOD_MILLIS * 3 +1000
 const uint32_t PACKET_MIN_WAIT_MILLIS = 200;
 const uint32_t FRAME_SEND_MILLIS_FROM_LAST_RECEIVE = 500;
 const uint32_t FRAME_SEND_MILLIS_FROM_LAST_SEND = 500;
-const uint32_t INITIAL_FRAME_SEND_BLOCK_MILLIS = 30000;
+const uint32_t INITIAL_FRAME_SEND_BLOCK_MILLIS = 40000;
 const uint32_t REMOTE_REANNOUNCE_TIMEOUT_MILLIS = 30000;
 const uint32_t BUS_DISCOVERY_PERIOD_MILLIS = 180000;
 const uint32_t ESTIA_DN_READ_TIMEOUT_MILLIS = 10000;
@@ -84,6 +75,8 @@ const uint8_t TOSHIBA_MASTER_DEFAULT = 0x00;
 const uint8_t TOSHIBA_REMOTE_DEFAULT = 0x40;
 const uint8_t TOSHIBA_REMOTE_MAX = 0x49;
 const uint8_t TOSHIBA_TU2C_REMOTE_DEFAULT = 0x50;
+const uint8_t TOSHIBA_TU2C_REMOTE_MAX = 0x59;
+const uint8_t TOSHIBA_TU2C_TEMP_SENSOR = 0x52;
 const uint8_t TOSHIBA_TU2C_MASTER_DEFAULT = 0x90;
 const uint8_t TOSHIBA_ESTIA_REMOTE_DEFAULT = 0x60;
 const uint8_t TOSHIBA_ESTIA_REMOTE_MAX = 0x69;
@@ -901,8 +894,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool master_address_confirmed_{false};
   uint8_t remote_address_{TOSHIBA_REMOTE_DEFAULT};
   bool remote_address_auto_{true};
+  std::bitset<256> occupied_remote_addresses_;
+  bool remote_address_available_{true};
   bool master_address_auto_{true};
-  uint8_t tu2c_remote_address_{TOSHIBA_TU2C_REMOTE_DEFAULT};
   uint8_t tu2c_master_address_{TOSHIBA_TU2C_MASTER_DEFAULT};
   bool filter_frames_{true};
   void set_master_address(uint8_t address);
@@ -912,9 +906,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
     // a zero mode byte (for example 0x40 becomes 0x0040).
     estia_source_address_ = remote_address_;
     remote_address_auto_ = false;
-  }
-  void set_remote_address_select(ToshibaAbRemoteAddressSelect *address_select) {
-    remote_address_select_ = address_select;
+    remote_address_available_ = true;
   }
   bool get_master_address_auto() const { return master_address_auto_; }
   void set_filter_frames(bool filter_frames) {
@@ -969,8 +961,10 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
     data_reader.set_frame_format(format);
     frame_format_auto_ = false;
     frame_format_confirmed_ = true;
-    if (format == FrameFormat::ESTIA) {
-      if (remote_address_auto_) remote_address_ = TOSHIBA_ESTIA_REMOTE_DEFAULT;
+    if (remote_address_auto_) {
+      remote_address_ = format == FrameFormat::TU2C ? TOSHIBA_TU2C_REMOTE_DEFAULT
+                        : format == FrameFormat::ESTIA ? TOSHIBA_ESTIA_REMOTE_DEFAULT
+                                                     : TOSHIBA_REMOTE_DEFAULT;
     }
     this->apply_default_master_address_for_frame_format_();
   }
@@ -1042,7 +1036,6 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_remote_count_text_sensor(text_sensor::TextSensor *sensor) { this->remote_count_text_sensor_ = sensor; }
   void set_remote_addresses_text_sensor(text_sensor::TextSensor *sensor) { this->remote_addresses_text_sensor_ = sensor; }
 
-  ToshibaAbRemoteAddressSelect *remote_address_select_{nullptr};
 
   void send_command(struct DataFrame command);
   bool send_raw_frame_from_text(const std::string &frame_text);

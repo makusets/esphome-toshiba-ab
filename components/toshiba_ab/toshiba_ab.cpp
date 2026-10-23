@@ -176,11 +176,11 @@ void ToshibaAbClimate::remember_tx_frame_for_echo_(const uint8_t *bytes, size_t 
 
   DataFrame tx{};
   std::memcpy(tx.raw, payload, payload_size);
+  tx.set_tu2c(payload_tu2c);
   if (tx.size() == 0 || tx.size() != payload_size) {
     return;
   }
 
-  tx.set_tu2c(payload_tu2c);
   this->last_tx_frame_for_echo_ = tx;
   this->last_tx_frame_millis_ = millis();
 }
@@ -373,7 +373,7 @@ bool ToshibaAbClimate::should_track_tu2c_command_ack_(const DataFrame &frame) co
     return false;
   }
 
-  const bool matches_tu2c_addresses = frame.raw[1] == this->tu2c_remote_address_ && frame.raw[2] == this->tu2c_master_address_;
+  const bool matches_tu2c_addresses = frame.raw[1] == this->remote_address_ && frame.raw[2] == this->tu2c_master_address_;
   const bool matches_estia_addresses = this->data_reader.frame_format() == FrameFormat::ESTIA &&
                                       frame.raw[1] == this->remote_address_ && frame.raw[2] == this->master_address_;
   if (!matches_tu2c_addresses && !matches_estia_addresses) {
@@ -806,16 +806,38 @@ bool ToshibaAbClimate::is_remote_announce_frame_(const DataFrame *frame) const {
 }
 
 void ToshibaAbClimate::handle_remote_address_collision_(uint8_t address, const char *reason) {
-  if (!this->remote_address_auto_ || address != this->remote_address_ || this->remote_address_ >= TOSHIBA_REMOTE_MAX) {
-    return;
-  }
+  const bool tu2c = this->data_reader.frame_format() == FrameFormat::TU2C;
+  const bool estia = this->is_estia_first_gen();
+  const uint8_t max_address = estia ? TOSHIBA_ESTIA_REMOTE_MAX
+                                  : tu2c ? TOSHIBA_TU2C_REMOTE_MAX : TOSHIBA_REMOTE_MAX;
+  const uint8_t sensor_address = estia ? 0xFF : tu2c ? TOSHIBA_TU2C_TEMP_SENSOR : TOSHIBA_TEMP_SENSOR;
+  const uint8_t min_address = estia ? TOSHIBA_ESTIA_REMOTE_DEFAULT
+                                  : tu2c ? TOSHIBA_TU2C_REMOTE_DEFAULT : TOSHIBA_REMOTE_DEFAULT;
+  if (address < min_address || address > max_address || address == sensor_address) return;
+  this->occupied_remote_addresses_.set(address);
+  if (!this->remote_address_auto_ || address != this->remote_address_) return;
 
   const uint8_t old = this->remote_address_;
-  uint8_t next = this->remote_address_ + 1;
-  if (next == TOSHIBA_TEMP_SENSOR) {
+  uint8_t next = old + 1;
+  while (next <= max_address &&
+         (next == sensor_address || this->occupied_remote_addresses_.test(next))) {
     next++;
   }
-  this->remote_address_ = std::min(next, TOSHIBA_REMOTE_MAX);
+  // Nothing queued under a collided address may be sent after listening ends.
+  this->write_queue_ = {};
+  this->last_unconfirmed_command_.reset();
+  if (next > max_address) {
+    this->remote_address_available_ = false;
+    this->announce_ack_received_ = false;
+    ESP_LOGW(TAG, "No unused remote address remains through 0x%02X; suppressing remote transmissions", max_address);
+    return;
+  }
+  this->remote_address_ = next;
+  this->remote_address_available_ = true;
+  if (estia) {
+    ESP_LOGI(TAG, "%s at 0x%02X; switching to remote address 0x%02X", reason, old, next);
+    return;
+  }
   this->announce_ack_received_ = false;
   this->remote_reannounce_pending_ = true;
   this->remote_reannounce_started_ms_ = millis();
@@ -827,7 +849,12 @@ void ToshibaAbClimate::handle_remote_address_collision_(uint8_t address, const c
   // sends its first periodic frame, after the finite boot announce window has
   // closed. Announce the replacement address immediately; the setup interval
   // retries it until the master acknowledges that address.
-  this->remote_announce();
+  if (this->is_initial_frame_send_block_active_(millis())) return;
+  if (tu2c) {
+    this->tu2c_remote_announce();
+  } else {
+    this->remote_announce();
+  }
 }
 
 void ToshibaAbClimate::remote_announce() {
@@ -847,7 +874,7 @@ void ToshibaAbClimate::remote_announce() {
 
 void ToshibaAbClimate::tu2c_remote_announce() {
   DataFrame cmd{};
-  const uint8_t source = this->tu2c_remote_address_;
+  const uint8_t source = this->remote_address_;
   const uint8_t dest = this->tu2c_master_address_;
 
   cmd.set_tu2c(true);
@@ -864,7 +891,7 @@ void ToshibaAbClimate::tu2c_remote_announce() {
 
 void ToshibaAbClimate::tu2c_send_ping() {
   DataFrame cmd{};
-  const uint8_t source = this->tu2c_remote_address_;
+  const uint8_t source = this->remote_address_;
   const uint8_t dest = this->tu2c_master_address_;
 
   cmd.set_tu2c(true);
@@ -891,14 +918,15 @@ bool ToshibaAbClimate::is_tu2c_registration_ack_(const DataFrame *frame) const {
     return false;
   }
 
-  return frame->raw[1] == this->tu2c_master_address_ && frame->raw[4] == 0x80 && frame->raw[5] == 0x0D;
+  return frame->raw[1] == this->tu2c_master_address_ && frame->raw[2] == this->remote_address_ &&
+         frame->raw[4] == 0x80 && frame->raw[5] == 0x0D;
 }
 
 bool ToshibaAbClimate::is_tu2c_registration_query_(const DataFrame &frame) const {
   if (!frame.is_tu2c() || frame.size() < 7) {
     return false;
   }
-  return frame.raw[0] == 0x0A && frame.raw[1] == this->tu2c_remote_address_ && frame.raw[2] == this->tu2c_master_address_ &&
+  return frame.raw[0] == 0x0A && frame.raw[1] == this->remote_address_ && frame.raw[2] == this->tu2c_master_address_ &&
          frame.raw[4] == 0x49 && frame.raw[5] == 0x0D;
 }
 
@@ -1357,13 +1385,6 @@ bool ToshibaAbClimate::control_wall_mounted_louvre(uint8_t position) {
   return true;
 }
 
-void ToshibaAbRemoteAddressSelect::control(const std::string &value) {
-  const uint8_t address = value == "0x41" ? 0x41 : 0x40;
-  this->parent_->set_remote_address(address);
-  this->publish_state(value);
-  ESP_LOGI(TAG, "Remote address changed at runtime to %s", value.c_str());
-}
-
 void ToshibaAbEstiaCurveShiftSelect::control(const std::string &value) {
   // Accept only the configured options, before any narrowing conversion.
   for (int shift = -5; shift <= 5; ++shift) {
@@ -1462,15 +1483,10 @@ void ToshibaAbClimate::dump_config() {
   LOG_SELECT("  ", "Curve shift (DN 27)", this->curve_shift_select_);
   ESP_LOGCONFIG(TAG, "  Vent switch: %s", this->vent_switch_ ? "yes" : "no");
   ESP_LOGCONFIG(TAG, "  Read-only switch: %s", this->read_only_switch_ ? "yes" : "no");
-  ESP_LOGCONFIG(TAG, "  Remote address select: %s", this->remote_address_select_ ? "yes" : "no");
 }
 
 void ToshibaAbClimate::setup() {
   this->boot_millis_ = millis();
-  if (this->remote_address_select_ != nullptr &&
-      (this->remote_address_ == 0x40 || this->remote_address_ == 0x41)) {
-    this->remote_address_select_->publish_state(this->remote_address_ == 0x41 ? "0x41" : "0x40");
-  }
   if (this->failed_crcs_sensor_ != nullptr) {
     this->failed_crcs_sensor_->publish_state(0);
   }
@@ -1623,7 +1639,8 @@ void ToshibaAbClimate::setup() {
   this->announce_ack_received_ = false;
   this->set_interval(2000, [this]() {
     const FrameFormat format = this->data_reader.frame_format();
-    if (format != FrameFormat::NORMAL && format != FrameFormat::HM) {
+    if (format != FrameFormat::NORMAL && format != FrameFormat::HM &&
+        !(format == FrameFormat::TU2C && !this->autonomous_ && this->remote_reannounce_pending_)) {
       return;
     }
     const uint32_t now = millis();
@@ -1633,12 +1650,17 @@ void ToshibaAbClimate::setup() {
       ESP_LOGW(TAG, "Remote address 0x%02X was not registered within %us; stopping re-registration announces",
                this->remote_address_, REMOTE_REANNOUNCE_TIMEOUT_MILLIS / 1000);
     }
-    if (this->announce_ack_received_ || now < INITIAL_FRAME_SEND_BLOCK_MILLIS ||
-        (now >= INITIAL_FRAME_SEND_BLOCK_MILLIS * 2 && !this->remote_reannounce_pending_)) {
+    const uint32_t boot_elapsed = now - this->boot_millis_;
+    if (this->announce_ack_received_ || boot_elapsed < INITIAL_FRAME_SEND_BLOCK_MILLIS ||
+        (boot_elapsed >= INITIAL_FRAME_SEND_BLOCK_MILLIS * 2 && !this->remote_reannounce_pending_)) {
       return;
     }
-    ESP_LOGV(TAG, "Remote announce: sending broadcast announce");
-    this->remote_announce();
+    if (format == FrameFormat::TU2C) {
+      this->tu2c_remote_announce();
+    } else {
+      ESP_LOGV(TAG, "Remote announce: sending broadcast announce");
+      this->remote_announce();
+    }
   });
 
   // Mimic the wall remote's periodic keep-alive traffic in both operating modes.
@@ -1803,7 +1825,7 @@ void ToshibaAbClimate::autoreset_remote_error_() {
   auto command = DataFrame{};
   if (this->data_reader.frame_format() == FrameFormat::TU2C) {
     ESP_LOGI(TAG, "Autoreset errors: resending current mode/fan/target temperature");
-    write_set_parameter_flags_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_, &this->tcc_state,
+    write_set_parameter_flags_tu2c(&command, this->remote_address_, this->tu2c_master_address_, &this->tcc_state,
                                    COMMAND_SET_TEMP | COMMAND_SET_FAN);
     this->send_command(command);
     return;
@@ -1878,7 +1900,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         // When this is received after boot, the remote can stop announcing itself.
         // The full raw frame may be longer; guard on size()
         if (this->is_announce_ack_frame_(frame)) {
-          if (millis() < INITIAL_FRAME_SEND_BLOCK_MILLIS) {
+          if (this->is_initial_frame_send_block_active_(millis())) {
             ESP_LOGI(TAG, "Ignoring announce ACK (0x0D) from 0x%02X during initial %us announce delay",
                      frame->source, INITIAL_FRAME_SEND_BLOCK_MILLIS / 1000);
           } else if (frame->dest != this->remote_address_) {
@@ -2116,7 +2138,7 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         // Only act on an addressed announce ACK if we haven't already seen one
         // and the initial announce delay has elapsed. ACKs received before the
         // first announce is sent must be for another remote.
-        if (millis() < INITIAL_FRAME_SEND_BLOCK_MILLIS) {
+        if (this->is_initial_frame_send_block_active_(millis())) {
           ESP_LOGI(TAG, "Ignoring announce ACK (0x0D) from 0x%02X during initial %us announce delay",
                    frame->source, INITIAL_FRAME_SEND_BLOCK_MILLIS / 1000);
         } else if (frame->dest != this->remote_address_) {
@@ -2159,6 +2181,13 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
   const uint8_t frame_length = frame->raw[0];
   const uint8_t source = frame->raw[1];
   const uint8_t dest = frame->raw[2];
+  // Own TX echoes have already been removed by receive_data_frame(). Any
+  // remaining frame from our address therefore belongs to another remote.
+  if (source >= TOSHIBA_TU2C_REMOTE_DEFAULT && source <= TOSHIBA_TU2C_REMOTE_MAX &&
+      source != TOSHIBA_TU2C_TEMP_SENSOR) {
+    this->record_discovered_address_(source, true);
+    this->handle_remote_address_collision_(source, "TU2C remote auto-address collision detected");
+  }
   const size_t payload_offset = 4;
   const size_t payload_available = size > payload_offset ? size - payload_offset : 0;
   const bool has_tail_signature =
@@ -2184,6 +2213,7 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
     log_raw_data("Master registration ACK frame", frame->raw, size);
     ESP_LOGD(TAG, "Registration ACK from master %02X", source);
     this->announce_ack_received_ = true;
+    this->remote_reannounce_pending_ = false;
     return;
   }
 
@@ -2199,7 +2229,6 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
       frame->raw[payload_offset + 1] == 0x5C) {
     log_raw_data("Remote keepalive frame", frame->raw, size);
     ESP_LOGD(TAG, "Remote %02X keepalive", source);
-    this->record_discovered_address_(source, true);
     return;
   }
 
@@ -2823,7 +2852,7 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
 }
 
 void ToshibaAbClimate::record_discovered_address_(uint8_t address, bool remote) {
-  if (millis() > BUS_DISCOVERY_PERIOD_MILLIS) return;
+  if (millis() - this->boot_millis_ > BUS_DISCOVERY_PERIOD_MILLIS) return;
   std::bitset<256> &addresses = remote ? this->discovered_remotes_ : this->discovered_indoor_units_;
   if (addresses.test(address)) return;
 
@@ -3241,7 +3270,7 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
       ESP_LOGD(TAG, "Turning on");
       auto command = DataFrame{};
       if (use_tu2c) {
-        write_power_on_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_);
+        write_power_on_tu2c(&command, this->remote_address_, this->tu2c_master_address_);
       } else {
         write_set_parameter_power(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
       }
@@ -3251,7 +3280,7 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
       ESP_LOGD(TAG, "Turning off");
       auto command = DataFrame{};
       if (use_tu2c) {
-        write_power_off_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_);
+        write_power_off_tu2c(&command, this->remote_address_, this->tu2c_master_address_);
       } else {
         write_set_parameter_power(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
       }
@@ -3265,7 +3294,7 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
     ESP_LOGD(TAG, "Changing mode");
     auto command = DataFrame{};
     if (use_tu2c) {
-      write_set_mode_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_, new_state);
+      write_set_mode_tu2c(&command, this->remote_address_, this->tu2c_master_address_, new_state);
     } else {
       write_set_parameter_mode(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state);
     }
@@ -3276,7 +3305,7 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
     ESP_LOGD(TAG, "Changing fan");
     auto command = DataFrame{};
     if (use_tu2c) {
-      write_set_parameter_flags_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_, new_state,
+      write_set_parameter_flags_tu2c(&command, this->remote_address_, this->tu2c_master_address_, new_state,
                                         COMMAND_SET_FAN);
     } else {
       write_set_parameter_flags(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state, COMMAND_SET_FAN, this->is_hm_variant());
@@ -3288,7 +3317,7 @@ std::vector<DataFrame> ToshibaAbClimate::create_commands(const struct TccState *
     ESP_LOGD(TAG, "Changing target temperature");
     auto command = DataFrame{};
     if (use_tu2c) {
-      write_set_parameter_flags_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_, new_state,
+      write_set_parameter_flags_tu2c(&command, this->remote_address_, this->tu2c_master_address_, new_state,
                                         COMMAND_SET_TEMP);
     } else {
       write_set_parameter_flags(&command, this->remote_address_, this->master_address_, this->command_mode_read_, new_state, COMMAND_SET_TEMP, this->is_hm_variant());
@@ -3401,7 +3430,7 @@ void ToshibaAbClimate::control(const climate::ClimateCall &call) {
     }
 
     auto command = DataFrame{};
-    write_set_preset_tu2c(&command, this->tu2c_remote_address_, this->tu2c_master_address_, tu2c_preset);
+    write_set_preset_tu2c(&command, this->remote_address_, this->tu2c_master_address_, tu2c_preset);
     this->send_command(command);
   }
 }
@@ -3637,6 +3666,11 @@ void ToshibaAbClimate::send_command(const struct DataFrame command) {
     return;
   }
   const FrameFormat format = this->data_reader.frame_format();
+  if ((format == FrameFormat::NORMAL || format == FrameFormat::HM || format == FrameFormat::TU2C ||
+       format == FrameFormat::ESTIA) &&
+      (this->is_initial_frame_send_block_active_(millis()) || !this->remote_address_available_)) {
+    return;
+  }
   if (this->autonomous_ && format == FrameFormat::TU2C && !this->announce_ack_received_ &&
       !this->is_tu2c_registration_query_(command)) {
     ESP_LOGW(TAG, "Dropping TU2C command while awaiting registration ACK (autonomous mode)");
@@ -3644,12 +3678,12 @@ void ToshibaAbClimate::send_command(const struct DataFrame command) {
   }
 
   if ((format == FrameFormat::NORMAL || format == FrameFormat::HM) && !this->announce_ack_received_ &&
-      millis() < INITIAL_FRAME_SEND_BLOCK_MILLIS * 2) {
+      (millis() - this->boot_millis_) < INITIAL_FRAME_SEND_BLOCK_MILLIS * 2) {
     const bool is_announce = command.source == this->remote_address_ && command.dest == TOSHIBA_BROADCAST &&
                              command.opcode1 == OPCODE_ERROR_HISTORY && command.data_length == 2 &&
                              command.data[1] == 0x0D;
     if (!is_announce) {
-      ESP_LOGW(TAG, "Dropping Normal/HM command while awaiting announce ACK or 60s boot grace period");
+      ESP_LOGW(TAG, "Dropping Normal/HM command while awaiting announce ACK or boot grace period");
       return;
     }
   }
@@ -4442,9 +4476,8 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
       }
     }
   }
-  if (this->remote_address_auto_ && src == this->remote_address_ && this->remote_address_ < TOSHIBA_ESTIA_REMOTE_MAX) {
-    this->remote_address_++;
-    ESP_LOGI(TAG, "Estia remote-address collision from decoded remote frame; switching to 0x%02X", this->remote_address_);
+  if (is_remote_source) {
+    this->handle_remote_address_collision_(src, "Estia remote-address collision from decoded remote frame");
   }
   if (src == this->master_address_) {
     this->last_master_alive_millis_ = millis();
