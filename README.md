@@ -251,13 +251,6 @@ climate:
 Use [`estia_R410A_example.yaml`](estia_R410A_example.yaml) for the complete R410A configuration,
 including auto curve adjustment, sensors and runtime switches.
 
-For first-generation status temperatures, Zone 1 uses `raw[14]` when nonzero,
-falling back to `raw[13]` when byte 14 is empty (as reported on Estia 5 Hipower).
-The water-temperature sensor and Zone 1 climate entity use the same reading.
-An empty DHW byte (`raw[12] == 0x00`) is ignored rather than decoded as −16 °C;
-likewise, two empty Zone 1 slots do not overwrite the last valid temperature.
-Offsets refer to decoded frames with the `F0:F0` prefix and trailing `A0` removed.
-
 ### Minimal R32 configuration
 
 ```yaml
