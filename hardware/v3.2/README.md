@@ -42,6 +42,24 @@ This is the schematic of the board.
 
 <img src="v3_2 Schematic.png" width="99%">
 
+# Bus power and OTA
+
+The v3.2 board can be powered from the AB line. If OTA updates reset or fail
+while running on AB power, lower the Wi-Fi output power:
+
+```yaml
+wifi:
+  output_power: 14.0dBm
+
+status_led:
+  pin:
+    number: GPIO2
+    inverted: true
+```
+
+See [bus-powered operation](../../docs/hardware.md#bus-powered-operation) for
+details. If OTA still fails, update over USB instead.
+
 # Final product
 
 This is how I installed it
