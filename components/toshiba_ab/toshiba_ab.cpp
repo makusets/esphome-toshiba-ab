@@ -1588,9 +1588,10 @@ void ToshibaAbClimate::setup() {
     if (format != FrameFormat::NORMAL && format != FrameFormat::HM) {
       return;
     }
-    if (this->remote_address_ != TOSHIBA_REMOTE_DEFAULT) {
-      ESP_LOGV(TAG, "Remote temperature report skipped: remote address 0x%02X is not autonomous address 0x%02X",
-               this->remote_address_, TOSHIBA_REMOTE_DEFAULT);
+    if (this->remote_address_ != TOSHIBA_REMOTE_DEFAULT ||
+        (format == FrameFormat::NORMAL && this->block_temperature_reports_)) {
+      ESP_LOGV(TAG, "Remote temperature report skipped: address 0x%02X or diagnostic switch",
+               this->remote_address_);
       return;
     }
 
@@ -1700,6 +1701,8 @@ void ToshibaAbClimate::setup() {
   // Ensure the read-only switch reports its initial state on startup (default OFF)
   if (this->read_only_switch_)
     this->read_only_switch_->publish_state(this->read_only_);
+  if (this->block_temperature_reports_switch_)
+    this->block_temperature_reports_switch_->publish_state(this->block_temperature_reports_);
 
 }
 
