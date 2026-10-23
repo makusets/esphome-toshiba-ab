@@ -1588,13 +1588,12 @@ void ToshibaAbClimate::setup() {
     if (format != FrameFormat::NORMAL && format != FrameFormat::HM) {
       return;
     }
-    if (this->remote_address_ != TOSHIBA_REMOTE_DEFAULT) {
-      ESP_LOGV(TAG, "Remote temperature report skipped: remote address 0x%02X is not autonomous address 0x%02X",
-               this->remote_address_, TOSHIBA_REMOTE_DEFAULT);
+    if (this->remote_address_ != TOSHIBA_REMOTE_DEFAULT ||
+        (format == FrameFormat::NORMAL && this->block_temperature_reports_)) {
+      ESP_LOGV(TAG, "Remote temperature report skipped: address 0x%02X or diagnostic switch",
+               this->remote_address_);
       return;
     }
-
-    if (this->block_temperature_reports_ && format == FrameFormat::NORMAL) return;
 
     float t = NAN;
     if (this->ext_temp_sensor_ && this->ext_temp_sensor_->has_state()) {
@@ -3003,14 +3002,6 @@ void ToshibaAbClimate::loop() {
     }
 
     if (frame_to_send.has_value()) {
-      if (this->should_block_temperature_report_(*frame_to_send)) {
-        ESP_LOGD(TAG, "Diagnostic switch: dropping regular remote temperature report");
-        this->last_unconfirmed_command_.reset();
-        this->last_unconfirmed_command_attempts_ = 0;
-        this->resend_last_unconfirmed_command_ = false;
-        this->last_unconfirmed_command_sent_ms_ = 0;
-        return;
-      }
       if (frame_to_send->is_tu2c() && this->data_reader.frame_format() == FrameFormat::TU2C &&
           !this->has_tu2c_quiet_time_elapsed_(now)) {
           return;

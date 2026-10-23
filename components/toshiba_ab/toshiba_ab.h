@@ -1030,12 +1030,6 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_read_only_switch(switch_::Switch *read_only_switch) { read_only_switch_ = read_only_switch; }
   void set_block_temperature_reports_switch(switch_::Switch *sw) { block_temperature_reports_switch_ = sw; }
   void set_block_temperature_reports(bool block) { block_temperature_reports_ = block; }
-  bool should_block_temperature_report_(const DataFrame &frame) const {
-    return block_temperature_reports_ && this->data_reader.frame_format() == FrameFormat::NORMAL &&
-           remote_address_ == TOSHIBA_REMOTE_DEFAULT && !frame.is_tu2c() && !frame.is_estia() &&
-           frame.source == TOSHIBA_REMOTE_DEFAULT && frame.opcode1 == OPCODE_TEMPERATURE &&
-           frame.data_length == 5 && frame.data[1] == 0x81;
-  }
   void set_zone1_switch(switch_::Switch *zone1_switch) { zone1_switch_ = zone1_switch; }
   void set_dhw_boost_switch(switch_::Switch *dhw_boost_switch) { dhw_boost_switch_ = dhw_boost_switch; }
   void set_frost_protection_switch(switch_::Switch *sw) { frost_protection_switch_ = sw; }
