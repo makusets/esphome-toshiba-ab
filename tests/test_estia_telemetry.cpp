@@ -390,16 +390,16 @@ static void regular_temperature_checks() {
     assert(!unit.should_track_command_ack_(f));
     return f;
   };
-  report(0x00, 117);  // Current 24 C minus 0.5 C.
+  report(0x01, 117);  // Current 24 C minus 0.5 C.
   unit.current_temperature = NAN;
   unit.target_temperature = 25.0f;
-  report(0x00, 120);
+  report(0x01, 120);
   unit.target_temperature = NAN;
-  report(0x00, 110);  // Default 20 C.
+  report(0x01, 110);  // Default 20 C.
   sensor::Sensor room;
   unit.set_ext_temp_source(&room);
   room.publish_state(22.5f);
-  auto f = report(0x00, 115);  // Configured sensors also use the regular report flag.
+  auto f = report(0x01, 115);  // Configured sensors also use the regular report flag.
   // The decoder reads raw[7], while leaving control temperature to unit status.
   TestEstia receiver;
   receiver.set_frame_format(FrameFormat::TU2C);

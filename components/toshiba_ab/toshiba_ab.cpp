@@ -899,7 +899,7 @@ void ToshibaAbClimate::send_regular_remote_temperature_() {
     cmd.raw[3] = TU2C_FRAME_MARKER;
     cmd.raw[4] = 0x61;
     cmd.raw[5] = 0x38;
-    cmd.raw[6] = 0x00;  // Regular remote report, matching TCC-Link regardless of temperature source.
+    cmd.raw[6] = 0x01;  // Regular TU2C header-remote report: 61 38 01.
     cmd.raw[7] = raw;
     cmd.raw[8] = 0x00;
     cmd.raw[9] = calculate_tu2c_crc(cmd.raw, 9);
