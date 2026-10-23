@@ -179,7 +179,57 @@ static void dn_checks() {
   assert(!unit.write_estia_first_gen_dn(0x27, 0));
 }
 
+static void first_gen_temperature_checks() {
+  TestEstia unit;
+  unit.set_frame_format(FrameFormat::ESTIA);
+  unit.set_master_address(0x70);
+  ToshibaAbEstiaZoneClimate zone(&unit);
+  sensor::Sensor water, dhw;
+  unit.set_zone1_climate(&zone);
+  unit.set_zone1_water_temp_sensor(&water);
+  unit.set_dhw_current_temp_sensor(&dhw);
+
+  // Exact 18-byte status from #242: length 0x15 includes three framing bytes.
+  DataFrame status{};
+  status.set_tu2c(true);
+  const uint8_t captured[] = {0x15, 0x70, 0xFF, 0xE0, 0xA0, 0x31, 0x41, 0x00, 0x10,
+                              0xA2, 0x60, 0x66, 0x00, 0x48, 0x00, 0x00, 0x00, 0x36};
+  std::copy(std::begin(captured), std::end(captured), status.raw);
+  assert(dn_checksum(status.raw, 17) == status.raw[17]);
+  auto receive = [&]() {
+    const size_t checksum_offset = status.raw[0] - 4;
+    status.raw[checksum_offset] = dn_checksum(status.raw, checksum_offset);
+    unit.process_received_data_estia_first_gen_(&status);
+  };
+  receive();
+  near(water.state, 20.0f); near(zone.current_temperature, 20.0f);
+  assert(!dhw.has_state() && std::isnan(unit.current_temperature));
+  status.raw[13] = 0x5F; receive();
+  near(water.state, 31.5f); near(zone.current_temperature, 31.5f);
+
+  // Same length, byte-14 layout: preserve its precedence even if both are populated.
+  status.raw[14] = 0x64; status.raw[12] = 0x84; receive();
+  near(water.state, 34.0f); near(zone.current_temperature, 34.0f);
+  near(dhw.state, 50.0f); near(unit.current_temperature, 50.0f);
+  status.raw[13] = 0; receive(); near(water.state, 34.0f);
+
+  // Empty slots must not overwrite valid readings with -16 degrees.
+  status.raw[12] = 0; status.raw[14] = 0; receive();
+  near(water.state, 34.0f); near(zone.current_temperature, 34.0f);
+  near(dhw.state, 50.0f); near(unit.current_temperature, 50.0f);
+
+  // Short status and bad checksums cannot supply current temperatures.
+  status.raw[13] = 0x50; status.raw[14] = 0x60; status.raw[12] = 0x80;
+  status.raw[17] = dn_checksum(status.raw, 17) ^ 1;
+  unit.process_received_data_estia_first_gen_(&status);
+  near(water.state, 34.0f); near(dhw.state, 50.0f);
+  status.raw[0] = 0x0F; receive();
+  near(water.state, 34.0f); near(zone.current_temperature, 34.0f);
+  near(dhw.state, 50.0f);
+}
+
 int main() {
+  first_gen_temperature_checks();
   dn_checks();
   new (&App) Application();
   control_checks();
