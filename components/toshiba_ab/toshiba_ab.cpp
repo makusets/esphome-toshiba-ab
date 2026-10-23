@@ -1,7 +1,9 @@
 #include "toshiba_ab.h"
 #include "climate_compat.h"
 #include "esphome.h"
+#ifdef USE_NETWORK
 #include "esphome/components/network/util.h"
+#endif
 #include <inttypes.h>
 #include <cstring>
 #include <cstdlib>
@@ -2527,8 +2529,12 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
                is_cooling ? "COOL" : (is_heating ? "HEAT" : "???"),
                dhw_setpoint, zone1_setpoint, zone2_setpoint);
 
-      // Initial status on first 0x58 after network is ready
+      // Initial status after network is ready, or on the first 0x58 without networking.
+#ifdef USE_NETWORK
       if (!estia_was_connected_ && network::is_connected()) {
+#else
+      if (!estia_was_connected_) {
+#endif
         const char *mode_str = is_cooling ? "COOL" : (is_heating ? "HEAT" : "???");
         ESP_LOGI(TAG, "Heat pump connected — power: %s, mode: %s, DHW: %.1f°C, zone 1: %.1f°C, zone 2: %.1f°C",
                  zone1_on ? "ON" : "OFF", mode_str, dhw_setpoint, zone1_setpoint, zone2_setpoint);
