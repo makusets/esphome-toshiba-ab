@@ -1,7 +1,9 @@
 #include "toshiba_ab.h"
 #include "climate_compat.h"
 #include "esphome.h"
+#ifdef USE_NETWORK
 #include "esphome/components/network/util.h"
+#endif
 #include <inttypes.h>
 #include <cstring>
 #include <cstdlib>
@@ -1602,15 +1604,18 @@ void ToshibaAbClimate::setup() {
     if (format != FrameFormat::NORMAL && format != FrameFormat::HM) {
       return;
     }
-    if (this->remote_address_ != TOSHIBA_REMOTE_DEFAULT) {
-      ESP_LOGV(TAG, "Remote temperature report skipped: remote address 0x%02X is not autonomous address 0x%02X",
-               this->remote_address_, TOSHIBA_REMOTE_DEFAULT);
+    if (this->remote_address_ != TOSHIBA_REMOTE_DEFAULT ||
+        (format == FrameFormat::NORMAL && this->block_temperature_reports_)) {
+      ESP_LOGV(TAG, "Remote temperature report skipped: address 0x%02X or diagnostic switch",
+               this->remote_address_);
       return;
     }
 
     float t = NAN;
     if (this->ext_temp_sensor_ && this->ext_temp_sensor_->has_state()) {
       t = this->ext_temp_sensor_->state;
+    } else if (std::isfinite(this->current_temperature)) {
+      t = this->current_temperature - 0.5f;
     } else if (!std::isnan(this->target_temperature)) {
       t = this->target_temperature;
     } else {
@@ -1720,6 +1725,8 @@ void ToshibaAbClimate::setup() {
   // Ensure the read-only switch reports its initial state on startup (default OFF)
   if (this->read_only_switch_)
     this->read_only_switch_->publish_state(this->read_only_);
+  if (this->block_temperature_reports_switch_)
+    this->block_temperature_reports_switch_->publish_state(this->block_temperature_reports_);
 
 }
 
@@ -2556,8 +2563,12 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
                is_cooling ? "COOL" : (is_heating ? "HEAT" : "???"),
                dhw_setpoint, zone1_setpoint, zone2_setpoint);
 
-      // Initial status on first 0x58 after network is ready
+      // Initial status after network is ready, or on the first 0x58 without networking.
+#ifdef USE_NETWORK
       if (!estia_was_connected_ && network::is_connected()) {
+#else
+      if (!estia_was_connected_) {
+#endif
         const char *mode_str = is_cooling ? "COOL" : (is_heating ? "HEAT" : "???");
         ESP_LOGI(TAG, "Heat pump connected — power: %s, mode: %s, DHW: %.1f°C, zone 1: %.1f°C, zone 2: %.1f°C",
                  zone1_on ? "ON" : "OFF", mode_str, dhw_setpoint, zone1_setpoint, zone2_setpoint);
@@ -4512,13 +4523,22 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
       this->hotwater_resistor_heating_binary_sensor_->publish_state(this->estia_first_gen_hotwater_resistor_heating_);
     if (this->zone1_target_temperature_sensor_) this->zone1_target_temperature_sensor_->publish_state(static_cast<float>(frame->raw[10]) / 2.0f - 16.0f);
     const bool has_status_temperatures = frame->raw[0] == 0x15 && len > 18;
+    // Zero means no DHW sensor on heating-only systems, not -16 degrees.
     if (has_status_temperatures && frame->raw[12] != 0x00)
       this->publish_dhw_current_temperature_(static_cast<float>(frame->raw[12]) / 2.0f - 16.0f);
-    if (has_status_temperatures && this->zone1_water_temp_sensor_)
-      this->zone1_water_temp_sensor_->publish_state(static_cast<float>(frame->raw[14]) / 2.0f - 16.0f);
+    // First-generation models can report Zone 1 in either slot. Keep the
+    // existing byte-14 mapping when populated; #242 captures use byte 13 with
+    // byte 14 empty in the same 0x15 status layout. Length alone cannot select it.
+    const uint8_t zone1_temperature_offset = has_status_temperatures && frame->raw[14] != 0x00 ? 14 : 13;
+    const bool has_zone1_temperature = has_status_temperatures && frame->raw[zone1_temperature_offset] != 0x00;
+    const float zone1_temperature = has_zone1_temperature
+                                        ? static_cast<float>(frame->raw[zone1_temperature_offset]) / 2.0f - 16.0f
+                                        : NAN;
+    if (has_zone1_temperature && this->zone1_water_temp_sensor_)
+      this->zone1_water_temp_sensor_->publish_state(zone1_temperature);
     if (has_status_temperatures) {
-      ESP_LOGD(TAG, "Estia first-gen status temperatures: temperature 2=%.1f°C (raw 13=0x%02X)",
-               static_cast<float>(frame->raw[13]) / 2.0f - 16.0f, frame->raw[13]);
+      ESP_LOGD(TAG, "Estia first-gen status temperatures: Zone 1=%.1f°C (byte %u; raw 13=0x%02X, raw 14=0x%02X)",
+               zone1_temperature, zone1_temperature_offset, frame->raw[13], frame->raw[14]);
     }
     if (this->zone1_climate_ != nullptr) {
       this->zone1_climate_->mode = !this->estia_first_gen_zone1_active_
@@ -4528,8 +4548,8 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
                                                                                       ? climate::CLIMATE_MODE_COOL
                                                                                       : climate::CLIMATE_MODE_HEAT));
       this->zone1_climate_->target_temperature = static_cast<float>(frame->raw[10]) / 2.0f - 16.0f;
-      if (has_status_temperatures) {
-        this->zone1_climate_->current_temperature = static_cast<float>(frame->raw[14]) / 2.0f - 16.0f;
+      if (has_zone1_temperature) {
+        this->zone1_climate_->current_temperature = zone1_temperature;
       }
       this->zone1_climate_->publish_state();
     }
