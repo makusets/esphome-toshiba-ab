@@ -52,6 +52,33 @@ sensor, or another ESPHome-compatible I²C device.
 Never change the power selector while the board is powered. Disconnect both USB
 and the AB line before moving the jumper or switch.
 
+## Bus-powered operation
+
+After the first USB flash, v3 boards can run directly from the AB line. On v3.2
+the onboard buck converter powers the ESP from AB, but Wi-Fi transmit bursts and
+flash erase can briefly load the 3.3 V rail. On some systems this causes watchdog
+resets or failed OTA updates.
+
+Reducing Wi-Fi output power makes OTA reliable on these installations. 14.0 dBm
+has been validated on a bus-powered v3.2 running an Estia 5 Hipower:
+
+```yaml
+wifi:
+  output_power: 14.0dBm
+```
+
+The v3.2 status LED is connected to GPIO2 and is active-low:
+
+```yaml
+status_led:
+  pin:
+    number: GPIO2
+    inverted: true
+```
+
+If OTA still fails on AB power, update over USB using the procedure above rather
+than raising the Wi-Fi power blindly.
+
 ## Installation
 
 > The indoor unit and wired controller may contain hazardous voltages nearby.
