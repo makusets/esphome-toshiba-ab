@@ -512,7 +512,7 @@ static void regular_temperature_checks() {
     unit.send_regular_remote_temperature_();
     assert(unit.write_queue_.empty());
   }
-  unit.set_allways_report_temperature(true);
+  unit.set_always_report_temperature(true);
   for (uint8_t address = 0x51; address <= 0x59; ++address) {
     if (address == TOSHIBA_TU2C_TEMP_SENSOR) continue;
     unit.set_remote_address(address);
@@ -548,7 +548,7 @@ static void regular_temperature_checks() {
     normal.set_remote_address(0x41);
     normal.send_regular_remote_temperature_();
     assert(normal.write_queue_.empty());
-    normal.set_allways_report_temperature(true);
+    normal.set_always_report_temperature(true);
     normal.send_regular_remote_temperature_();
     assert(normal.write_queue_.size() == 1);
     assert(normal.write_queue_.front().source == 0x41);
