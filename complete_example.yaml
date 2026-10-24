@@ -69,6 +69,16 @@ climate:
 
     autonomous: true            # Optional, defaults to true, sends regular pings to master and reports temp if setup as header remote
 
+    # Regular remote temperature reports (TCC-Link/HM and TU2C).
+    # false: header address only; true: report from any assigned remote address.
+    allways_report_temperature: false
+    # TA (sensor address 0x02) is created and polled every 30s automatically.
+    # Optional: customize its entity name; no sensors: entry is required for TA.
+    intake_air_temperature:
+      name: "AC Intake Air Temperature"
+    # Report priority: external sensor, TA - 0.5 C, target temperature, then 20 C.
+    # Regular TU2C reports use flag 01; DN32 still selects the control source.
+
     master: 0x00                # optional, will autodetect if omitted (recommended)
     remote: 0x40                # optional, will autoassign if omitted (recommended)
     
@@ -110,6 +120,8 @@ climate:
       interval: 1min            # default 5min if omitted
 
     # --- Optional queries for additional internal AC sensors ---
+    # Shared polling supports TCC-Link/HM and TU2C; scale and interval apply to each entry.
+    # TU2C uses monitor-function queries; TA at 0x02 is already polled automatically.
     sensors:
       - address: 0x6A           # Required for every sensor added, in this case, AC current sensor of the external unit
         scale: 0.1              # default 1.0; here we decode raw/10 as current is reported in deciAmps
