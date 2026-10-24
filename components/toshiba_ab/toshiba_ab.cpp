@@ -880,7 +880,7 @@ void ToshibaAbClimate::send_regular_remote_temperature_() {
   const FrameFormat format = this->data_reader.frame_format();
   const bool tu2c = format == FrameFormat::TU2C;
   if (!tu2c && format != FrameFormat::NORMAL && format != FrameFormat::HM) return;
-  if (!this->allways_report_temperature_ &&
+  if (!this->always_report_temperature_ &&
       this->remote_address_ != (tu2c ? TOSHIBA_TU2C_REMOTE_DEFAULT : TOSHIBA_REMOTE_DEFAULT)) return;
 
   const bool sensor_reading = this->ext_temp_sensor_ && this->ext_temp_sensor_->has_state() &&
