@@ -875,18 +875,19 @@ void ToshibaAbClimate::remote_announce() {
 }
 
 // Periodic wall-remote temperature report, distinct from the independent
-// sensor report sent by send_remote_temp(). Only the header remote sends it.
+// sensor report sent by send_remote_temp(). Header-only unless explicitly enabled.
 void ToshibaAbClimate::send_regular_remote_temperature_() {
   const FrameFormat format = this->data_reader.frame_format();
   const bool tu2c = format == FrameFormat::TU2C;
   if (!tu2c && format != FrameFormat::NORMAL && format != FrameFormat::HM) return;
-  if (this->remote_address_ != (tu2c ? TOSHIBA_TU2C_REMOTE_DEFAULT : TOSHIBA_REMOTE_DEFAULT)) return;
+  if (!this->always_report_temperature_ &&
+      this->remote_address_ != (tu2c ? TOSHIBA_TU2C_REMOTE_DEFAULT : TOSHIBA_REMOTE_DEFAULT)) return;
 
   const bool sensor_reading = this->ext_temp_sensor_ && this->ext_temp_sensor_->has_state() &&
                               std::isfinite(this->ext_temp_sensor_->state);
   float temperature = 20.0f;
   if (sensor_reading) temperature = this->ext_temp_sensor_->state;
-  else if (std::isfinite(this->current_temperature)) temperature = this->current_temperature - 0.5f;
+  else if (std::isfinite(this->intake_air_temperature_)) temperature = this->intake_air_temperature_ - 0.5f;
   else if (std::isfinite(this->target_temperature)) temperature = this->target_temperature;
   const uint8_t raw = temp_celcius_to_payload(temperature);
   DataFrame cmd{};
@@ -1005,6 +1006,7 @@ void ToshibaAbClimate::add_polled_sensor(uint8_t id, float scale, uint32_t inter
 }
 
 bool ToshibaAbClimate::enqueue_sensor_query_(uint8_t id) {
+  if (this->sensor_query_outstanding_ && this->last_sensor_query_id_ == id) return false;
   if (this->pending_count_ >= MAX_PENDING_SENSOR_QUERIES) {
     ESP_LOGW(TAG, "Sensor query queue full; dropping query for 0x%02X", id);
     return false;
@@ -1021,6 +1023,24 @@ bool ToshibaAbClimate::enqueue_sensor_query_(uint8_t id) {
 }
 
 void ToshibaAbClimate::send_sensor_query(uint8_t sensor_id) {
+  if (this->data_reader.frame_format() == FrameFormat::TU2C) {
+    DataFrame cmd{};
+    cmd.set_tu2c(true);
+    cmd.raw[0] = 0x0C;
+    cmd.raw[1] = this->remote_address_;
+    cmd.raw[2] = this->tu2c_master_address_;
+    cmd.raw[3] = TU2C_FRAME_MARKER;
+    cmd.raw[4] = 0x41;
+    cmd.raw[5] = 0x5C;
+    cmd.raw[6] = 0x90;
+    cmd.raw[7] = sensor_id;
+    cmd.raw[8] = calculate_tu2c_crc(cmd.raw, 8);
+    this->last_sensor_query_id_ = sensor_id;
+    this->sensor_query_outstanding_ = true;
+    this->last_sensor_query_ms_ = millis();
+    this->send_command(cmd);
+    return;
+  }
   if (this->data_reader.frame_format() == FrameFormat::ESTIA) {
     this->last_sensor_query_id_ = sensor_id;
     this->sensor_query_outstanding_ = true;
@@ -1096,6 +1116,22 @@ void ToshibaAbClimate::drain_sensor_query_queue_() {
 }
 
 
+void ToshibaAbClimate::publish_polled_sensor_value_(uint8_t id, uint16_t raw, bool signed_value) {
+  const float value = signed_value || id == 0x02
+                          ? static_cast<float>(static_cast<int16_t>(raw))
+                          : static_cast<float>(raw);
+  if (id == 0x02) {
+    this->intake_air_temperature_ = value;
+    if (this->intake_air_temperature_sensor_ != nullptr)
+      this->intake_air_temperature_sensor_->publish_state(value);
+  }
+  for (auto &ps : this->polled_sensors_) {
+    if (ps.id == id && ps.sensor != nullptr)
+      ps.sensor->publish_state(value * ps.scale);
+  }
+  ESP_LOGD(TAG, "Sensor id=0x%02X raw=0x%04X -> %.3f", id, raw, value);
+}
+
 void ToshibaAbClimate::process_sensor_value_(const DataFrame *frame) {
   if (frame == nullptr) {
     // Always release the guard even if frame is null
@@ -1149,16 +1185,7 @@ void ToshibaAbClimate::process_sensor_value_(const DataFrame *frame) {
     const uint16_t raw = (static_cast<uint16_t>(frame->data[5]) << 8) | frame->data[6];
 
     if (prev_id != 0xFF) {
-      for (auto &ps : this->polled_sensors_) {
-        if (ps.id == prev_id) {
-          const float value = static_cast<float>(raw) * ps.scale;
-          if (ps.sensor != nullptr) {
-            ps.sensor->publish_state(value);
-          }
-          ESP_LOGD(TAG, "0x1A short: id=0x%02X raw=0x%04X -> %.3f", prev_id, raw, value);
-          break;
-        }
-      }
+      this->publish_polled_sensor_value_(prev_id, raw);
     } else {
       ESP_LOGW(TAG, "0x1A short with no last id; ignoring value raw=0x%04X", raw);
     }
@@ -1179,17 +1206,7 @@ void ToshibaAbClimate::process_sensor_value_(const DataFrame *frame) {
 
     const uint8_t  id  = frame->data[6];
     const uint16_t raw = (static_cast<uint16_t>(frame->data[7]) << 8) | frame->data[8];
-
-    for (auto &ps : this->polled_sensors_) {
-      if (ps.id == id) {
-        const float value = static_cast<float>(raw) * ps.scale;
-        if (ps.sensor != nullptr) {
-          ps.sensor->publish_state(value);
-        }
-        ESP_LOGD(TAG, "0x1A long:  id=0x%02X raw=0x%04X -> %.3f", id, raw, value);
-        break;
-      }
-    }
+    this->publish_polled_sensor_value_(id, raw);
 
     // Clear outstanding (only one query at a time anyway)
     this->sensor_query_outstanding_ = false;
@@ -1645,6 +1662,13 @@ void ToshibaAbClimate::setup() {
 
   this->set_interval(this->ping_interval_ms_, [this]() {
     this->send_regular_remote_temperature_();
+  });
+  // TA is independent of the selected control temperature. Poll it even when
+  // no optional service sensors were configured, including after auto-detection.
+  this->set_interval(30000, [this]() {
+    const auto format = this->data_reader.frame_format();
+    if (format == FrameFormat::NORMAL || format == FrameFormat::HM || format == FrameFormat::TU2C)
+      this->enqueue_sensor_query_(0x02);
   });
 
   this->announce_ack_received_ = false;
@@ -2203,6 +2227,31 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
   const size_t payload_available = size > payload_offset ? size - payload_offset : 0;
   const bool has_tail_signature =
       size >= 3 && frame->raw[size - 3] == 0x00 && frame->raw[size - 2] == 0x3A;
+
+  // Monitor replies do not repeat the sensor ID. Track the most recent query
+  // on the bus, including queries made by another remote and F3 keepalives.
+  if (frame_length == 0x0C && size >= 9 && dest == this->tu2c_master_address_ &&
+      frame->raw[4] == 0x41 && frame->raw[5] == 0x5C && frame->raw[6] == 0x90) {
+    this->tu2c_monitor_query_id_ = frame->raw[7];
+    this->tu2c_monitor_requester_ = source;
+    return;
+  }
+  if (source == this->tu2c_master_address_ && dest == this->tu2c_monitor_requester_ &&
+      size >= 7 && frame->raw[4] == 0x80 &&
+      ((frame_length == 0x0C && size >= 9 && frame->raw[5] == 0x5C) ||
+       (frame_length == 0x0A && frame->raw[5] == 0xA2))) {
+    const uint8_t id = this->tu2c_monitor_query_id_;
+    if (id != 0xFF && frame->raw[5] == 0x5C) {
+      const uint16_t raw = (static_cast<uint16_t>(frame->raw[6]) << 8) | frame->raw[7];
+      this->publish_polled_sensor_value_(id, raw, true);
+    }
+    if (dest == this->remote_address_ && id == this->last_sensor_query_id_) {
+      this->sensor_query_outstanding_ = false;
+      this->last_sensor_query_id_ = 0xFF;
+    }
+    this->tu2c_monitor_query_id_ = 0xFF;
+    return;
+  }
 
   if (frame_length == 0x0A && has_tail_signature) {
     log_raw_data("Master keepalive", frame->raw, size);
@@ -3060,6 +3109,10 @@ void ToshibaAbClimate::loop() {
         log_data_frame("Write frame", &frame);
       }
       this->remember_tx_frame_for_echo_(frame.raw, frame.size(), frame.is_tu2c());
+      if (frame.is_tu2c() && frame.raw[0] == 0x0C && frame.raw[4] == 0x41 && frame.raw[5] == 0x5C) {
+        this->tu2c_monitor_query_id_ = frame.raw[7];
+        this->tu2c_monitor_requester_ = frame.raw[1];
+      }
 
       auto log_tx_bytes = [this](const uint8_t *bytes, size_t size) {
         std::string payload;
