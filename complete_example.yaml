@@ -67,36 +67,24 @@ climate:
     name: "My AC System"
     id: my_ac_system      # Required
 
-    autonomous: true            # Optional, defaults to true, sends regular pings to master and reports temp if setup as header remote
-
-    # Regular remote temperature reports (TCC-Link/HM and TU2C).
-    # false: header address only; true: report from any assigned remote address.
-    allways_report_temperature: false
-    # TA (sensor address 0x02) is created and polled every 30s automatically.
-    # Optional: customize its entity name; no sensors: entry is required for TA.
-    intake_air_temperature:
-      name: "AC Intake Air Temperature"
-    # Report priority: external sensor, TA - 0.5 C, target temperature, then 20 C.
-    # Regular TU2C reports use flag 01; DN32 still selects the control source.
-
+     
     master: 0x00                # optional, will autodetect if omitted (recommended)
     remote: 0x40                # optional, will autoassign if omitted (recommended)
     
+ 
+    frame_format: tcc-link      # optional, defaults to autodetect; force "tcc-link" for TCC-Link, "hm" for its HM variation, or "tu2c" for TU2C; check UART parity too
+                                # further info on protocols settings is found in docs/frame_formats.md
+
     command_mode_read: 0x08     # optional, defaults to 0x08 if omitted; use 0x0D for some commercial systems
     command_mode_write: 0x80    # optional, defaults to 0x80 if omitted; use 0xD0 for some commercial systems
     
-    frame_format: tcc-link      # optional, defaults to autodetect; force "tcc-link" for TCC-Link, "hm" for its HM variation, or "tu2c" for TU2C; check UART parity too
-                                # further info on protocols settings is found in docs/frame_formats.md
-                                
-    filter_frames: true         # optional, default true; reject normal TCC-Link frames with source > 0xA0, helps discarding ghost data created by voltage noise in the AB line
 
     
-    packet_min_wait: 200ms      # optional, default 200ms; minimum idle time after received bytes before the next packet is parsed
-    
+    filter_frames: true         # optional, default true; reject normal TCC-Link frames with source > 0xA0, helps discarding ghost data created by voltage noise in the AB line  
+    packet_min_wait: 200ms      # optional, default 200ms; minimum idle time after received bytes before the next packet is parsed    
     read_only: true             # optional, defaults to false; used for debugging to listen to the traffic on the bus without sending
     read_only_switch:
       name: "Read only"         # optional switch to turn on and off read only mode while the esp is running
-
 
     filter_alert:               # Optional binary sensor to report filter alert status if available
       name: "Filter Alert"
@@ -115,9 +103,21 @@ climate:
 
     report_sensor_temp:         # optional
       enabled: true             # default false, when "true" forces AC unit to use this temperature as room temperature control regardless of AC unit settings
+                                # this option is only implemented in tcc-link
       sensor: bme280_temp       # must match an existing temp sensor id in this yaml file
                                 # it can be any temperature sensor supported, including other HA sensors configured here
       interval: 1min            # default 5min if omitted
+
+    ## Regular remote temperature reports (TCC-Link/HM and TU2C).
+    ## false: header address only; true: report from any assigned remote address.
+    
+    allways_report_temperature: false     # Optional, defaults to false
+
+        ## Intake air temperature sensor (TA) (sensor address 0x02) is created and polled every 30s automatically.
+    ## Optional: customize its entity name; no entry in sensors section is required for TA.
+    
+    intake_air_temperature:
+      name: "AC Intake Air Temperature"
 
     # --- Optional queries for additional internal AC sensors ---
     # Shared polling supports TCC-Link/HM and TU2C; scale and interval apply to each entry.
@@ -148,7 +148,7 @@ climate:
 #
 #       0x00 //Room Temp as reported by master (Control Temp) (°C) 
 #       0x01 //Room temperature from remote controller
-#       0x02 //Indoor unit intake air temperature (TA)
+#       0x02 //Indoor unit intake air temperature (TA) ** Already polled automatically
 #       0x03 //Indoor unit heat exchanger (coil) temperature (TCJ) TCJ Coil Liquid Temp (°C)
 #       0x04 //Indoor unit heat exchanger (coil) temperature (TC)  Coil Vapour Temp (°C)
 #       0x07 //Fan Speed (rpm)
