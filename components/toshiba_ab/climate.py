@@ -63,6 +63,8 @@ CONF_AUTORESET_ERRORS = "autoreset_errors"
 CONF_FRAME = "frame"
 
 CONF_AUTONOMOUS = "autonomous"
+CONF_ALLWAYS_REPORT_TEMPERATURE = "allways_report_temperature"
+CONF_INTAKE_AIR_TEMPERATURE = "intake_air_temperature"
 CONF_READ_ONLY = "read_only"
 CONF_PING = "ping"
 
@@ -518,6 +520,13 @@ CONFIG_SCHEMA = cv.All(
             }
         ),
         cv.Optional(CONF_AUTONOMOUS, default=True): cv.boolean,
+        cv.Optional(CONF_ALLWAYS_REPORT_TEMPERATURE, default=False): cv.boolean,
+        cv.Optional(CONF_INTAKE_AIR_TEMPERATURE, default={CONF_NAME: "Intake Air Temperature"}): sensor.sensor_schema(
+            unit_of_measurement=UNIT_CELSIUS,
+            accuracy_decimals=1,
+            device_class=DEVICE_CLASS_TEMPERATURE,
+            state_class=STATE_CLASS_MEASUREMENT,
+        ),
         cv.Optional(CONF_READ_ONLY, default=False): cv.boolean,
         cv.Optional(CONF_PING, default=True): cv.boolean,
         cv.Optional(CONF_SENSORS, default=[]): cv.ensure_list(SENSOR_ITEM_SCHEMA),
@@ -792,6 +801,10 @@ async def to_code(config):
             )
     if CONF_AUTONOMOUS in config:
         cg.add(var.set_autonomous(config[CONF_AUTONOMOUS]))
+    cg.add(var.set_allways_report_temperature(config[CONF_ALLWAYS_REPORT_TEMPERATURE]))
+    if config.get(CONF_FRAME_FORMAT, "auto") in ("auto", "normal", "hm", "tu2c"):
+        intake = await sensor.new_sensor(config[CONF_INTAKE_AIR_TEMPERATURE])
+        cg.add(var.set_intake_air_temperature_sensor(intake))
     if CONF_READ_ONLY in config:
         cg.add(var.set_read_only(config[CONF_READ_ONLY]))
     if CONF_PING in config:
