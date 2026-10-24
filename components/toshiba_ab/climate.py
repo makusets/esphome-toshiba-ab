@@ -203,8 +203,8 @@ CONF_REPORT_SENSOR_TEMP = "report_sensor_temp" # Report external temperature (fr
 CONF_FILTER_ALERT = "filter_alert" #report filter alert status as binary sensor
 
 def _normalize_report_sensor_temp(config):
-    # Preserve the legacy default and alias; the explicit new name takes precedence.
-    config["enforce_use"] = config.get("enforce_use", config.get("enabled", True))
+    # Accept the legacy alias; the explicit new name takes precedence.
+    config["enforce_use"] = config.get("enforce_use", config.get("enabled", False))
     config.pop("enabled", None)
     return config
 
