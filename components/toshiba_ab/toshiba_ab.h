@@ -1049,7 +1049,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void tu2c_remote_announce();
   void tu2c_send_ping();
   void send_regular_remote_temperature_();
-  void set_allways_report_temperature(bool enabled) { allways_report_temperature_ = enabled; }
+  void set_always_report_temperature(bool enabled) { always_report_temperature_ = enabled; }
   void set_intake_air_temperature_sensor(sensor::Sensor *sensor) { intake_air_temperature_sensor_ = sensor; }
   bool is_tu2c_registration_ack_(const DataFrame *frame) const;
   bool is_tu2c_registration_query_(const DataFrame &frame) const;
@@ -1272,7 +1272,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
                                   float setpoint);
   std::vector<PolledSensor> polled_sensors_;
   void publish_polled_sensor_value_(uint8_t id, uint16_t raw, bool signed_value = false);
-  bool allways_report_temperature_{false};
+  bool always_report_temperature_{false};
   float intake_air_temperature_{NAN};
   sensor::Sensor *intake_air_temperature_sensor_{nullptr};
   uint8_t tu2c_monitor_query_id_{0xFF};
