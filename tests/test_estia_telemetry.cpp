@@ -366,6 +366,101 @@ static void first_gen_temperature_checks() {
   near(dhw.state, 50.0f);
 }
 
+static void intake_air_temperature_checks() {
+  TestEstia unit;
+  unit.set_frame_format(FrameFormat::NORMAL);
+  sensor::Sensor intake;
+  unit.set_intake_air_temperature_sensor(&intake);
+  sensor::Sensor yaml_ta;
+  unit.add_polled_sensor(0x02, 2.0f, 0, &yaml_ta);
+  // Short TCC-Link response carries no ID: associate it with query 02.
+  DataFrame short_reply{};
+  short_reply.source = 0x00;
+  short_reply.data_length = 7;
+  const uint8_t short_data[] = {0x80, 0xEF, 0x80, 0x00, 0x2C, 0x00, 27};
+  std::copy(std::begin(short_data), std::end(short_data), short_reply.data);
+  unit.last_sensor_query_id_ = 0x02;
+  unit.sensor_query_outstanding_ = true;
+  unit.process_sensor_value_(&short_reply);
+  near(unit.intake_air_temperature_, 27.0f);
+  near(intake.state, 27.0f);
+  near(yaml_ta.state, 54.0f);
+  assert(!unit.sensor_query_outstanding_);
+  // Long response identifies TA itself; negative values are signed degrees.
+  DataFrame long_reply{};
+  long_reply.source = 0x00;
+  long_reply.data_length = 9;
+  const uint8_t long_data[] = {0x80, 0xEF, 0x00, 0x2C, 0x08, 0x00, 0x02, 0xFF, 0xFE};
+  std::copy(std::begin(long_data), std::end(long_data), long_reply.data);
+  unit.process_sensor_value_(&long_reply);
+  near(intake.state, -2.0f);
+  near(yaml_ta.state, -4.0f);
+
+  TestEstia tu;
+  tu.set_frame_format(FrameFormat::TU2C);
+  tu.set_remote_address(0x51);
+  tu.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+  tu.announce_ack_received_ = true;
+  tu.send_sensor_query(0x02);
+  assert(tu.write_queue_.size() == 1);
+  auto query = tu.write_queue_.front(); tu.write_queue_.pop();
+  assert(query.raw[0] == 0x0C && query.raw[1] == 0x51 && query.raw[2] == 0x90);
+  assert(query.raw[4] == 0x41 && query.raw[5] == 0x5C && query.raw[6] == 0x90 && query.raw[7] == 0x02);
+  assert(query.raw[8] == dn_checksum(query.raw, 8));
+  // Observe another remote's query, then replay a CRC-validated master reply.
+  query.raw[1] = 0x50; query.raw[8] = dn_checksum(query.raw, 8);
+  assert(tu.receive_data_frame(&query));
+  DataFrame reply{};
+  reply.set_tu2c(true);
+  const uint8_t data[] = {0x0C, 0x90, 0x50, 0xC0, 0x80, 0x5C, 0x00, 27, 0x00};
+  std::copy(std::begin(data), std::end(data), reply.raw);
+  reply.raw[8] = dn_checksum(reply.raw, 8);
+  assert(tu.receive_data_frame(&reply));
+  near(tu.intake_air_temperature_, 27.0f);
+  assert(tu.sensor_query_outstanding_);  // Reply to another remote is not our ACK.
+  // A keepalive query replaces attribution; F3 must never overwrite TA.
+  query.raw[7] = 0xF3; query.raw[8] = dn_checksum(query.raw, 8);
+  assert(tu.receive_data_frame(&query));
+  reply.raw[7] = 99; reply.raw[8] = dn_checksum(reply.raw, 8);
+  assert(tu.receive_data_frame(&reply));
+  near(tu.intake_air_temperature_, 27.0f);
+  query.raw[7] = 0x02; query.raw[8] = dn_checksum(query.raw, 8);
+  assert(tu.receive_data_frame(&query));
+  reply.raw[7] = 28; reply.raw[8] = dn_checksum(reply.raw, 8) ^ 1;
+  assert(!tu.receive_data_frame(&reply));
+  near(tu.intake_air_temperature_, 27.0f);
+  sensor::Sensor current;
+  tu.add_polled_sensor(0x6A, 0.1f, 0, &current);
+  // YAML service sensors use the same queued TU2C query and reply dispatcher.
+  assert(tu.enqueue_sensor_query_(0x6A));
+  assert(!tu.enqueue_sensor_query_(0x6A));  // Pending IDs are deduplicated.
+  tu.sensor_query_outstanding_ = false;
+  tu.drain_sensor_query_queue_();
+  assert(tu.write_queue_.size() == 1);
+  auto service_query = tu.write_queue_.front(); tu.write_queue_.pop();
+  assert(service_query.raw[7] == 0x6A);
+  // The transmitter records this attribution when the queued query reaches the wire.
+  tu.tu2c_monitor_query_id_ = 0x6A;
+  tu.tu2c_monitor_requester_ = 0x51;
+  reply.raw[2] = 0x51; reply.raw[7] = 42;
+  reply.raw[8] = dn_checksum(reply.raw, 8);
+  assert(tu.receive_data_frame(&reply));
+  near(current.state, 4.2f);
+  near(tu.intake_air_temperature_, 27.0f);
+  assert(!tu.sensor_query_outstanding_);
+  // Unsupported monitor IDs complete the request without publishing bogus data.
+  tu.last_sensor_query_id_ = 0x6A;
+  tu.sensor_query_outstanding_ = true;
+  tu.tu2c_monitor_query_id_ = 0x6A;
+  DataFrame missing{}; missing.set_tu2c(true);
+  const uint8_t no_data[] = {0x0A, 0x90, 0x51, 0xC0, 0x80, 0xA2, 0x00};
+  std::copy(std::begin(no_data), std::end(no_data), missing.raw);
+  missing.raw[6] = dn_checksum(missing.raw, 6);
+  assert(tu.receive_data_frame(&missing));
+  assert(!tu.sensor_query_outstanding_);
+  near(current.state, 4.2f);
+}
+
 static void regular_temperature_checks() {
   TestEstia unit;
   unit.set_frame_format(FrameFormat::TU2C);
@@ -378,7 +473,8 @@ static void regular_temperature_checks() {
   unit.send_regular_remote_temperature_();
   assert(unit.write_queue_.empty());  // Must register first in autonomous mode.
   unit.announce_ack_received_ = true;
-  unit.current_temperature = 24.0f;
+  unit.current_temperature = 10.0f;
+  unit.intake_air_temperature_ = 24.0f;
   auto report = [&](uint8_t flag, uint8_t temperature) {
     unit.send_regular_remote_temperature_();
     assert(unit.write_queue_.size() == 1);
@@ -390,8 +486,8 @@ static void regular_temperature_checks() {
     assert(!unit.should_track_command_ack_(f));
     return f;
   };
-  report(0x01, 117);  // Current 24 C minus 0.5 C.
-  unit.current_temperature = NAN;
+  report(0x01, 117);  // TA 24 C minus 0.5 C, independent of control temperature.
+  unit.intake_air_temperature_ = NAN;
   unit.target_temperature = 25.0f;
   report(0x01, 120);
   unit.target_temperature = NAN;
@@ -416,6 +512,17 @@ static void regular_temperature_checks() {
     unit.send_regular_remote_temperature_();
     assert(unit.write_queue_.empty());
   }
+  unit.set_allways_report_temperature(true);
+  for (uint8_t address = 0x51; address <= 0x59; ++address) {
+    if (address == TOSHIBA_TU2C_TEMP_SENSOR) continue;
+    unit.set_remote_address(address);
+    unit.send_regular_remote_temperature_();
+    assert(unit.write_queue_.size() == 1);
+    const auto &f = unit.write_queue_.front();
+    assert(f.raw[1] == address && f.raw[6] == 0x01 && f.raw[7] == 115);
+    assert(f.raw[9] == dn_checksum(f.raw, 9));
+    unit.write_queue_.pop();
+  }
   TestEstia collided;
   collided.set_frame_format(FrameFormat::TU2C);
   collided.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
@@ -429,13 +536,22 @@ static void regular_temperature_checks() {
     normal.set_frame_format(format);
     normal.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
     normal.announce_ack_received_ = true;
-    normal.current_temperature = 24.0f;
+    normal.current_temperature = 10.0f;
+    normal.intake_air_temperature_ = 24.0f;
     normal.send_regular_remote_temperature_();
     assert(normal.write_queue_.size() == 1);
-    const auto &command = normal.write_queue_.front();
+    auto command = normal.write_queue_.front();
     assert(command.source == 0x40 && command.opcode1 == OPCODE_TEMPERATURE);
     assert(command.data[1] == 0x81 && command.data[3] == 117);
     assert(command.crc() == command.calculate_crc());
+    normal.write_queue_.pop();
+    normal.set_remote_address(0x41);
+    normal.send_regular_remote_temperature_();
+    assert(normal.write_queue_.empty());
+    normal.set_allways_report_temperature(true);
+    normal.send_regular_remote_temperature_();
+    assert(normal.write_queue_.size() == 1);
+    assert(normal.write_queue_.front().source == 0x41);
   }
   for (auto format : {FrameFormat::A0, FrameFormat::ESTIA}) {
     TestEstia other;
@@ -452,6 +568,7 @@ int main() {
   control_checks();
   tu2c_address_checks();
   startup_address_checks();
+  intake_air_temperature_checks();
   regular_temperature_checks();
   TestEstia unit;
   unit.set_frame_format(FrameFormat::A0);
