@@ -98,11 +98,11 @@ climate:
     # The temperature sensor with the given id below will be passed to the thermostat and used to report room temperature to the AC unit
     # If "enforce_use: true" this will override the temperature reported by the remote controller or the internal sensor of the AC unit,
     # regardless of settings in the AC system
-    # If "enforce_use: false", the AC unit will use its internal sensor or the remote controller temperature, depending on settings
+    # If "enforce_use: false" or omitted, the AC unit will use its internal sensor or the remote controller temperature, depending on settings
     # If the esp is the only remote or setup as header, a sensor should ideally be configured here, regardless of enforce_use setting.
 
     report_sensor_temp:         # optional
-      enforce_use: true         # default true, when "true" forces AC unit to use this temperature as room temperature control regardless of AC unit settings
+      enforce_use: false        # default false, when "true" forces AC unit to use this temperature as room temperature control regardless of AC unit settings
                                 # this option is only implemented in tcc-link
       sensor: bme280_temp       # must match an existing temp sensor id in this yaml file
                                 # it can be any temperature sensor supported, including other HA sensors configured here
