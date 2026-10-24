@@ -202,11 +202,19 @@ FRAME_FORMATS = {
 CONF_REPORT_SENSOR_TEMP = "report_sensor_temp" # Report external temperature (from any ESPHome sensor) to the AC
 CONF_FILTER_ALERT = "filter_alert" #report filter alert status as binary sensor
 
-REPORT_SENSOR_TEMP_SCHEMA = cv.Schema({
-    cv.Optional("enabled", default=True): cv.boolean,
+def _normalize_report_sensor_temp(config):
+    # Preserve the legacy default and alias; the explicit new name takes precedence.
+    config["enforce_use"] = config.get("enforce_use", config.get("enabled", True))
+    config.pop("enabled", None)
+    return config
+
+
+REPORT_SENSOR_TEMP_SCHEMA = cv.All(cv.Schema({
+    cv.Optional("enforce_use"): cv.boolean,
+    cv.Optional("enabled"): cv.boolean,
     cv.Required(CONF_SENSOR): cv.use_id(sensor.Sensor),
     cv.Optional(CONF_INTERVAL, default="5min"): cv.positive_time_period_milliseconds,
-})
+}), _normalize_report_sensor_temp)
 
 
 CONF_HARDWARE_UART_RX_PIN = "hardware_uart_rx_pin"
@@ -929,7 +937,7 @@ async def to_code(config):
     if (rst := config.get(CONF_REPORT_SENSOR_TEMP)) is not None:
         src = await cg.get_variable(rst[CONF_SENSOR])
         cg.add(var.set_ext_temp_source(src))
-        cg.add(var.set_ext_temp_enabled(rst["enabled"]))
+        cg.add(var.set_ext_temp_enabled(rst["enforce_use"]))
         cg.add(var.set_ext_temp_interval(cg.uint32(rst[CONF_INTERVAL])))
         cg.add(var.set_ext_temp_sensor_name(rst[CONF_SENSOR].id))
 
