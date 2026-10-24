@@ -111,7 +111,7 @@ climate:
     ## Regular remote temperature reports (TCC-Link/HM and TU2C).
     ## false: header address only; true: report from any assigned remote address.
     
-    allways_report_temperature: false     # Optional, defaults to false
+    always_report_temperature: false     # Optional, defaults to false
 
         ## Intake air temperature sensor (TA) (sensor address 0x02) is created and polled every 30s automatically.
     ## Optional: customize its entity name; no entry in sensors section is required for TA.
