@@ -561,8 +561,41 @@ static void regular_temperature_checks() {
   }
 }
 
+
+static void first_gen_recovery_checks() {
+  TestEstia unit;
+  unit.set_frame_format(FrameFormat::ESTIA);
+  unit.set_remote_address(0x61);
+  unit.set_master_address(0x70);
+  unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+  ToshibaAbEstiaZoneClimate zone(&unit);
+  unit.set_zone1_climate(&zone);
+
+  // Captured HWS-AMS54 ON sequence: 0x22:02:02 power-on, then 0x21:03 Zone ON.
+  zone.make_call().set_mode(climate::CLIMATE_MODE_HEAT).perform();
+  assert(!unit.write_queue_.empty());
+  const auto power_on = unit.write_queue_.front();
+  unit.write_queue_.pop();
+  assert(power_on.raw[0] == 0x0C && power_on.raw[1] == 0x61 && power_on.raw[2] == 0x70);
+  assert(power_on.raw[3] == 0xE0 && power_on.raw[4] == 0x01 && power_on.raw[5] == 0x22);
+  assert(power_on.raw[6] == 0x02 && power_on.raw[7] == 0x02);
+  assert(!unit.write_queue_.empty());
+  const auto zone_on = unit.write_queue_.front();
+  unit.write_queue_.pop();
+  assert(zone_on.raw[0] == 0x0B && zone_on.raw[1] == 0x61 && zone_on.raw[2] == 0x70);
+  assert(zone_on.raw[3] == 0xE0 && zone_on.raw[4] == 0x01 && zone_on.raw[5] == 0x21);
+  assert(zone_on.raw[6] == 0x03);
+  assert(unit.write_queue_.empty());
+
+  // An already-active HEAT request must not emit the harmful 0x22:06:06 frame.
+  unit.estia_first_gen_zone1_active_ = true;
+  zone.make_call().set_mode(climate::CLIMATE_MODE_HEAT).perform();
+  assert(unit.write_queue_.empty());
+}
+
 int main() {
   first_gen_temperature_checks();
+  first_gen_recovery_checks();
   dn_checks();
   new (&App) Application();
   control_checks();
