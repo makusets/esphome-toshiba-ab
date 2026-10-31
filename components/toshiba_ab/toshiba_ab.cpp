@@ -337,7 +337,7 @@ bool ToshibaAbClimate::is_ack_for_pending_command_(const DataFrame *frame) const
       return false;
     }
 
-    return this->is_tu2c_command_ack_frame_(frame);
+    return frame->raw[3] == pending.raw[3] && this->is_tu2c_command_ack_frame_(frame);
   }
 
   // Broadcast louvre commands are acknowledged by the indoor master.
@@ -350,7 +350,7 @@ bool ToshibaAbClimate::is_ack_for_pending_command_(const DataFrame *frame) const
     return false;
   }
 
-  if (frame->opcode1 != OPCODE_ACK || frame->data_length < 2) {
+  if (frame->opcode1 != OPCODE_ACK || frame->data_length != 2) {
     return false;
   }
 
@@ -400,7 +400,8 @@ bool ToshibaAbClimate::should_track_command_ack_(const DataFrame &frame) const {
     return false;
   }
 
-  return frame.data[1] == OPCODE2_SET_MODE || frame.data[1] == OPCODE2_SET_TEMP_WITH_FAN;
+  return frame.data[1] == OPCODE2_SET_POWER || frame.data[1] == OPCODE2_SET_MODE ||
+         frame.data[1] == OPCODE2_SET_TEMP_WITH_FAN;
 }
 
 void ToshibaAbClimate::handle_pending_command_ack_(const DataFrame *frame) {
@@ -414,15 +415,8 @@ void ToshibaAbClimate::handle_pending_command_ack_(const DataFrame *frame) {
              static_cast<unsigned>(this->last_unconfirmed_command_attempts_));
     this->last_unconfirmed_command_.reset();
     this->last_unconfirmed_command_attempts_ = 0;
-    this->resend_last_unconfirmed_command_ = false;
     this->last_unconfirmed_command_sent_ms_ = 0;
     return;
-  }
-
-  // TU2C retries are timeout-driven. Keep legacy immediate retry behaviour
-  // for non-TU2C traffic unchanged.
-  if (!this->last_unconfirmed_command_->is_tu2c()) {
-    this->resend_last_unconfirmed_command_ = true;
   }
 }
 
@@ -2990,8 +2984,6 @@ void ToshibaAbClimate::publish_reader_diagnostics_() {
 void ToshibaAbClimate::loop() {
   this->update_estia_dn_();
   if (millis() - this->last_diagnostics_publish_ms_ >= 30000) this->publish_reader_diagnostics_();
-  // TODO: check if last_unconfirmed_command_ was not confirmed after a timeout
-  // and log warning/error
 
   const uint32_t now = millis();
   const bool initial_send_block_active = this->is_initial_frame_send_block_active_(now);
@@ -3007,46 +2999,41 @@ void ToshibaAbClimate::loop() {
     this->drain_sensor_query_queue_();
   }
 
-  const bool bus_can_send = !this->read_only_ && !initial_send_block_active && this->has_bus_quiet_time_elapsed_(now);
+#ifdef USE_ESP8266
+  const bool rx_pending = this->hw_uart_rx_enabled_ ? s_bus_serial.available() > 0 : this->available() > 0;
+#else
+  const bool rx_pending = this->available() > 0;
+#endif
+  const bool bus_can_send = !this->read_only_ && !initial_send_block_active && !rx_pending &&
+                            this->has_bus_quiet_time_elapsed_(now) &&
+                            (this->data_reader.frame_format() != FrameFormat::TU2C ||
+                             this->has_tu2c_quiet_time_elapsed_(now));
 
   if (bus_can_send) {
     optional<DataFrame> frame_to_send{};
 
     if (this->last_unconfirmed_command_.has_value()) {
-      const bool pending_is_tu2c = this->last_unconfirmed_command_->is_tu2c();
-      const bool retry_due = pending_is_tu2c
-                                 ? (this->last_unconfirmed_command_sent_ms_ != 0 &&
-                                    (millis() - this->last_unconfirmed_command_sent_ms_) >= TU2C_ACK_TIMEOUT_MS)
-                                 : this->resend_last_unconfirmed_command_;
-      const uint8_t max_attempts = pending_is_tu2c ? TU2C_MAX_COMMAND_SEND_ATTEMPTS : MAX_COMMAND_SEND_ATTEMPTS;
-      if (retry_due) {
-        if (this->last_unconfirmed_command_attempts_ >= max_attempts) {
-        ESP_LOGE(TAG, "Command opcode 0x%02X not acknowledged after %u attempts",
-                 command_opcode_for_ack_log(*this->last_unconfirmed_command_),
-                 static_cast<unsigned>(this->last_unconfirmed_command_attempts_));
-        this->last_unconfirmed_command_.reset();
-        this->last_unconfirmed_command_attempts_ = 0;
-        this->resend_last_unconfirmed_command_ = false;
-        this->last_unconfirmed_command_sent_ms_ = 0;
+      if (this->command_ack_timeout_elapsed_(now)) {
+        if (this->last_unconfirmed_command_attempts_ >= MAX_COMMAND_SEND_ATTEMPTS) {
+          ESP_LOGE(TAG, "Command opcode 0x%02X not acknowledged after %u attempts",
+                   command_opcode_for_ack_log(*this->last_unconfirmed_command_),
+                   static_cast<unsigned>(this->last_unconfirmed_command_attempts_));
+          this->last_unconfirmed_command_.reset();
+          this->last_unconfirmed_command_attempts_ = 0;
+          this->last_unconfirmed_command_sent_ms_ = 0;
         } else {
           frame_to_send = this->last_unconfirmed_command_.value();
           this->last_unconfirmed_command_attempts_++;
-          this->resend_last_unconfirmed_command_ = false;
-          if (frame_to_send->is_tu2c()) {
-            ESP_LOGD(TAG, "Resending TU2C command after ACK timeout (attempt %u/%u)",
-                     static_cast<unsigned>(this->last_unconfirmed_command_attempts_),
-                     static_cast<unsigned>(max_attempts));
-          } else {
-            ESP_LOGD(TAG, "Resending command opcode 0x%02X (attempt %u/%u)",
-                     command_opcode_for_ack_log(*frame_to_send),
-                     static_cast<unsigned>(this->last_unconfirmed_command_attempts_),
-                     static_cast<unsigned>(max_attempts));
-          }
+          ESP_LOGD(TAG, "Resending command opcode 0x%02X after ACK timeout (attempt %u/%u)",
+                   command_opcode_for_ack_log(*frame_to_send),
+                   static_cast<unsigned>(this->last_unconfirmed_command_attempts_),
+                   static_cast<unsigned>(MAX_COMMAND_SEND_ATTEMPTS));
         }
       }
     }
 
-    if (!frame_to_send.has_value() && !this->raw_write_queue_.empty()) {
+    if (!frame_to_send.has_value() && !this->last_unconfirmed_command_.has_value() &&
+        !this->raw_write_queue_.empty()) {
       last_sent_frame_millis_ = now;
       auto raw_frame = this->raw_write_queue_.front();
       this->raw_write_queue_.pop();
@@ -3077,21 +3064,15 @@ void ToshibaAbClimate::loop() {
       if (this->should_track_command_ack_(frame_to_send.value())) {
         this->last_unconfirmed_command_ = frame_to_send.value();
         this->last_unconfirmed_command_attempts_ = 1;
-        this->resend_last_unconfirmed_command_ = false;
         this->last_unconfirmed_command_sent_ms_ = now;
       } else {
         this->last_unconfirmed_command_.reset();
         this->last_unconfirmed_command_attempts_ = 0;
-        this->resend_last_unconfirmed_command_ = false;
         this->last_unconfirmed_command_sent_ms_ = 0;
       }
     }
 
     if (frame_to_send.has_value()) {
-      if (frame_to_send->is_tu2c() && this->data_reader.frame_format() == FrameFormat::TU2C &&
-          !this->has_tu2c_quiet_time_elapsed_(now)) {
-          return;
-      }
       last_sent_frame_millis_ = now;
       if (frame_to_send->is_tu2c()) {
         last_tu2c_sent_frame_millis_ = last_sent_frame_millis_;
@@ -3148,6 +3129,9 @@ void ToshibaAbClimate::loop() {
         this->write_array(frame.raw, frame.size());
       }
 
+      if (this->last_unconfirmed_command_.has_value()) {
+        this->last_unconfirmed_command_sent_ms_ = millis();
+      }
       if (this->write_queue_.empty()) {
         ESP_LOGV(TAG, "All frames written");
       }
@@ -3710,7 +3694,6 @@ void ToshibaAbClimate::set_read_only(bool en) {
   this->pending_count_ = 0;
   this->last_unconfirmed_command_.reset();
   this->last_unconfirmed_command_attempts_ = 0;
-  this->resend_last_unconfirmed_command_ = false;
   this->last_unconfirmed_command_sent_ms_ = 0;
   this->estia_pending_cmd_.clear();
   this->estia_pending_ack_dtype_ = 0;

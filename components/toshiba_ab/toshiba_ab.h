@@ -1362,15 +1362,17 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   std::queue<std::vector<uint8_t>> raw_write_queue_;
   optional<DataFrame> last_unconfirmed_command_;
   uint8_t last_unconfirmed_command_attempts_{0};
-  bool resend_last_unconfirmed_command_{false};
   uint32_t last_unconfirmed_command_sent_ms_{0};
   optional<DataFrame> last_tx_frame_for_echo_;
   uint32_t last_tx_frame_millis_{0};
   static const uint32_t ECHO_MATCH_WINDOW_MS = 1500;
 
   static const uint8_t MAX_COMMAND_SEND_ATTEMPTS = 5;
-  static const uint8_t TU2C_MAX_COMMAND_SEND_ATTEMPTS = 3;
-  static const uint32_t TU2C_ACK_TIMEOUT_MS = 3000;
+  static const uint32_t COMMAND_ACK_TIMEOUT_MS = 200;
+  bool command_ack_timeout_elapsed_(uint32_t now) const {
+    return this->last_unconfirmed_command_.has_value() &&
+           (now - this->last_unconfirmed_command_sent_ms_) >= COMMAND_ACK_TIMEOUT_MS;
+  }
   static const uint32_t TU2C_FRAME_SEND_MILLIS_FROM_LAST_RECEIVE = 500;
   static const uint32_t TU2C_FRAME_SEND_MILLIS_FROM_LAST_SEND = 500;
 
