@@ -257,6 +257,19 @@ climate:
 Use [`estia_R410A_example.yaml`](estia_R410A_example.yaml) for the complete R410A configuration,
 including auto curve adjustment, sensors and runtime switches.
 
+For heating-only installations, restrict the zone thermostat's advertised modes:
+
+```yaml
+    zone1_climate:
+      name: "Heating Zone"
+      supports_cool: false
+      supports_auto: false
+```
+
+Both options default to `true` and also apply to `zone2_climate` on R32 systems.
+Off and Heat remain available. These options restrict ESPHome commands and do
+not change the heat pump's installer settings or hide modes selected physically.
+
 ### Minimal R32 configuration
 
 ```yaml

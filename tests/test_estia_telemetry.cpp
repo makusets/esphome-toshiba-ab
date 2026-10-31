@@ -797,7 +797,30 @@ static void command_retry_checks() {
   }
 }
 
+static void zone_mode_capability_checks() {
+  for (auto format : {FrameFormat::ESTIA, FrameFormat::A0}) {
+    TestEstia unit;
+    unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+    unit.set_frame_format(format);
+    ToshibaAbEstiaZoneClimate zone(&unit);
+    unit.set_zone1_climate(&zone);
+    assert(zone.traits().supports_mode(climate::CLIMATE_MODE_COOL));
+    assert(zone.traits().supports_mode(climate::CLIMATE_MODE_AUTO));
+    zone.set_supports_cool(false);
+    zone.set_supports_auto(false);
+    const auto traits = zone.traits();
+    assert(traits.supports_mode(climate::CLIMATE_MODE_OFF));
+    assert(traits.supports_mode(climate::CLIMATE_MODE_HEAT));
+    assert(!traits.supports_mode(climate::CLIMATE_MODE_COOL));
+    assert(!traits.supports_mode(climate::CLIMATE_MODE_AUTO));
+    zone.make_call().set_mode(climate::CLIMATE_MODE_COOL).perform();
+    zone.make_call().set_mode(climate::CLIMATE_MODE_AUTO).perform();
+    assert(unit.write_queue_.empty() && unit.raw_write_queue_.empty());
+  }
+}
+
 int main() {
+  zone_mode_capability_checks();
   first_gen_temperature_checks();
   dn_checks();
   new (&App) Application();
