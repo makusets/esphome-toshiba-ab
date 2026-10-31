@@ -1079,7 +1079,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_demand_enabled(bool en) { demand_enabled_ = en; }
   void send_estia_data_request(uint8_t subtype);
   void send_estia_first_gen_dhw_setpoint(float target_temp);
-  void send_estia_first_gen_zone1_setpoint(float target_temp);
+  void send_estia_first_gen_zone1_setpoint(float target_temp,
+                                         climate::ClimateMode mode = climate::CLIMATE_MODE_HEAT);
   void send_estia_first_gen_zone1_mode(climate::ClimateMode mode);
   void send_estia_first_gen_zone1(bool on);
   void send_estia_first_gen_dhw_on();
@@ -1406,6 +1407,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
 
   bool estia_first_gen_pump_state_known_{false};
   bool estia_first_gen_zone1_active_{false};
+  bool estia_first_gen_zone1_cooling_{false};
   bool estia_first_gen_dhw_active_{false};
   bool estia_first_gen_dhw_boost_{false};
   bool estia_first_gen_antibacteria_{false};
