@@ -3515,10 +3515,17 @@ void ToshibaAbClimate::control_estia_zone1(const climate::ClimateCall &call) {
       }
     }
     if (call.get_target_temperature().has_value()) {
-      if (requested_mode == climate::CLIMATE_MODE_AUTO) {
+      // Off hides the controller's selected mode, including weather compensation.
+      const auto setpoint_mode = requested_mode != climate::CLIMATE_MODE_OFF
+                                     ? requested_mode
+                                     : (this->estia_first_gen_auto_mode_active_
+                                            ? climate::CLIMATE_MODE_AUTO
+                                            : (this->estia_first_gen_zone1_cooling_ ? climate::CLIMATE_MODE_COOL
+                                                                                   : climate::CLIMATE_MODE_HEAT));
+      if (setpoint_mode == climate::CLIMATE_MODE_AUTO) {
         ESP_LOGD(TAG, "Ignoring Zone 1 target temperature in Automatik mode; the heat pump calculates it");
       } else {
-        this->send_estia_first_gen_zone1_setpoint(*call.get_target_temperature());
+        this->send_estia_first_gen_zone1_setpoint(*call.get_target_temperature(), setpoint_mode);
       }
     }
     return;
@@ -4344,15 +4351,20 @@ void ToshibaAbClimate::send_estia_first_gen_zone1_mode(climate::ClimateMode mode
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
-void ToshibaAbClimate::send_estia_first_gen_zone1_setpoint(float target_temp) {
+void ToshibaAbClimate::send_estia_first_gen_zone1_setpoint(float target_temp, climate::ClimateMode mode) {
   if (this->read_only_) return;
-  if (!std::isfinite(target_temp) || target_temp < 20.0f || target_temp > 65.0f) {
+  if (mode != climate::CLIMATE_MODE_HEAT && mode != climate::CLIMATE_MODE_COOL) return;
+  const bool cooling = mode == climate::CLIMATE_MODE_COOL;
+  const float minimum = cooling ? 7.0f : 20.0f;
+  const float maximum = cooling ? 25.0f : 65.0f;
+  if (!std::isfinite(target_temp) || target_temp < minimum || target_temp > maximum) {
     ESP_LOGW(TAG, "Ignoring invalid first-generation Estia Zone 1 setpoint %.1f°C", target_temp);
     return;
   }
   const uint8_t encoded = static_cast<uint8_t>(std::round((target_temp + 16.0f) * 2.0f));
-  // Zone 1 setpoint frame tested in PR #243; retain its captured companion fields.
-  const uint8_t payload[] = {0xE0, 0x01, 0x23, 0x02, encoded, 0x66, 0xA2, encoded};
+  // Keep PR #243's heating layout; cooling follows an accepted R410A remote capture.
+  const uint8_t payload[] = {0xE0, 0x01, 0x23, static_cast<uint8_t>(cooling ? 0x01 : 0x02),
+                             encoded, static_cast<uint8_t>(cooling ? encoded : 0x66), 0xA2, encoded};
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
@@ -4560,6 +4572,7 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
   }
   if (src == this->master_address_ && frame->raw[3] == 0xE0 && frame->raw[5] == 0x31 && len > 11) {
     this->estia_first_gen_zone1_active_ = frame->raw[6] & 0x01;
+    this->estia_first_gen_zone1_cooling_ = (frame->raw[6] & 0x60) == 0x20;
     if (this->estia_first_gen_zone1_active_ && this->estia_first_gen_pending_zone1_mode_.has_value()) {
       const auto pending_mode = *this->estia_first_gen_pending_zone1_mode_;
       this->estia_first_gen_pending_zone1_mode_.reset();
