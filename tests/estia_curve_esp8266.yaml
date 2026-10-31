@@ -22,5 +22,9 @@ climate:
     zone1_climate:
       supports_heat: false
       supports_auto: false
+    fault_code:
+      name: Pump Fault Code
+    fault_active:
+      name: Pump Fault Active
     curve_shift:
       name: Heating Curve Shift

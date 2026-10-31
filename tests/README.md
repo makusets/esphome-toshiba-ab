@@ -46,6 +46,20 @@ python3 tests/test_estia_config.py
 esphome compile tests/estia_esp8266.yaml
 ```
 
+Pump-fault checks replay the captured R410A A01/F23/clear announcements and
+polled responses through checksum validation. Constructed A0 packets cover the
+existing alarm layout, both dtype byte positions and explicit zero/clear; these
+are software checks, not R32 hardware validation. Shared tests cover family
+boundaries, raw unknown codes, startup unknown, duplicate reports, malformed or
+wrong-source packets, remote-error independence, connection timeout and recovery.
+All four optional-entity combinations run with read-only UART transmission checks.
+Configuration generation covers both protocols and the A0 alias, either entity
+alone and unsupported formats. The host and both ESP8266 configurations enable
+the fault entities.
+The A0 ESP8266 fixture includes Wi-Fi and the native API to compile the
+text-sensor unknown-state notification; the R410A fixture also verifies a build
+without networking.
+
 GitHub Actions runs these checks and the ESP8266 build for pull requests.
 
 Custom preset API compatibility checks (legacy traits API, current entity API,

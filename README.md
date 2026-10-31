@@ -214,6 +214,40 @@ addresses, temperature reporting, diagnostic sensors, power estimation and all
 other air-to-air options. [`example.yaml`](example.yaml) is a ready-to-edit,
 smaller device configuration.
 
+### Pump fault reporting
+
+Both `frame_format: estia` and `frame_format: a0` (alias `estia_a0`) support
+independently optional diagnostic entities inside the `toshiba_ab` climate block:
+
+```yaml
+fault_code:
+  name: "Heat Pump Fault Code"
+fault_active:
+  name: "Heat Pump Fault Active"
+```
+
+`fault_code` reports the current code, such as `A01` or `F23`, and `None` on an
+explicit zero/clear report. `fault_active` is a problem binary sensor: any nonzero
+code is on, including an unrecognized code displayed as `0xNN`. Both start unknown,
+become unknown on the existing master-connection timeout, and require a fresh
+fault/clear report after reconnection. Ordinary status or heartbeat packets do not
+clear a fault. Unknown state is sent through the native API to Home Assistant.
+
+Decoding is passive and works in read-only mode; these options add no queries,
+reset commands or persistent last-fault storage. They are separate from
+`remote_error`, which reports a remote-controller indication rather than these
+pump fault codes. Select an explicit supported frame format; `auto`, normal,
+HM and TU2C do not support these entities.
+
+Series 5 R410A captures confirm opcode `0x29` announcements and polled responses
+for `0x01` = A01, `0x77` = F23, and `0x00` = clear. The formatter retains the
+existing A0 family ranges: A `01–0D`, E `41–52`, F `63–7F`, H `81–84`,
+L `C2–DD`, P `E3–FF` (hexadecimal), subtracting each family's base
+`00/40/60/80/C0/E0` to obtain the decimal suffix. Other mappings are inferred.
+A0 extraction follows the existing alarm data type containing `0x49` and the
+following error byte from the configured master. Its layout, exact codes and zero
+clear are tested with constructed CRC-valid packets, not verified on R32 hardware.
+
 ### Optional BME280
 
 The boards expose I²C so a BME280 can publish local temperature, humidity and
