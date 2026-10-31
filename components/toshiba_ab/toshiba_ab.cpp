@@ -1006,6 +1006,8 @@ void ToshibaAbClimate::add_polled_sensor(uint8_t id, float scale, uint32_t inter
 }
 
 bool ToshibaAbClimate::enqueue_sensor_query_(uint8_t id) {
+  if (this->read_only_) return false;
+
   if (this->sensor_query_outstanding_ && this->last_sensor_query_id_ == id) return false;
   if (this->pending_count_ >= MAX_PENDING_SENSOR_QUERIES) {
     ESP_LOGW(TAG, "Sensor query queue full; dropping query for 0x%02X", id);
@@ -3001,11 +3003,11 @@ void ToshibaAbClimate::loop() {
   // Drain the pending sensor-query queue at most one per loop iteration.
   // This must run BEFORE the TX dispatch below so an enqueued 0x17 has a
   // chance to be picked up in the same tick.
-  if (!initial_send_block_active) {
+  if (!this->read_only_ && !initial_send_block_active) {
     this->drain_sensor_query_queue_();
   }
 
-  const bool bus_can_send = !initial_send_block_active && this->has_bus_quiet_time_elapsed_(now);
+  const bool bus_can_send = !this->read_only_ && !initial_send_block_active && this->has_bus_quiet_time_elapsed_(now);
 
   if (bus_can_send) {
     optional<DataFrame> frame_to_send{};
@@ -3153,7 +3155,8 @@ void ToshibaAbClimate::loop() {
   }
 
   // Estia command ACK timeout and retry
-  if (!initial_send_block_active && !estia_pending_cmd_.empty() && (millis() - estia_cmd_sent_ms_) > ESTIA_CMD_ACK_TIMEOUT_MS) {
+  if (!this->read_only_ && !initial_send_block_active && !estia_pending_cmd_.empty() &&
+      (millis() - estia_cmd_sent_ms_) > ESTIA_CMD_ACK_TIMEOUT_MS) {
     if (estia_cmd_attempts_ >= ESTIA_MAX_CMD_ATTEMPTS) {
       ESP_LOGW(TAG, "Command not acknowledged after %u attempts (dtype %02X:%02X)",
                estia_cmd_attempts_,
@@ -3171,7 +3174,7 @@ void ToshibaAbClimate::loop() {
   }
 
   // Estia autonomous polling (runtime-toggleable)
-  if (this->autonomous_ && this->data_reader.frame_format() == FrameFormat::A0) {
+  if (!this->read_only_ && this->autonomous_ && this->data_reader.frame_format() == FrameFormat::A0) {
     uint32_t now = millis();
     if (now - estia_last_e8c0_ms_ >= ESTIA_E8C0_INTERVAL_MS) {
       estia_last_e8c0_ms_ = now;
@@ -3184,7 +3187,7 @@ void ToshibaAbClimate::loop() {
   }
 
   // 0-10V demand emulation: periodic heartbeat as 0x0041
-  if (this->demand_enabled_ && this->data_reader.frame_format() == FrameFormat::A0) {
+  if (!this->read_only_ && this->demand_enabled_ && this->data_reader.frame_format() == FrameFormat::A0) {
     uint32_t now = millis();
     if (now - estia_last_demand_heartbeat_ms_ >= ESTIA_DEMAND_HEARTBEAT_MS) {
       estia_last_demand_heartbeat_ms_ = now;
@@ -3697,7 +3700,27 @@ void ToshibaAbClimate::publish_estia_zone1_state_(bool zone1_on, bool is_cooling
   this->publish_estia_zone_state_(this->zone1_climate_, zone1_on, is_cooling, automatik, setpoint);
 }
 
+void ToshibaAbClimate::set_read_only(bool en) {
+  this->read_only_ = en;
+  if (!en) return;
+
+  this->write_queue_ = {};
+  this->raw_write_queue_ = {};
+  this->pending_head_ = 0;
+  this->pending_count_ = 0;
+  this->last_unconfirmed_command_.reset();
+  this->last_unconfirmed_command_attempts_ = 0;
+  this->resend_last_unconfirmed_command_ = false;
+  this->last_unconfirmed_command_sent_ms_ = 0;
+  this->estia_pending_cmd_.clear();
+  this->estia_pending_ack_dtype_ = 0;
+  this->estia_cmd_attempts_ = 0;
+  this->estia_cmd_sent_ms_ = 0;
+}
+
 bool ToshibaAbClimate::enqueue_command_(const DataFrame &command) {
+  if (this->read_only_) return false;
+
   std::queue<DataFrame> queued = this->write_queue_;
   const size_t command_size = command.size();
   while (!queued.empty()) {
@@ -3714,6 +3737,8 @@ bool ToshibaAbClimate::enqueue_command_(const DataFrame &command) {
 }
 
 bool ToshibaAbClimate::enqueue_raw_frame_(const std::vector<uint8_t> &raw_frame) {
+  if (this->read_only_) return false;
+
   std::queue<std::vector<uint8_t>> queued = this->raw_write_queue_;
   while (!queued.empty()) {
     if (queued.front() == raw_frame) {
@@ -3821,9 +3846,8 @@ bool ToshibaAbClimate::send_raw_frame_from_text(const std::string &frame_text) {
     payload += buf;
   }
 
-  if (this->enqueue_raw_frame_(raw_frame)) {
-    ESP_LOGI(TAG, "Queue raw frame from HA: %s", payload.c_str());
-  }
+  if (!this->enqueue_raw_frame_(raw_frame)) return false;
+  ESP_LOGI(TAG, "Queue raw frame from HA: %s", payload.c_str());
   return true;
 }
 
@@ -3845,7 +3869,7 @@ static uint16_t estia_crc16(const uint8_t *data, size_t len) {
 
 void ToshibaAbClimate::send_estia_tracked_(const uint8_t *frame, size_t len, uint16_t ack_dtype) {
   std::vector<uint8_t> raw(frame, frame + len);
-  this->enqueue_raw_frame_(raw);
+  if (!this->enqueue_raw_frame_(raw)) return;
   // Track for ACK/retry (only for commands, not heartbeats/requests)
   if (ack_dtype != 0) {
     estia_pending_cmd_ = std::move(raw);

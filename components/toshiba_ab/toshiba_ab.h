@@ -1056,7 +1056,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool is_announce_ack_frame_(const DataFrame *frame) const;
   bool is_remote_announce_frame_(const DataFrame *frame) const;
   void handle_remote_address_collision_(uint8_t address, const char *reason);
-  void set_read_only(bool en) { read_only_ = en; }
+  void set_read_only(bool en);
   void set_ping_enabled(bool en) { ping_enabled_ = en; }
   void set_autoreset_errors(bool en) { autoreset_errors_ = en; }
   void set_remote_error_binary_sensor(binary_sensor::BinarySensor *sensor) { remote_error_binary_sensor_ = sensor; }
