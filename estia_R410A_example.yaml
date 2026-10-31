@@ -32,6 +32,7 @@ ota:
 wifi:
   ssid: !secret wifi_ssid
   password: !secret wifi_password
+  output_power: 10dB        # Recommended, lowers the noise created by power spikes and prevents reboots when flashing OTA. Defaults to 20dB.
   ap:
     ssid: "Estia R410A Fallback"
     password: "your_ap_password"
