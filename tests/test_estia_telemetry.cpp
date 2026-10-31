@@ -563,10 +563,25 @@ static void regular_temperature_checks() {
 
 struct RecordingUart : uart::UARTComponent {
   size_t transmitted{0};
-  void write_array(const uint8_t *, size_t len) override { transmitted += len; }
-  bool peek_byte(uint8_t *) override { return false; }
-  bool read_array(uint8_t *, size_t) override { return false; }
-  size_t available() override { return 0; }
+  std::vector<std::vector<uint8_t>> writes;
+  std::vector<uint8_t> rx;
+  size_t rx_offset{0};
+  void write_array(const uint8_t *data, size_t len) override {
+    transmitted += len;
+    writes.emplace_back(data, data + len);
+  }
+  bool peek_byte(uint8_t *data) override {
+    if (!available()) return false;
+    *data = rx[rx_offset];
+    return true;
+  }
+  bool read_array(uint8_t *data, size_t len) override {
+    if (len > available()) return false;
+    std::copy_n(rx.begin() + rx_offset, len, data);
+    rx_offset += len;
+    return true;
+  }
+  size_t available() override { return rx.size() - rx_offset; }
   uart::UARTFlushResult flush() override { return uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS; }
   void check_logger_conflict() override {}
 };
@@ -592,7 +607,6 @@ static void read_only_transmission_checks() {
     assert(unit.enqueue_raw_frame_({0xA0, 0x00}));
     assert(unit.enqueue_sensor_query_(0x02));
     unit.last_unconfirmed_command_ = command;
-    unit.resend_last_unconfirmed_command_ = true;
     unit.estia_pending_cmd_ = {0xA0, 0x00};
     unit.estia_cmd_attempts_ = 1;
     unit.set_read_only(true);
@@ -629,6 +643,160 @@ static void read_only_transmission_checks() {
   }
 }
 
+static void command_retry_checks() {
+  for (auto format : {FrameFormat::NORMAL, FrameFormat::HM, FrameFormat::TU2C, FrameFormat::ESTIA}) {
+    for (uint8_t power : {0, 1}) {
+      RecordingUart uart;
+      TestEstia unit;
+      unit.set_uart_parent(&uart);
+      unit.set_frame_format(format);
+      unit.set_autonomous(false);
+      unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+      unit.tcc_state.power = !power;
+      unit.tcc_state.mode = MODE_HEAT;
+      unit.tcc_state.target_temp = 20;
+      auto requested = unit.tcc_state;
+      requested.power = power;
+      auto commands = unit.create_commands(&requested);
+      if (format == FrameFormat::ESTIA) {
+        if (power) unit.send_estia_first_gen_dhw_on();
+        else unit.send_estia_first_gen_dhw_off();
+        assert(unit.write_queue_.size() == 1);
+        commands = {unit.write_queue_.front()};
+        unit.write_queue_.pop();
+      }
+      assert(commands.size() == 1 && unit.should_track_command_ack_(commands[0]));
+      const auto command = commands[0];
+      auto quiet = [&]() {
+        unit.last_received_frame_millis_ = millis() - 1000;
+        unit.last_sent_frame_millis_ = millis() - 1000;
+        unit.last_tu2c_received_frame_millis_ = millis() - 1000;
+        unit.last_tu2c_sent_frame_millis_ = millis() - 1000;
+      };
+      auto start = [&]() {
+        quiet();
+        assert(unit.enqueue_command_(command));
+        unit.loop();
+        assert(unit.last_unconfirmed_command_.has_value());
+        assert(unit.last_unconfirmed_command_attempts_ == 1);
+      };
+      start();
+      const auto wire_command = uart.writes.back();
+      const size_t first_write = uart.writes.size();
+      // Timeout starts at zero too, and subtraction remains valid across rollover.
+      unit.last_unconfirmed_command_sent_ms_ = 0;
+      assert(!unit.command_ack_timeout_elapsed_(199));
+      assert(unit.command_ack_timeout_elapsed_(200));
+      unit.last_unconfirmed_command_sent_ms_ = UINT32_MAX - 99;
+      assert(!unit.command_ack_timeout_elapsed_(99));
+      assert(unit.command_ack_timeout_elapsed_(100));
+
+      auto seal = [](DataFrame &frame) {
+        const size_t n = frame.size();
+        if (frame.is_tu2c()) {
+          uint8_t sum = 0;
+          for (size_t i = 0; i + 1 < n; ++i) sum += frame.raw[i];
+          frame.raw[n - 1] = sum;
+        } else {
+          frame.raw[n - 1] = frame.calculate_crc();
+        }
+      };
+      DataFrame ack{};
+      if (command.is_tu2c()) {
+        ack.set_tu2c(true);
+        const uint8_t bytes[] = {0x0A, command.raw[2], command.raw[1], command.raw[3], 0x80, 0xA1, 0};
+        std::copy(std::begin(bytes), std::end(bytes), ack.raw);
+      } else {
+        ack.source = command.dest;
+        ack.dest = command.source;
+        ack.opcode1 = OPCODE_ACK;
+        ack.data_length = 2;
+        ack.data[0] = 0x80;
+        ack.data[1] = OPCODE2_PARAM_ACK;
+      }
+      seal(ack);
+      auto ignored = [&](DataFrame other, bool valid = true) {
+        unit.last_unconfirmed_command_sent_ms_ = millis();
+        const auto sent_ms = unit.last_unconfirmed_command_sent_ms_;
+        assert(unit.receive_data_frame(&other) == valid);
+        assert(unit.last_unconfirmed_command_.has_value());
+        assert(unit.last_unconfirmed_command_sent_ms_ == sent_ms);
+        quiet();
+        unit.loop();
+        assert(uart.writes.size() == first_write);
+      };
+      // Valid unrelated ACKs, wrong addresses, status/echo traffic and corrupt ACKs
+      // neither complete a command nor trigger an immediate resend.
+      auto other = ack;
+      other.raw[5] = 0x0C;
+      seal(other); ignored(other);
+      other = ack; other.raw[command.is_tu2c() ? 1 : 0] ^= 1;
+      seal(other); ignored(other);
+      other = ack; other.raw[command.is_tu2c() ? 2 : 1] ^= 1;
+      seal(other); ignored(other);
+      other = ack;
+      if (command.is_tu2c()) other.raw[3] ^= 0x20;
+      else other.opcode1 = OPCODE_PING;
+      seal(other); ignored(other);
+      unit.handle_pending_command_ack_(&command);
+      assert(unit.last_unconfirmed_command_.has_value());
+      other = ack; other.raw[other.size() - 1] ^= 1;
+      if (format != FrameFormat::HM) ignored(other, false);
+
+      // Silent bus: five identical sends total, each with a fresh timeout.
+      for (unsigned attempt = 2; attempt <= 5; ++attempt) {
+        quiet();
+        unit.last_unconfirmed_command_sent_ms_ = millis() - 201;
+        unit.loop();
+        assert(unit.last_unconfirmed_command_attempts_ == attempt);
+        assert(uart.writes.size() == first_write + attempt - 1);
+        assert(uart.writes.back() == wire_command);
+        assert(!unit.command_ack_timeout_elapsed_(unit.last_unconfirmed_command_sent_ms_ + 199));
+      }
+      quiet();
+      unit.last_unconfirmed_command_sent_ms_ = millis() - 201;
+      unit.loop();
+      assert(!unit.last_unconfirmed_command_.has_value());
+      assert(uart.writes.size() == first_write + 4);
+
+      // A buffered valid ACK wins over an expired timer; subsequent queued
+      // commands/raw requests must wait for that ACK, not a telemetry response.
+      start();
+      const size_t before_ack = uart.writes.size();
+      assert(unit.enqueue_command_(command));
+      assert(unit.enqueue_raw_frame_({0xA0, 0x00}));
+      quiet();
+      unit.last_unconfirmed_command_sent_ms_ = millis();
+      unit.loop();
+      assert(uart.writes.size() == before_ack && !unit.raw_write_queue_.empty());
+      assert(unit.write_queue_.size() == 1);
+      uart.rx.assign(ack.raw, ack.raw + ack.size());
+      if (command.is_tu2c()) {
+        uart.rx.insert(uart.rx.begin(), {0xF0, 0xF0});
+        uart.rx.push_back(0xA0);
+      }
+      unit.can_read_packet = true;
+      unit.last_unconfirmed_command_sent_ms_ = millis() - 201;
+      quiet();
+      unit.loop();
+      assert(!unit.last_unconfirmed_command_.has_value());
+      assert(uart.writes.size() == before_ack);
+      assert(unit.write_queue_.size() == 1);
+      unit.raw_write_queue_.pop();
+      quiet();
+      unit.loop();
+      assert(uart.writes.size() == before_ack + 1);
+      assert(unit.last_unconfirmed_command_attempts_ == 1);
+      assert(unit.write_queue_.empty());
+      assert(unit.receive_data_frame(&ack));
+      quiet();
+      unit.last_unconfirmed_command_sent_ms_ = millis() - 201;
+      unit.loop();
+      assert(uart.writes.size() == before_ack + 1);
+    }
+  }
+}
+
 int main() {
   first_gen_temperature_checks();
   dn_checks();
@@ -639,6 +807,7 @@ int main() {
   intake_air_temperature_checks();
   regular_temperature_checks();
   read_only_transmission_checks();
+  command_retry_checks();
   TestEstia unit;
   unit.set_frame_format(FrameFormat::A0);
   ToshibaAbEstiaZoneClimate z1(&unit), z2(&unit, 2);
