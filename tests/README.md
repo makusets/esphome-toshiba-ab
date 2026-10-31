@@ -65,6 +65,13 @@ shift values and read-only/boot guards. Configuration checks cover the optional
 esphome compile tests/estia_curve_esp8266.yaml
 ```
 
+Mode-encoding checks cover default/explicit `05_06` and opt-in `01_02` through
+the real Zone 1 control path, including active and deferred startup, both payload
+bytes, checksums/addresses, Off, Auto, read-only mode and the startup send block.
+Configuration checks reject the option on other protocols; the first-generation
+ESP8266 fixture compiles with `01_02`. These are packet-level checks, not proof
+of sustained operation on a physical pump.
+
 First-generation status temperature checks replay the 18-byte `0x15` status
 layout from issue #242. They cover byte-13 Zone 1 readings when byte 14 is empty,
 byte-14 precedence when populated, empty temperature slots, absent DHW sensors,

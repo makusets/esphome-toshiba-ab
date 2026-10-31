@@ -98,6 +98,10 @@ climate:
 
     frame_format: estia
 
+    # Optional Zone 1 mode payloads; default is "05_06" (Cool 05:05 / Heat 06:06).
+    # Select "01_02" only for matching controller captures; see docs/frame_formats.md.
+    # estia_mode_encoding: "01_02"
+
     # Optional diagnostic binary sensor: true when valid traffic has been seen.
     connected:
       name: "Estia Connected"

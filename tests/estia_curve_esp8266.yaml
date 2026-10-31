@@ -19,5 +19,6 @@ climate:
   - platform: toshiba_ab
     name: Estia DHW
     frame_format: estia
+    estia_mode_encoding: "01_02"
     curve_shift:
       name: Heating Curve Shift

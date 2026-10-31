@@ -56,4 +56,33 @@ with tempfile.TemporaryDirectory(prefix="estia-config-", dir=work) as temp:
         else:
             assert result.returncode != 0
             assert "curve_shift requires frame_format: estia" in result.stdout + result.stderr
+    for index, (framing, encoding, expected) in enumerate([
+        ("estia", None, None),
+        ("estia", "05_06", "MODE_05_06"),
+        ("estia", "01_02", "MODE_01_02"),
+        ("estia", "unknown", False),
+        ("estia", 102, False),
+        *[(framing, "01_02", False) for framing in
+          ("auto", "normal", "n", "tcc-link", "a0", "estia_a0", "hm", "tu2c", "u", "wrapped")],
+    ]):
+        build = temp / f"encoding-build-{index}"
+        config["esphome"]["build_path"] = str(build)
+        component = {"platform": "toshiba_ab", "name": "DHW", "frame_format": framing}
+        if encoding is not None:
+            component["estia_mode_encoding"] = encoding
+        config["climate"] = [component]
+        path = temp / f"encoding-{index}.yaml"
+        path.write_text(yaml.safe_dump(config))
+        result = subprocess.run([sys.executable, "-m", "esphome", "compile", "--only-generate", str(path)],
+                                capture_output=True, text=True)
+        if expected is False:
+            assert result.returncode != 0, (framing, encoding)
+            assert "estia_mode_encoding" in result.stdout + result.stderr
+        else:
+            assert result.returncode == 0, result.stdout + result.stderr
+            source = (build / "src/main.cpp").read_text()
+            if expected is None:
+                assert "set_estia_mode_encoding(" not in source
+            else:
+                assert f"set_estia_mode_encoding(toshiba_ab::EstiaModeEncoding::{expected})" in source
 print("Estia configuration checks passed")

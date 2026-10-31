@@ -1503,6 +1503,10 @@ void ToshibaAbClimate::dump_config() {
   }
   ESP_LOGCONFIG(TAG, "  Frame format: %s%s%s", fmt_label, this->frame_format_auto_ ? " (auto" : "",
                 this->frame_format_auto_ ? (this->frame_format_confirmed_ ? ", confirmed)" : ", pending)") : "");
+  if (this->is_estia_first_gen()) {
+    ESP_LOGCONFIG(TAG, "  ESTIA mode encoding: %s",
+                  this->estia_mode_encoding_ == EstiaModeEncoding::MODE_01_02 ? "01_02" : "05_06");
+  }
 #ifdef USE_ESP8266
   if (this->hw_uart_rx_enabled_) {
     ESP_LOGCONFIG(TAG, "  Hardware UART0 RX: enabled");
@@ -4338,8 +4342,10 @@ void ToshibaAbClimate::send_estia_first_gen_zone1_mode(climate::ClimateMode mode
   if (mode != climate::CLIMATE_MODE_HEAT && mode != climate::CLIMATE_MODE_COOL && mode != climate::CLIMATE_MODE_AUTO)
     return;
   this->send_estia_first_gen_auto_mode(mode == climate::CLIMATE_MODE_AUTO);
-  // Confirmed wall-remote captures in issue #90: 22:05:05 = cool, 22:06:06 = heat.
-  const uint8_t mode_byte = mode == climate::CLIMATE_MODE_COOL ? 0x05 : 0x06;
+  // #90 uses 05/06; another R410A controller uses 01/02. The extra 0x04 is not decoded.
+  const uint8_t mode_byte = this->estia_mode_encoding_ == EstiaModeEncoding::MODE_01_02
+                               ? (mode == climate::CLIMATE_MODE_COOL ? 0x01 : 0x02)
+                               : (mode == climate::CLIMATE_MODE_COOL ? 0x05 : 0x06);
   const uint8_t payload[] = {0xE0, 0x01, 0x22, mode_byte, mode_byte};
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }

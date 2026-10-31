@@ -19,6 +19,8 @@ namespace toshiba_ab {
 
 class ToshibaAbClimate;
 
+enum class EstiaModeEncoding : uint8_t { MODE_05_06, MODE_01_02 };
+
 class ToshibaAbWallMountedLouvreSelect : public select::Select {
  public:
   explicit ToshibaAbWallMountedLouvreSelect(ToshibaAbClimate *parent) : parent_(parent) {}
@@ -1081,6 +1083,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void send_estia_first_gen_dhw_setpoint(float target_temp);
   void send_estia_first_gen_zone1_setpoint(float target_temp);
   void send_estia_first_gen_zone1_mode(climate::ClimateMode mode);
+  void set_estia_mode_encoding(EstiaModeEncoding encoding) { estia_mode_encoding_ = encoding; }
   void send_estia_first_gen_zone1(bool on);
   void send_estia_first_gen_dhw_on();
   void send_estia_first_gen_dhw_off();
@@ -1404,6 +1407,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   uint8_t estia_demand_value_{0};         // current demand value (0..15)
   uint32_t estia_last_demand_heartbeat_ms_{0};
 
+  EstiaModeEncoding estia_mode_encoding_{EstiaModeEncoding::MODE_05_06};
   bool estia_first_gen_pump_state_known_{false};
   bool estia_first_gen_zone1_active_{false};
   bool estia_first_gen_dhw_active_{false};

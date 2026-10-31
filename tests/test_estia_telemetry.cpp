@@ -105,6 +105,66 @@ static uint8_t dn_checksum(const uint8_t *bytes, size_t size) {
   return static_cast<uint8_t>(sum);
 }
 
+static void first_gen_mode_encoding_checks() {
+  // Omitted, explicit 05_06, and the opt-in captured 01_02 encoding.
+  for (unsigned choice = 0; choice < 3; choice++) {
+    for (uint8_t remote : {0x60, 0x61}) {
+      for (bool active : {false, true}) {
+        for (auto mode : {climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_COOL, climate::CLIMATE_MODE_AUTO}) {
+          TestEstia unit;
+          unit.set_frame_format(FrameFormat::ESTIA);
+          unit.set_remote_address(remote);
+          unit.set_master_address(0x70);
+          unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+          if (choice) unit.set_estia_mode_encoding(choice == 2 ? EstiaModeEncoding::MODE_01_02 : EstiaModeEncoding::MODE_05_06);
+          unit.estia_first_gen_zone1_active_ = active;
+          ToshibaAbEstiaZoneClimate zone(&unit);
+          unit.set_zone1_climate(&zone);
+          auto expect = [&](std::initializer_list<uint8_t> payload) {
+            assert(!unit.write_queue_.empty());
+            const auto command = unit.write_queue_.front(); unit.write_queue_.pop();
+            std::vector<uint8_t> expected{static_cast<uint8_t>(payload.size() + 7), remote, 0x70};
+            expected.insert(expected.end(), payload);
+            expected.push_back(dn_checksum(expected.data(), expected.size()));
+            assert(command.size() == expected.size());
+            assert(std::equal(expected.begin(), expected.end(), command.raw));
+          };
+          zone.make_call().set_mode(mode).perform();
+          DataFrame status{};
+          status.set_tu2c(true);
+          const uint8_t captured[] = {0x15, 0x70, 0xFF, 0xE0, 0xA0, 0x31, 0x41, 0x00, 0x10,
+                                      0xA2, 0x60, 0x66, 0x00, 0x48, 0x00, 0x00, 0x00, 0x36};
+          std::copy(std::begin(captured), std::end(captured), status.raw);
+          if (!active) {
+            expect({0xE0, 0x01, 0x21, 0x03});
+            assert(unit.write_queue_.empty());  // Wait for pump-confirmed On.
+            assert(unit.estia_first_gen_pending_zone1_mode_ == mode);
+            assert(unit.receive_data_frame(&status));
+          }
+          expect({0xE0, 0x01, 0x24, 0x01, static_cast<uint8_t>(mode == climate::CLIMATE_MODE_AUTO)});
+          const uint8_t value = mode == climate::CLIMATE_MODE_COOL ? (choice == 2 ? 0x01 : 0x05)
+                                                                 : (choice == 2 ? 0x02 : 0x06);
+          expect({0xE0, 0x01, 0x22, value, value});
+          assert(unit.write_queue_.empty() && unit.raw_write_queue_.empty());
+          assert(!unit.estia_first_gen_pending_zone1_mode_.has_value());
+          assert(unit.receive_data_frame(&status));
+          assert(unit.write_queue_.empty());  // No repeated mode command.
+          zone.make_call().set_mode(climate::CLIMATE_MODE_OFF).perform();
+          expect({0xE0, 0x01, 0x21, 0x02});
+          assert(unit.write_queue_.empty());
+          unit.set_read_only(true);
+          zone.make_call().set_mode(mode).set_target_temperature(35).perform();
+          assert(unit.write_queue_.empty() && unit.raw_write_queue_.empty());
+          unit.set_read_only(false);
+          unit.boot_millis_ = millis();
+          unit.send_estia_first_gen_zone1_mode(mode);
+          assert(unit.write_queue_.empty());  // Existing startup send block.
+        }
+      }
+    }
+  }
+}
+
 static void dn_checks() {
   TestEstia unit;
   unit.set_frame_format(FrameFormat::ESTIA);
@@ -801,6 +861,7 @@ int main() {
   first_gen_temperature_checks();
   dn_checks();
   new (&App) Application();
+  first_gen_mode_encoding_checks();
   control_checks();
   tu2c_address_checks();
   startup_address_checks();

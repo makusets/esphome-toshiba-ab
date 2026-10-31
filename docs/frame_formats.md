@@ -287,6 +287,39 @@ climate:
       name: "Estia DHW Boost"
 ```
 
+### Zone 1 mode command encoding
+
+`estia_mode_encoding` optionally selects the two payload bytes in the
+`E0:01:22` mode command. It requires `frame_format: estia`.
+
+| Setting | Cool payload | Heat payload |
+| --- | --- | --- |
+| `"05_06"` (default) | `22:05:05` | `22:06:06` |
+| `"01_02"` | `22:01:01` | `22:02:02` |
+
+```yaml
+climate:
+  - platform: toshiba_ab
+    name: "Estia DHW"
+    frame_format: estia
+    estia_mode_encoding: "01_02"
+    zone1_climate:
+      name: "Estia Zone 1"
+```
+
+The default payloads were reported in [issue #90](https://github.com/makusets/esphome-toshiba-ab/issues/90).
+The alternate payloads were captured from an HWS-P1105XWHM3-E R410A wall
+controller. The meaning of the extra `0x04` in each default payload byte is
+unknown; cooling permission, DHW and zone settings do not establish which
+encoding to select. Choose the alternate only when controller captures match.
+Both settings use the same protocol and compute the checksum with the current
+remote/master addresses.
+
+Power commands, startup sequencing, read-only behavior and weather compensation
+are unchanged. Auto uses the selected Heat payload after enabling weather
+compensation. The alternate encoding has packet-level software tests; sustained
+ESPHome operation and Auto still need hardware validation.
+
 ## Configuration aliases
 
 The accepted values for `frame_format` are:

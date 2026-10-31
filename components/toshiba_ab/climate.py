@@ -57,6 +57,7 @@ CONF_REMOTE = "remote"
 CONF_COMMAND_MODE_READ = "command_mode_read"
 CONF_COMMAND_MODE_WRITE = "command_mode_write"
 CONF_FRAME_FORMAT = "frame_format"
+CONF_ESTIA_MODE_ENCODING = "estia_mode_encoding"
 CONF_FILTER_FRAMES = "filter_frames"
 CONF_PACKET_MIN_WAIT = "packet_min_wait"
 CONF_AUTORESET_ERRORS = "autoreset_errors"
@@ -184,6 +185,11 @@ ToshibaAbWallMountedLouvreSelect = toshiba_ab_ns.class_(
 )
 
 FrameFormat = toshiba_ab_ns.enum("FrameFormat")
+EstiaModeEncoding = toshiba_ab_ns.enum("EstiaModeEncoding", is_class=True)
+ESTIA_MODE_ENCODINGS = {
+    "05_06": EstiaModeEncoding.MODE_05_06,
+    "01_02": EstiaModeEncoding.MODE_01_02,
+}
 FRAME_FORMATS = {
     "auto": None,
     "n": FrameFormat.NORMAL,
@@ -289,6 +295,8 @@ def _validate_wall_mounted_louvre(config):
         raise cv.Invalid("zone2_climate requires frame_format: a0")
     if CONF_CURVE_SHIFT in config and config[CONF_FRAME_FORMAT] != "estia":
         raise cv.Invalid("curve_shift requires frame_format: estia (first-generation R410A)")
+    if CONF_ESTIA_MODE_ENCODING in config and config[CONF_FRAME_FORMAT] != "estia":
+        raise cv.Invalid("estia_mode_encoding requires frame_format: estia (first-generation R410A)")
     return config
 
 
@@ -307,6 +315,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_COMMAND_MODE_READ, default=0x08): cv.uint8_t,
         cv.Optional(CONF_COMMAND_MODE_WRITE, default=0x80): cv.uint8_t,
         cv.Optional(CONF_FRAME_FORMAT, default="auto"): cv.one_of(*FRAME_FORMATS, lower=True),
+        cv.Optional(CONF_ESTIA_MODE_ENCODING): cv.enum(ESTIA_MODE_ENCODINGS),
         cv.Optional(CONF_FILTER_FRAMES, default=True): cv.boolean,
         cv.Optional(CONF_PACKET_MIN_WAIT, default="200ms"): cv.positive_time_period_milliseconds,
         cv.Optional(CONF_AUTORESET_ERRORS, default=False): cv.boolean,
@@ -745,6 +754,8 @@ async def to_code(config):
             cg.add(var.set_frame_format_auto())
         else:
             cg.add(var.set_frame_format(FRAME_FORMATS[config[CONF_FRAME_FORMAT]]))
+    if CONF_ESTIA_MODE_ENCODING in config:
+        cg.add(var.set_estia_mode_encoding(config[CONF_ESTIA_MODE_ENCODING]))
     if CONF_FILTER_FRAMES in config:
         cg.add(var.set_filter_frames(config[CONF_FILTER_FRAMES]))
     if CONF_PACKET_MIN_WAIT in config:
