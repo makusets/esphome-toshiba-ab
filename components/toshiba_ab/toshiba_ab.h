@@ -41,6 +41,7 @@ class ToshibaAbEstiaZoneClimate : public climate::Climate {
   explicit ToshibaAbEstiaZoneClimate(ToshibaAbClimate *parent, uint8_t zone = 1) : parent_(parent), zone_(zone) {}
   climate::ClimateTraits traits() override;
   void control(const climate::ClimateCall &call) override;
+  void set_supports_heat(bool value) { supports_heat_ = value; }
   void set_supports_cool(bool value) { supports_cool_ = value; }
   void set_supports_auto(bool value) { supports_auto_ = value; }
   void report_night_setback(bool applied) {
@@ -57,6 +58,7 @@ class ToshibaAbEstiaZoneClimate : public climate::Climate {
  protected:
   ToshibaAbClimate *parent_;
   uint8_t zone_;
+  bool supports_heat_{true};
   bool supports_cool_{true};
   bool supports_auto_{true};
 };

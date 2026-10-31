@@ -20,6 +20,9 @@ cases = [
      [(7, 65), (18, 45)]),
     ({"zone1_climate": {"supports_cool": False, "supports_auto": False}}, [(20, 65)]),
     ({"zone2_climate": {"supports_cool": False, "supports_auto": False}}, [(20, 40), (20, 65)]),
+    ({"zone1_climate": {"supports_heat": False}}, [(20, 65)]),
+    ({"zone2_climate": {"supports_heat": False, "supports_cool": False, "supports_auto": False}},
+     [(20, 40), (20, 65)]),
 ]
 with tempfile.TemporaryDirectory(prefix="estia-config-", dir=work) as temp:
     temp = Path(temp)
@@ -36,9 +39,13 @@ with tempfile.TemporaryDirectory(prefix="estia-config-", dir=work) as temp:
         path.write_text(yaml.safe_dump(config))
         subprocess.run([sys.executable, "-m", "esphome", "compile", "--only-generate", str(path)], check=True)
         source = (build / "src/main.cpp").read_text()
-        if any(isinstance(value, dict) and value.get("supports_cool") is False for value in zones.values()):
-            assert "set_supports_cool(false)" in source
-            assert "set_supports_auto(false)" in source
+        for option in ("supports_heat", "supports_cool", "supports_auto"):
+            configured = [zones.get(name, name == "zone1_climate")
+                          for name in ("zone2_climate", "zone1_climate")]
+            enabled = [value.get(option, True) if isinstance(value, dict) else True
+                       for value in configured if value is not False]
+            assert source.count(f"set_{option}(true)") == enabled.count(True), option
+            assert source.count(f"set_{option}(false)") == enabled.count(False), option
         values = {}
         for entity, bound, value in re.findall(
             r"(\w+)->set_visual_(min|max)_temperature_override\(([\d.]+)f?\);", source

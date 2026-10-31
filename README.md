@@ -266,9 +266,11 @@ For heating-only installations, restrict the zone thermostat's advertised modes:
       supports_auto: false
 ```
 
-Both options default to `true` and also apply to `zone2_climate` on R32 systems.
-Off and Heat remain available. These options restrict ESPHome commands and do
-not change the heat pump's installer settings or hide modes selected physically.
+`supports_heat`, `supports_cool` and `supports_auto` all default to `true` and
+also apply to `zone2_climate` on R32 systems. Set `supports_heat: false` and
+`supports_auto: false` for a cooling-only zone; Off always remains available.
+These options restrict ESPHome commands and do not change the heat pump's
+installer settings or hide modes selected physically.
 
 ### Minimal R32 configuration
 
