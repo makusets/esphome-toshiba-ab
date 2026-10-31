@@ -561,6 +561,74 @@ static void regular_temperature_checks() {
   }
 }
 
+struct RecordingUart : uart::UARTComponent {
+  size_t transmitted{0};
+  void write_array(const uint8_t *, size_t len) override { transmitted += len; }
+  bool peek_byte(uint8_t *) override { return false; }
+  bool read_array(uint8_t *, size_t) override { return false; }
+  size_t available() override { return 0; }
+  uart::UARTFlushResult flush() override { return uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS; }
+  void check_logger_conflict() override {}
+};
+
+static void read_only_transmission_checks() {
+  for (auto format : {FrameFormat::A0, FrameFormat::NORMAL, FrameFormat::HM,
+                      FrameFormat::TU2C, FrameFormat::ESTIA}) {
+    RecordingUart uart;
+    TestEstia unit;
+    unit.set_uart_parent(&uart);
+    unit.set_frame_format(format);
+    unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+    unit.last_received_frame_millis_ = millis() - 1000;
+    unit.last_sent_frame_millis_ = millis() - 1000;
+    unit.set_autonomous(true);
+    unit.demand_enabled_ = true;
+    unit.estia_last_e8c0_ms_ = millis() - 30000;
+    unit.estia_last_e8c1_ms_ = millis() - 60000;
+    unit.estia_last_demand_heartbeat_ms_ = millis() - 5000;
+    DataFrame command{};
+    command.data_length = 2;
+    assert(unit.enqueue_command_(command));
+    assert(unit.enqueue_raw_frame_({0xA0, 0x00}));
+    assert(unit.enqueue_sensor_query_(0x02));
+    unit.last_unconfirmed_command_ = command;
+    unit.resend_last_unconfirmed_command_ = true;
+    unit.estia_pending_cmd_ = {0xA0, 0x00};
+    unit.estia_cmd_attempts_ = 1;
+    unit.set_read_only(true);
+    assert(unit.write_queue_.empty() && unit.commands_empty());
+    assert(unit.pending_count_ == 0);
+    assert(!unit.last_unconfirmed_command_.has_value());
+    assert(unit.estia_pending_cmd_.empty());
+    assert(!unit.enqueue_command_(command));
+    assert(!unit.enqueue_sensor_query_(0x02));
+    assert(!unit.send_raw_frame_from_text("A0:00"));
+    unit.send_estia_data_request(0xC0);
+    unit.send_estia_data_request(0xC1);
+    unit.send_estia_demand_heartbeat();
+    const uint8_t tracked[] = {0xA0, 0x00};
+    unit.send_estia_tracked_(tracked, sizeof(tracked), 0x0041);
+    assert(unit.commands_empty() && unit.estia_pending_cmd_.empty());
+    unit.loop();
+    assert(uart.transmitted == 0);
+    assert(unit.commands_empty());
+    // Even an already-populated queue cannot bypass the final TX guard.
+    unit.raw_write_queue_.push({0xA0, 0x00});
+    unit.write_queue_.push(command);
+    unit.loop();
+    assert(uart.transmitted == 0);
+    unit.set_read_only(true);
+    unit.set_read_only(false);
+    unit.set_autonomous(false);
+    unit.demand_enabled_ = false;
+    unit.loop();
+    assert(uart.transmitted == 0);
+    assert(unit.send_raw_frame_from_text("A0:00"));
+    unit.loop();
+    assert(uart.transmitted == 2);
+  }
+}
+
 int main() {
   first_gen_temperature_checks();
   dn_checks();
@@ -570,6 +638,7 @@ int main() {
   startup_address_checks();
   intake_air_temperature_checks();
   regular_temperature_checks();
+  read_only_transmission_checks();
   TestEstia unit;
   unit.set_frame_format(FrameFormat::A0);
   ToshibaAbEstiaZoneClimate z1(&unit), z2(&unit, 2);
