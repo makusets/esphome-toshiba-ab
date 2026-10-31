@@ -1457,8 +1457,10 @@ void ToshibaAbEstiaCurveShiftSelect::control(const std::string &value) {
 climate::ClimateTraits ToshibaAbEstiaZoneClimate::traits() {
   climate::ClimateTraits traits;
   traits.add_feature_flags(climate::CLIMATE_SUPPORTS_CURRENT_TEMPERATURE);
-  traits.set_supported_modes(
-      {climate::CLIMATE_MODE_OFF, climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_COOL, climate::CLIMATE_MODE_AUTO});
+  traits.set_supported_modes({climate::CLIMATE_MODE_OFF});
+  if (this->supports_heat_) traits.add_supported_mode(climate::CLIMATE_MODE_HEAT);
+  if (this->supports_cool_) traits.add_supported_mode(climate::CLIMATE_MODE_COOL);
+  if (this->supports_auto_) traits.add_supported_mode(climate::CLIMATE_MODE_AUTO);
   if (this->parent_->is_estia_r32()) {
     traits.set_supported_presets({climate::CLIMATE_PRESET_NONE});
     detail::configure_night_setback(*this, traits, 0);

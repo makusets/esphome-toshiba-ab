@@ -797,7 +797,38 @@ static void command_retry_checks() {
   }
 }
 
+static void zone_mode_capability_checks() {
+  for (auto format : {FrameFormat::ESTIA, FrameFormat::A0}) {
+    for (uint8_t zone_number : {1, 2}) {
+      for (uint8_t modes = 0; modes < 8; modes++) {
+        TestEstia unit;
+        unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+        unit.set_frame_format(format);
+        ToshibaAbEstiaZoneClimate zone(&unit, zone_number);
+        if (zone_number == 1) unit.set_zone1_climate(&zone);
+        else unit.set_zone2_climate(&zone);
+        assert(zone.traits().supports_mode(climate::CLIMATE_MODE_HEAT));
+        assert(zone.traits().supports_mode(climate::CLIMATE_MODE_COOL));
+        assert(zone.traits().supports_mode(climate::CLIMATE_MODE_AUTO));
+        zone.set_supports_heat(modes & 1);
+        zone.set_supports_cool(modes & 2);
+        zone.set_supports_auto(modes & 4);
+        const auto traits = zone.traits();
+        assert(traits.supports_mode(climate::CLIMATE_MODE_OFF));
+        assert(traits.supports_mode(climate::CLIMATE_MODE_HEAT) == bool(modes & 1));
+        assert(traits.supports_mode(climate::CLIMATE_MODE_COOL) == bool(modes & 2));
+        assert(traits.supports_mode(climate::CLIMATE_MODE_AUTO) == bool(modes & 4));
+        for (auto mode : {climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_COOL, climate::CLIMATE_MODE_AUTO}) {
+          if (!traits.supports_mode(mode)) zone.make_call().set_mode(mode).perform();
+        }
+        assert(unit.write_queue_.empty() && unit.raw_write_queue_.empty());
+      }
+    }
+  }
+}
+
 int main() {
+  zone_mode_capability_checks();
   first_gen_temperature_checks();
   dn_checks();
   new (&App) Application();
