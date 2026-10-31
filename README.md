@@ -179,12 +179,18 @@ For byte-level differences, aliases and detection behavior, read
 ### Minimal ESPHome configuration
 
 This is the complete component-specific portion for TCC-Link and HM. Add your normal
-ESPHome device, Wi-Fi, API and OTA sections. For TU2C, change both highlighted
+ESPHome device, API and OTA sections. For TU2C, change both highlighted
 settings to `parity: NONE` and `frame_format: tu2c`.
 
 ```yaml
 logger:
   baud_rate: 0
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  output_power: 10dB        # Recommended, lowers the noise created by power spikes and prevents reboots when flashing OTA. Defaults to 20dB.
+                          #10dB typically gets good wifi coverage unless in a weak signal area, can be any number of dB between 8.5dB to 20.5dB
 
 external_components:
   - source: github://makusets/esphome-toshiba-ab
