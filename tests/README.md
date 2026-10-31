@@ -60,6 +60,13 @@ The A0 ESP8266 fixture includes Wi-Fi and the native API to compile the
 text-sensor unknown-state notification; the R410A fixture also verifies a build
 without networking.
 
+Startup fault checks exercise the real loop's first ESTIA query, captured wire
+bytes, boot/address/connectivity/read-only guards, periodic refresh, passive
+`never` mode and refresh after reconnection. Sending a query cannot publish OK;
+the captured-format zero response must produce `None`/off. A0 setup checks its
+explicitly assumed initial `None`/off without faking connectivity, alarm override
+and unknown on connection loss. These do not constitute A0 hardware validation.
+
 GitHub Actions runs these checks and the ESP8266 build for pull requests.
 
 Custom preset API compatibility checks (legacy traits API, current entity API,

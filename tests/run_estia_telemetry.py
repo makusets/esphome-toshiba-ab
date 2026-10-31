@@ -2,6 +2,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 import argparse
+import os
 import subprocess
 import tempfile
 
@@ -27,4 +28,4 @@ with tempfile.TemporaryDirectory(prefix="estia-tests-") as temp:
         objects = list(pool.map(compile_source, enumerate(sources)))
     binary = str(Path(temp) / "test_estia_telemetry")
     subprocess.run(["g++", "-pthread", "-Wl,--gc-sections", *objects, "-o", binary], check=True)
-    subprocess.run([binary], check=True)
+    subprocess.run([binary], check=True, env={**os.environ, "ESPHOME_PREFDIR": str(Path(temp) / "prefs")})

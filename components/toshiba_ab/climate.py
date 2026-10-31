@@ -115,6 +115,7 @@ CONF_HOTWATER_RESISTOR_HEATING = "hotwater_resistor_heating"
 CONF_REMOTE_ERROR = "remote_error"
 CONF_FAULT_CODE = "fault_code"
 CONF_FAULT_ACTIVE = "fault_active"
+CONF_FAULT_POLL_INTERVAL = "fault_poll_interval"
 
 #AC Sensors addresses
 
@@ -295,6 +296,11 @@ def _validate_wall_mounted_louvre(config):
         "estia", "a0", "estia_a0"
     ):
         raise cv.Invalid("fault_code and fault_active require frame_format: estia or a0")
+    if CONF_FAULT_POLL_INTERVAL in config:
+        if config[CONF_FRAME_FORMAT] != "estia":
+            raise cv.Invalid("fault_poll_interval requires frame_format: estia; A0 fault queries are unverified")
+        if CONF_FAULT_CODE not in config and CONF_FAULT_ACTIVE not in config:
+            raise cv.Invalid("fault_poll_interval requires fault_code or fault_active")
     return config
 
 
@@ -504,6 +510,9 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_FAULT_ACTIVE): binary_sensor.binary_sensor_schema(
             device_class=DEVICE_CLASS_PROBLEM,
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
+        cv.Optional(CONF_FAULT_POLL_INTERVAL): cv.All(
+            cv.update_interval, cv.Range(min=cv.TimePeriodMilliseconds(milliseconds=1000))
         ),
         cv.Optional(CONF_FAILED_CRCS): sensor.sensor_schema(
             accuracy_decimals=0,
@@ -904,6 +913,8 @@ async def to_code(config):
     if CONF_FAULT_ACTIVE in config:
         sens = await binary_sensor.new_binary_sensor(config[CONF_FAULT_ACTIVE])
         cg.add(var.set_fault_active_binary_sensor(sens))
+    if CONF_FAULT_POLL_INTERVAL in config:
+        cg.add(var.set_fault_poll_interval(cg.uint32(config[CONF_FAULT_POLL_INTERVAL])))
     if CONF_OUTDOOR_TEMPERATURE in config:
         sens = await sensor.new_sensor(config[CONF_OUTDOOR_TEMPERATURE])
         cg.add(var.set_outdoor_temp_sensor(sens))

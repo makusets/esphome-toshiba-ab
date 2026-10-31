@@ -98,11 +98,13 @@ climate:
 
     frame_format: estia
 
-    # Optional passive pump faults, separate from remote_error below.
+    # Optional pump faults, separate from remote_error below.
     # fault_code:
     #   name: "Estia Fault Code"
     # fault_active:
     #   name: "Estia Fault Active"
+    # Writable ESTIA polls every 30s by default; read_only always stays passive.
+    # fault_poll_interval: 30s  # or never; only used with a fault entity above
 
     # Optional diagnostic binary sensor: true when valid traffic has been seen.
     connected:

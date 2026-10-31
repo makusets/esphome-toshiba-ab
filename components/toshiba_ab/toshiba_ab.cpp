@@ -23,6 +23,7 @@ namespace toshiba_ab {
 static const char *const TAG = "tcc_link.climate";
 
 static uint16_t estia_crc16(const uint8_t *data, size_t len);
+static std::string format_pump_fault(uint8_t code);
 
 static uint8_t command_opcode_for_ack_log(const DataFrame &frame) {
   if (frame.is_tu2c()) {
@@ -1757,6 +1758,14 @@ void ToshibaAbClimate::setup() {
   if (this->read_only_switch_)
     this->read_only_switch_->publish_state(this->read_only_);
 
+  // A0 has no verified fault query yet: this is an assumed startup default,
+  // not a received all-clear and not evidence that the master is connected.
+  if (this->is_estia_r32() && (this->fault_code_text_sensor_ || this->fault_active_binary_sensor_)) {
+    this->pump_fault_code_ = 0;
+    if (this->fault_code_text_sensor_) this->fault_code_text_sensor_->publish_state(format_pump_fault(0));
+    if (this->fault_active_binary_sensor_) this->fault_active_binary_sensor_->publish_state(false);
+    ESP_LOGI(TAG, "A0 fault status starts assumed clear; fault query is not verified");
+  }
 }
 
 void ToshibaAbClimate::sync_from_received_state() {
@@ -1949,6 +1958,7 @@ void ToshibaAbClimate::update_pump_fault_(uint8_t code) {
 void ToshibaAbClimate::invalidate_pump_fault_() {
   if (!this->pump_fault_code_.has_value()) return;
   this->pump_fault_code_.reset();
+  this->last_fault_poll_ms_ = 0;
   if (this->fault_code_text_sensor_) {
     // TextSensor has no invalidate_state(); notify the native API with missing_state.
     this->fault_code_text_sensor_->set_has_state(false);
@@ -3039,6 +3049,7 @@ void ToshibaAbClimate::loop() {
 
   const uint32_t now = millis();
   const bool initial_send_block_active = this->is_initial_frame_send_block_active_(now);
+  this->update_estia_fault_poll_(now);
   if (initial_send_block_active && !this->initial_frame_send_block_logged_) {
     ESP_LOGI(TAG, "Blocking outbound frames for the first %" PRIu32 "ms after boot", INITIAL_FRAME_SEND_BLOCK_MILLIS);
     this->initial_frame_send_block_logged_ = true;
@@ -4341,6 +4352,21 @@ static DataFrame make_estia_first_gen_frame(uint8_t src, uint8_t dst, const uint
   // derives TU2C/first-generation Estia length from raw[0].
   frame.set_tu2c(true);
   return frame;
+}
+
+void ToshibaAbClimate::update_estia_fault_poll_(uint32_t now) {
+  if (!this->is_estia_first_gen() || this->read_only_ ||
+      (!this->fault_code_text_sensor_ && !this->fault_active_binary_sensor_) ||
+      this->fault_poll_interval_ms_ == UINT32_MAX || this->fault_poll_interval_ms_ == 0 ||
+      this->is_initial_frame_send_block_active_(now) || !this->remote_address_available_ ||
+      !this->master_address_confirmed_ || this->last_master_alive_millis_ == 0 ||
+      now - this->last_master_alive_millis_ > LAST_ALIVE_TIMEOUT_MILLIS) return;
+  if (this->last_fault_poll_ms_ != 0 && now - this->last_fault_poll_ms_ < this->fault_poll_interval_ms_) return;
+  // Captured controller read: 0A:60:70:E0:61:29:44. Use our negotiated source.
+  const uint8_t payload[] = {0xE0, 0x61, 0x29};
+  const auto query = make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload));
+  this->last_fault_poll_ms_ = now;
+  if (this->enqueue_command_(query)) log_tu2c_data_frame("Enqueue fault status query", &query);
 }
 
 void ToshibaAbClimate::send_estia_first_gen_zone1(bool on) {

@@ -23,5 +23,6 @@ climate:
       name: Pump Fault Code
     fault_active:
       name: Pump Fault Active
+    fault_poll_interval: 30s
     curve_shift:
       name: Heating Curve Shift

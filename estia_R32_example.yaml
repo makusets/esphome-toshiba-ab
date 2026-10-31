@@ -116,7 +116,8 @@ climate:
 
     frame_format: a0  #required
 
-    # Optional passive pump faults; A0 alarm decoding needs hardware verification.
+    # Optional passive faults: A0 starts assumed None/off until an alarm report.
+    # No A0 pump is available for validation; the fault-query packet is unknown.
     # fault_code:
     #   name: "Estia Fault Code"
     # fault_active:

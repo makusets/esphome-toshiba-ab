@@ -1,5 +1,6 @@
 #include "esphome/components/toshiba_ab/toshiba_ab.h"
 #include "esphome/core/application.h"
+#include "esphome/components/host/preferences.h"
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -586,6 +587,107 @@ struct RecordingUart : uart::UARTComponent {
   void check_logger_conflict() override {}
 };
 
+static DataFrame pump_fault_frame(FrameFormat format, uint8_t code);
+
+static void fault_initial_query_checks() {
+  RecordingUart uart;
+  TestEstia unit;
+  unit.set_uart_parent(&uart);
+  unit.set_frame_format(FrameFormat::ESTIA);
+  unit.set_remote_address(0x61);
+  unit.set_master_address(0x70);
+  unit.master_address_confirmed_ = true;
+  unit.set_autonomous(false);
+  unit.set_ping_enabled(false);
+  text_sensor::TextSensor code;
+  binary_sensor::BinarySensor active;
+  unit.set_fault_code_text_sensor(&code);
+  unit.set_fault_active_binary_sensor(&active);
+  if (millis() == 0) delay(1);
+  const auto now = millis();
+  unit.last_master_alive_millis_ = now;
+  unit.last_received_frame_millis_ = now;  // Hold TX while checking the queued read.
+  unit.last_sent_frame_millis_ = now;
+  unit.boot_millis_ = now;
+  unit.loop(); assert(unit.write_queue_.empty());
+  unit.boot_millis_ = now - INITIAL_FRAME_SEND_BLOCK_MILLIS - 1;
+  unit.set_read_only(true);
+  unit.loop(); assert(unit.write_queue_.empty());
+  unit.set_read_only(false);
+  unit.master_address_confirmed_ = false;
+  unit.loop(); assert(unit.write_queue_.empty());
+  unit.master_address_confirmed_ = true;
+  unit.remote_address_available_ = false;
+  unit.loop(); assert(unit.write_queue_.empty());
+  unit.remote_address_available_ = true;
+  unit.last_master_alive_millis_ = now - LAST_ALIVE_TIMEOUT_MILLIS - 1;
+  unit.loop(); assert(unit.write_queue_.empty());
+  unit.last_master_alive_millis_ = now;
+  unit.loop();
+  assert(!code.has_state() && !active.has_state());  // A query is not an OK response.
+  if (unit.write_queue_.empty()) {
+    std::cerr << "Initial pump fault-status query missing; startup fault state can remain unknown forever\n";
+    std::abort();
+  }
+  const auto query = unit.write_queue_.front();
+  const uint8_t expected[] = {0x0A, 0x61, 0x70, 0xE0, 0x61, 0x29, 0x45};
+  assert(query.size() == sizeof(expected));
+  assert(std::equal(std::begin(expected), std::end(expected), query.raw));
+  assert(!unit.should_track_command_ack_(query));
+  unit.write_queue_.pop();
+  unit.loop(); assert(unit.write_queue_.empty());
+  assert(!code.has_state() && !active.has_state());
+  auto clear = pump_fault_frame(FrameFormat::ESTIA, 0);
+  assert(unit.receive_data_frame(&clear));
+  assert(code.state == "None" && active.has_state() && !active.state);
+  unit.last_fault_poll_ms_ = millis() - 30001;
+  unit.last_master_alive_millis_ = millis();
+  unit.loop(); assert(unit.write_queue_.size() == 1);
+  unit.write_queue_.pop();
+  unit.set_fault_poll_interval(UINT32_MAX);
+  unit.last_fault_poll_ms_ = 0;
+  unit.loop(); assert(unit.write_queue_.empty());
+  unit.set_fault_poll_interval(30000);
+  unit.set_read_only(true);
+  unit.loop(); assert(unit.write_queue_.empty() && uart.transmitted == 0);
+  unit.set_read_only(false);
+  unit.last_master_alive_millis_ = millis() - LAST_ALIVE_TIMEOUT_MILLIS - 1;
+  unit.loop(); assert(!code.has_state() && !active.has_state());
+  unit.last_master_alive_millis_ = millis();
+  unit.loop(); assert(unit.write_queue_.size() == 1);  // Refresh after reconnection.
+}
+
+static void a0_initial_fault_checks() {
+  for (auto format : {FrameFormat::A0, FrameFormat::ESTIA}) {
+    RecordingUart uart;
+    TestEstia unit;
+    unit.set_uart_parent(&uart);
+    unit.set_frame_format(format);
+    unit.set_read_only(true);
+    text_sensor::TextSensor code;
+    binary_sensor::BinarySensor active;
+    unit.set_fault_code_text_sensor(&code);
+    unit.set_fault_active_binary_sensor(&active);
+    unit.setup();
+    assert(unit.last_master_alive_millis_ == 0);  // Assumed OK must not fake connectivity.
+    if (format == FrameFormat::A0) {
+      assert(code.has_state() && code.state == "None");
+      assert(active.has_state() && !active.state);
+      auto alarm = pump_fault_frame(format, 0x77);
+      assert(unit.receive_data_frame(&alarm));
+      assert(code.state == "F23" && active.state);
+      unit.last_master_alive_millis_ = millis() - LAST_ALIVE_TIMEOUT_MILLIS - 1;
+      unit.loop(); assert(!code.has_state() && !active.has_state());
+      auto clear = pump_fault_frame(format, 0);
+      assert(unit.receive_data_frame(&clear));
+      assert(code.state == "None" && active.has_state() && !active.state);
+    } else {
+      assert(!code.has_state() && !active.has_state());
+    }
+    assert(uart.transmitted == 0 && unit.write_queue_.empty());
+  }
+}
+
 static DataFrame pump_fault_frame(FrameFormat format, uint8_t code) {
   if (format == FrameFormat::ESTIA) {
     DataFrame f{};
@@ -981,10 +1083,13 @@ static void command_retry_checks() {
 }
 
 int main() {
+  new (&App) Application();
+  host::setup_preferences();
+  fault_initial_query_checks();
+  a0_initial_fault_checks();
   pump_fault_checks();
   first_gen_temperature_checks();
   dn_checks();
-  new (&App) Application();
   control_checks();
   tu2c_address_checks();
   startup_address_checks();
