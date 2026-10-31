@@ -116,6 +116,12 @@ climate:
 
     frame_format: a0  #required
 
+    # Optional passive pump faults; A0 alarm decoding needs hardware verification.
+    # fault_code:
+    #   name: "Estia Fault Code"
+    # fault_active:
+    #   name: "Estia Fault Active"
+
     # Optional one-byte addresses, the defaults below may be omitted.
     # remote: 0x40
     # master: 0x00

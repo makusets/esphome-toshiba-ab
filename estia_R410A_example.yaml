@@ -98,6 +98,12 @@ climate:
 
     frame_format: estia
 
+    # Optional passive pump faults, separate from remote_error below.
+    # fault_code:
+    #   name: "Estia Fault Code"
+    # fault_active:
+    #   name: "Estia Fault Active"
+
     # Optional diagnostic binary sensor: true when valid traffic has been seen.
     connected:
       name: "Estia Connected"

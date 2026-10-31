@@ -56,4 +56,20 @@ with tempfile.TemporaryDirectory(prefix="estia-config-", dir=work) as temp:
         else:
             assert result.returncode != 0
             assert "curve_shift requires frame_format: estia" in result.stdout + result.stderr
+    for framing in ["estia", "a0", "estia_a0", "normal", "hm", "tu2c", "auto"]:
+        for entity_keys in [("fault_code",), ("fault_active",), ("fault_code", "fault_active")]:
+            config["climate"] = [{"platform": "toshiba_ab", "name": "DHW", "frame_format": framing,
+                                  **{key: {"name": key} for key in entity_keys}}]
+            path = temp / f"fault-{framing}-{'-'.join(entity_keys)}.yaml"
+            path.write_text(yaml.safe_dump(config))
+            result = subprocess.run([sys.executable, "-m", "esphome", "compile", "--only-generate", str(path)],
+                                    capture_output=True, text=True)
+            if framing in ("estia", "a0", "estia_a0"):
+                assert result.returncode == 0, result.stdout + result.stderr
+                source = (build / "src/main.cpp").read_text()
+                assert ("set_fault_code_text_sensor(" in source) == ("fault_code" in entity_keys)
+                assert ("set_fault_active_binary_sensor(" in source) == ("fault_active" in entity_keys)
+            else:
+                assert result.returncode != 0
+                assert "fault_code and fault_active require frame_format: estia or a0" in result.stdout + result.stderr
 print("Estia configuration checks passed")

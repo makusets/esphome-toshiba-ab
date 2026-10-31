@@ -1060,6 +1060,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_ping_enabled(bool en) { ping_enabled_ = en; }
   void set_autoreset_errors(bool en) { autoreset_errors_ = en; }
   void set_remote_error_binary_sensor(binary_sensor::BinarySensor *sensor) { remote_error_binary_sensor_ = sensor; }
+  void set_fault_code_text_sensor(text_sensor::TextSensor *sensor) { fault_code_text_sensor_ = sensor; }
+  void set_fault_active_binary_sensor(binary_sensor::BinarySensor *sensor) { fault_active_binary_sensor_ = sensor; }
   void set_estia_source_address(uint16_t addr) { estia_source_address_ = addr; }
   void send_estia_setpoint(float target_temp, climate::ClimateMode mode, uint8_t zone = 1);
   void control_estia_zone1(const climate::ClimateCall &call);
@@ -1163,6 +1165,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   EstiaDnReadCallback estia_dn_callback_;
   bool begin_remote_error_autoreset_();
   void update_remote_error_(bool active);
+  void update_pump_fault_(uint8_t code);
+  void invalidate_pump_fault_();
   bool is_own_tx_echo_(const DataFrame *f) const; //used to filter echo after sending frame
   void remember_tx_frame_for_echo_(const uint8_t *bytes, size_t size, bool tu2c);
   void update_frame_validation_();
@@ -1261,6 +1265,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   binary_sensor::BinarySensor *hotwater_pump_heating_binary_sensor_{nullptr};
   binary_sensor::BinarySensor *hotwater_resistor_heating_binary_sensor_{nullptr};
   binary_sensor::BinarySensor *remote_error_binary_sensor_{nullptr};
+  text_sensor::TextSensor *fault_code_text_sensor_{nullptr};
+  binary_sensor::BinarySensor *fault_active_binary_sensor_{nullptr};
+  optional<uint8_t> pump_fault_code_;
   bool remote_error_active_{false};
   uint8_t remote_error_autoreset_attempts_{0};
   bool remote_error_autoreset_give_up_logged_{false};

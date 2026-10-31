@@ -19,5 +19,9 @@ climate:
   - platform: toshiba_ab
     name: Estia DHW
     frame_format: estia
+    fault_code:
+      name: Pump Fault Code
+    fault_active:
+      name: Pump Fault Active
     curve_shift:
       name: Heating Curve Shift
