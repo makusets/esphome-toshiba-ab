@@ -3515,14 +3515,16 @@ void ToshibaAbClimate::control_estia_zone1(const climate::ClimateCall &call) {
       }
     }
     if (call.get_target_temperature().has_value()) {
-      if (requested_mode == climate::CLIMATE_MODE_AUTO) {
+      // Off hides the controller's selected mode, including weather compensation.
+      const auto setpoint_mode = requested_mode != climate::CLIMATE_MODE_OFF
+                                     ? requested_mode
+                                     : (this->estia_first_gen_auto_mode_active_
+                                            ? climate::CLIMATE_MODE_AUTO
+                                            : (this->estia_first_gen_zone1_cooling_ ? climate::CLIMATE_MODE_COOL
+                                                                                   : climate::CLIMATE_MODE_HEAT));
+      if (setpoint_mode == climate::CLIMATE_MODE_AUTO) {
         ESP_LOGD(TAG, "Ignoring Zone 1 target temperature in Automatik mode; the heat pump calculates it");
       } else {
-        // Off hides the controller's selected Heat/Cool mode; retain its last report.
-        const auto setpoint_mode = requested_mode == climate::CLIMATE_MODE_OFF
-                                       ? (this->estia_first_gen_zone1_cooling_ ? climate::CLIMATE_MODE_COOL
-                                                                              : climate::CLIMATE_MODE_HEAT)
-                                       : requested_mode;
         this->send_estia_first_gen_zone1_setpoint(*call.get_target_temperature(), setpoint_mode);
       }
     }

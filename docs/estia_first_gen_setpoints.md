@@ -4,7 +4,8 @@
 Cool targets. The selected mode comes from the control call, a pending mode
 transition, or the last controller report when the climate entity is Off.
 Setting a target while Off does not turn Zone 1 on. Auto remains controlled by
-the weather curve and ignores fixed targets.
+the weather curve and ignores fixed targets, including while Zone 1 is Off with
+Auto still selected. Explicit Heat or Cool requests supersede retained Auto.
 
 | Mode | Accepted target range | Payload after `23` |
 | --- | --- | --- |

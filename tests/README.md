@@ -73,7 +73,8 @@ the same length; the leading `0x15` includes three framing bytes stripped by the
 
 First-generation setpoint checks replay the accepted 20°C cooling command and
 exercise Cool 7–25°C, unchanged Heat 20–65°C, full companion bytes and checksums,
-both remote addresses, pending/explicit modes, selected mode while Off, Auto,
+both remote addresses, pending/explicit modes, selected mode while Off, running
+Auto and retained Auto while Off,
 invalid values, read-only mode and startup transmission guards. See
 [the setpoint reference](../docs/estia_first_gen_setpoints.md) for provenance and
 hardware-validation limits.

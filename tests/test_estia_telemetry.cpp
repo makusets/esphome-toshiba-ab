@@ -161,18 +161,34 @@ static void first_gen_cooling_setpoint_checks() {
   }
   unit.set_remote_address(0x60);
   // The physical status retains the selected mode even with Zone 1 switched Off.
-  for (bool cooling : {false, true}) {
+  for (auto selected_mode : {climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_COOL, climate::CLIMATE_MODE_AUTO}) {
+    const bool cooling = selected_mode == climate::CLIMATE_MODE_COOL;
+    const bool automatic = selected_mode == climate::CLIMATE_MODE_AUTO;
     DataFrame status{};
     status.set_tu2c(true);
     const uint8_t report[] = {0x15, 0x70, 0xFF, 0xE0, 0xA0, 0x31, 0x40, 0x00, 0x10,
                               0xA2, 0x60, 0x66, 0x00, 0x48, 0x00, 0x00, 0x00, 0x35};
     std::copy(std::begin(report), std::end(report), status.raw);
     status.raw[6] = cooling ? 0x20 : 0x40;
+    status.raw[7] = automatic ? 0x04 : 0x00;
     status.raw[17] = dn_checksum(status.raw, 17);
     assert(unit.receive_data_frame(&status));
     assert(zone.mode == climate::CLIMATE_MODE_OFF);
     zone.make_call().set_target_temperature(cooling ? 15 : 30).perform();
-    expect_target(cooling ? 15 : 30, cooling);
+    if (automatic) {
+      assert(unit.write_queue_.empty());  // Off must not hide retained Auto.
+      status.raw[6] |= 1;
+      status.raw[17] = dn_checksum(status.raw, 17);
+      assert(unit.receive_data_frame(&status));
+      assert(zone.mode == climate::CLIMATE_MODE_AUTO);
+      zone.make_call().set_target_temperature(30).perform();
+      assert(unit.write_queue_.empty());  // Running Auto is also curve-controlled.
+      status.raw[6] &= ~1;
+      status.raw[17] = dn_checksum(status.raw, 17);
+      assert(unit.receive_data_frame(&status));
+    } else {
+      expect_target(cooling ? 15 : 30, cooling);
+    }
   }
   // An explicit or deferred mode takes precedence over the previous report.
   zone.make_call().set_mode(climate::CLIMATE_MODE_HEAT).set_target_temperature(30).perform();
