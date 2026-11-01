@@ -4566,7 +4566,12 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
   if (src == this->master_address_ && frame->raw[3] == 0xE0 && frame->raw[5] == 0x31 && raw_len >= 12) {
     // A complete status includes raw[10] and its checksum. Learn availability
     // before sending a mode deferred until Zone 1 becomes active.
-    this->estia_first_gen_dhw_available_ = (frame->raw[6] & 0x80) != 0;
+    const bool dhw_available = (frame->raw[6] & 0x80) != 0;
+    if (!this->estia_first_gen_pump_state_known_ || dhw_available != this->estia_first_gen_dhw_available_) {
+      ESP_LOGD(TAG, "ESTIA DHW detected: %s (Heat 0x%02X, Cool 0x%02X)",
+               dhw_available ? "present" : "not present", dhw_available ? 0x06 : 0x02, dhw_available ? 0x05 : 0x01);
+    }
+    this->estia_first_gen_dhw_available_ = dhw_available;
     this->estia_first_gen_pump_state_known_ = true;
     this->estia_first_gen_zone1_active_ = frame->raw[6] & 0x01;
     if (this->estia_first_gen_zone1_active_ && this->estia_first_gen_pending_zone1_mode_.has_value()) {
