@@ -287,6 +287,29 @@ climate:
       name: "Estia DHW Boost"
 ```
 
+### DHW availability and mode commands
+
+First-generation Series 5 captures show that status bit `0x80` in `raw[6]`
+(the seventh byte, starting with the length byte) indicates configured DHW
+availability. The component learns this from a checksum-valid master `0x31`
+status and preserves it in both `0x22` mode-command bytes:
+
+| Configured DHW | Cool | Heat / Auto |
+| --- | --- | --- |
+| Disabled | `22:01:01` | `22:02:02` |
+| Enabled | `22:05:05` | `22:06:06` |
+
+No encoding option is needed. A mode request waits for status before choosing
+the bytes; the existing Zone 1 enable/startup sequence remains in place. Auto
+still uses its separate weather-compensation command before the Heat payload.
+Each new valid status updates the configured availability for the next request.
+
+This reports the controller's configured DHW state; a cylinder or its probe
+can still be absent or faulty. DHW operation On/Off is independently reported
+by status bit `0x02`. The separate Zone 1 and DHW On/Off commands are unchanged.
+Other frame formats are unchanged. The capture comparison is discussed in
+[issue #284](https://github.com/makusets/esphome-toshiba-ab/issues/284).
+
 ## Configuration aliases
 
 The accepted values for `frame_format` are:

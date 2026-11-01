@@ -1405,6 +1405,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   uint32_t estia_last_demand_heartbeat_ms_{0};
 
   bool estia_first_gen_pump_state_known_{false};
+  bool estia_first_gen_dhw_available_{false};
   bool estia_first_gen_zone1_active_{false};
   bool estia_first_gen_dhw_active_{false};
   bool estia_first_gen_dhw_boost_{false};
