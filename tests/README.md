@@ -70,3 +70,8 @@ layout from issue #242. They cover byte-13 Zone 1 readings when byte 14 is empty
 byte-14 precedence when populated, empty temperature slots, absent DHW sensors,
 short status frames and checksum rejection. Byte-14 compatibility is tested at
 the same length; the leading `0x15` includes three framing bytes stripped by the reader.
+
+First-generation mode checks replay the Series 5 DHW-availability status bit
+with both captured status lengths. They verify Heat/Cool/Auto command bytes,
+independence from DHW On/Off, startup deferral and cancellation, live status
+updates, malformed/wrong-source rejection, and read-only/boot send guards.

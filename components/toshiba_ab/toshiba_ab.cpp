@@ -4337,9 +4337,14 @@ void ToshibaAbClimate::send_estia_first_gen_zone1_mode(climate::ClimateMode mode
   if (this->read_only_) return;
   if (mode != climate::CLIMATE_MODE_HEAT && mode != climate::CLIMATE_MODE_COOL && mode != climate::CLIMATE_MODE_AUTO)
     return;
+  if (!this->estia_first_gen_pump_state_known_) {
+    this->estia_first_gen_pending_zone1_mode_ = mode;
+    return;
+  }
   this->send_estia_first_gen_auto_mode(mode == climate::CLIMATE_MODE_AUTO);
-  // Confirmed wall-remote captures in issue #90: 22:05:05 = cool, 22:06:06 = heat.
-  const uint8_t mode_byte = mode == climate::CLIMATE_MODE_COOL ? 0x05 : 0x06;
+  // Series 5 captures: preserve configured DHW availability in both mode bytes.
+  const uint8_t mode_byte = (mode == climate::CLIMATE_MODE_COOL ? 0x01 : 0x02) |
+                           (this->estia_first_gen_dhw_available_ ? 0x04 : 0x00);
   const uint8_t payload[] = {0xE0, 0x01, 0x22, mode_byte, mode_byte};
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
@@ -4558,7 +4563,11 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     this->last_master_alive_millis_ = millis();
     if (this->connected_binary_sensor_) this->connected_binary_sensor_->publish_state(true);
   }
-  if (src == this->master_address_ && frame->raw[3] == 0xE0 && frame->raw[5] == 0x31 && len > 11) {
+  if (src == this->master_address_ && frame->raw[3] == 0xE0 && frame->raw[5] == 0x31 && raw_len >= 12) {
+    // A complete status includes raw[10] and its checksum. Learn availability
+    // before sending a mode deferred until Zone 1 becomes active.
+    this->estia_first_gen_dhw_available_ = (frame->raw[6] & 0x80) != 0;
+    this->estia_first_gen_pump_state_known_ = true;
     this->estia_first_gen_zone1_active_ = frame->raw[6] & 0x01;
     if (this->estia_first_gen_zone1_active_ && this->estia_first_gen_pending_zone1_mode_.has_value()) {
       const auto pending_mode = *this->estia_first_gen_pending_zone1_mode_;
@@ -4617,7 +4626,6 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
       }
       this->zone1_climate_->publish_state();
     }
-    this->estia_first_gen_pump_state_known_ = true;
   } else if (src == this->master_address_ && frame->raw[4] == 0x80 && frame->raw[5] == 0x5C && len > 8) {
     const uint16_t value = encode_uint16(frame->raw[6], frame->raw[7]);
     bool published_polled_sensor = false;
