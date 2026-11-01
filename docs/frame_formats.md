@@ -16,6 +16,9 @@ traffic. Not all protocols are automatically identified.
 | `u`, `tu2c`, `wrapped` | TU2C protocol | Newer U-series HVAC systems | `NONE` | No, set explicitly | Fully supported. Frames are prefixed with `F0:F0` and have a trailing `A0`. |
 | `estia` | Estia R410A (first gen) TU2C variant | R410A Estia heat pumps | `NONE` | No, set explicitly | Uses the TU2C reader path and Estia-specific control/decoding logic. |
 
+For ESTIA fault entities, polling and hardware-validation limits, see
+[ESTIA fault reporting](estia_fault_reporting.md).
+
 ## Common fields used by frames
 
 TCC-Link and the component's internal representation of frames (messages) use this

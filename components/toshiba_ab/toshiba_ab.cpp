@@ -1,6 +1,9 @@
 #include "toshiba_ab.h"
 #include "climate_compat.h"
 #include "esphome.h"
+#ifdef USE_CONTROLLER_REGISTRY
+#include "esphome/core/controller_registry.h"
+#endif
 #ifdef USE_NETWORK
 #include "esphome/components/network/util.h"
 #endif
@@ -20,6 +23,7 @@ namespace toshiba_ab {
 static const char *const TAG = "tcc_link.climate";
 
 static uint16_t estia_crc16(const uint8_t *data, size_t len);
+static std::string format_pump_fault(uint8_t code);
 
 static uint8_t command_opcode_for_ack_log(const DataFrame &frame) {
   if (frame.is_tu2c()) {
@@ -1533,6 +1537,8 @@ void ToshibaAbClimate::dump_config() {
   }
   ESP_LOGCONFIG(TAG, "  Polled sensors configured: %zu", this->polled_sensors_.size());
   ESP_LOGCONFIG(TAG, "  Connected sensor: %s", this->connected_binary_sensor_ ? "yes" : "no");
+  LOG_TEXT_SENSOR("  ", "Pump fault code", this->fault_code_text_sensor_);
+  LOG_BINARY_SENSOR("  ", "Pump fault active", this->fault_active_binary_sensor_);
   ESP_LOGCONFIG(TAG, "  Failed CRCs sensor: %s", this->failed_crcs_sensor_ ? "yes" : "no");
   LOG_SENSOR("  ", "Noise Rate", this->noise_rate_sensor_);
   LOG_SENSOR("  ", "CRC Failure Rate", this->crc_failures_5min_sensor_);
@@ -1752,6 +1758,14 @@ void ToshibaAbClimate::setup() {
   if (this->read_only_switch_)
     this->read_only_switch_->publish_state(this->read_only_);
 
+  // A0 has no verified fault query yet: this is an assumed startup default,
+  // not a received all-clear and not evidence that the master is connected.
+  if (this->is_estia_r32() && (this->fault_code_text_sensor_ || this->fault_active_binary_sensor_)) {
+    this->pump_fault_code_ = 0;
+    if (this->fault_code_text_sensor_) this->fault_code_text_sensor_->publish_state(format_pump_fault(0));
+    if (this->fault_active_binary_sensor_) this->fault_active_binary_sensor_->publish_state(false);
+    ESP_LOGI(TAG, "A0 fault status starts assumed clear; fault query is not verified");
+  }
 }
 
 void ToshibaAbClimate::sync_from_received_state() {
@@ -1900,6 +1914,59 @@ void ToshibaAbClimate::update_remote_error_(bool active) {
     this->remote_error_autoreset_attempts_ = 0;
     this->remote_error_autoreset_give_up_logged_ = false;
   }
+}
+
+static std::string format_pump_fault(uint8_t code) {
+  if (code == 0) return "None";
+  struct Family {
+    uint8_t first;
+    uint8_t last;
+    uint8_t base;
+    char prefix;
+  };
+  // Existing A0 family ranges; only A01/F23 and clear have Series 5 captures.
+  static constexpr Family families[] = {
+      {0x01, 0x0D, 0x00, 'A'}, {0x41, 0x52, 0x40, 'E'}, {0x63, 0x7F, 0x60, 'F'},
+      {0x81, 0x84, 0x80, 'H'}, {0xC2, 0xDD, 0xC0, 'L'}, {0xE3, 0xFF, 0xE0, 'P'},
+  };
+  char value[5];
+  for (const auto &family : families) {
+    if (code >= family.first && code <= family.last) {
+      std::snprintf(value, sizeof(value), "%c%02u", family.prefix, unsigned(code - family.base));
+      return value;
+    }
+  }
+  std::snprintf(value, sizeof(value), "0x%02X", unsigned(code));
+  return value;
+}
+
+void ToshibaAbClimate::update_pump_fault_(uint8_t code) {
+  // A validated fault report from the configured master also proves bus life.
+  this->last_master_alive_millis_ = millis();
+  if (this->pump_fault_code_.has_value() && *this->pump_fault_code_ == code) return;
+  this->pump_fault_code_ = code;
+  const auto value = format_pump_fault(code);
+  if (code == 0) {
+    ESP_LOGI(TAG, "Pump fault cleared");
+  } else {
+    ESP_LOGW(TAG, "Pump fault: %s (raw 0x%02X)", value.c_str(), code);
+  }
+  if (this->fault_code_text_sensor_) this->fault_code_text_sensor_->publish_state(value);
+  if (this->fault_active_binary_sensor_) this->fault_active_binary_sensor_->publish_state(code != 0);
+}
+
+void ToshibaAbClimate::invalidate_pump_fault_() {
+  if (!this->pump_fault_code_.has_value()) return;
+  this->pump_fault_code_.reset();
+  this->last_fault_poll_ms_ = 0;
+  if (this->fault_code_text_sensor_) {
+    // TextSensor has no invalidate_state(); notify the native API with missing_state.
+    this->fault_code_text_sensor_->set_has_state(false);
+#if defined(USE_TEXT_SENSOR) && defined(USE_CONTROLLER_REGISTRY)
+    ControllerRegistry::notify_text_sensor_update(this->fault_code_text_sensor_);
+#endif
+  }
+  if (this->fault_active_binary_sensor_) this->fault_active_binary_sensor_->invalidate_state();
 }
 
 void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
@@ -2839,17 +2906,12 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       }
     }
 
-    // Alarm/error frames (dtype xx:49) — log at WARN level
-    if (frame_len >= 8 && (frame->raw[8] == 0x49 || frame->raw[7] == 0x49)) {
-      uint8_t error_byte = (frame_len > 9) ? frame->raw[9] : 0;
-      const char *error_desc = "unknown";
-      if (error_byte >= 0x01 && error_byte <= 0x0D) error_desc = "hydro unit (A-series)";
-      else if (error_byte >= 0x41 && error_byte <= 0x52) error_desc = "communication (E-series)";
-      else if (error_byte >= 0x63 && error_byte <= 0x7F) error_desc = "sensor (F-series)";
-      else if (error_byte >= 0x81 && error_byte <= 0x84) error_desc = "compressor (H-series)";
-      else if (error_byte >= 0xC2 && error_byte <= 0xDD) error_desc = "configuration (L-series)";
-      else if (error_byte >= 0xE3 && error_byte <= 0xFF) error_desc = "protection (P-series)";
-      ESP_LOGW(TAG, "ALARM: error=0x%02X (%s)", error_byte, error_desc);
+    // A0 alarm layout follows the existing xx:49 recognizer. Require a payload
+    // byte before CRC and the configured master; a short packet is not a clear.
+    const uint16_t alarm_source = (uint16_t(frame->raw[3]) << 8) | frame->raw[4];
+    if (fsz >= 12 && alarm_source == this->estia_master_address_ &&
+        (frame->raw[8] == 0x49 || frame->raw[7] == 0x49)) {
+      this->update_pump_fault_(frame->raw[9]);
     }
 
     return true;
@@ -2987,6 +3049,7 @@ void ToshibaAbClimate::loop() {
 
   const uint32_t now = millis();
   const bool initial_send_block_active = this->is_initial_frame_send_block_active_(now);
+  this->update_estia_fault_poll_(now);
   if (initial_send_block_active && !this->initial_frame_send_block_logged_) {
     ESP_LOGI(TAG, "Blocking outbound frames for the first %" PRIu32 "ms after boot", INITIAL_FRAME_SEND_BLOCK_MILLIS);
     this->initial_frame_send_block_logged_ = true;
@@ -3291,6 +3354,7 @@ void ToshibaAbClimate::loop() {
   }
 
   if (last_master_alive_millis_ > 0 && (millis() - last_master_alive_millis_) > LAST_ALIVE_TIMEOUT_MILLIS) {
+    this->invalidate_pump_fault_();
     if (estia_was_connected_) {
       ESP_LOGW(TAG, "Heat pump disconnected");
       estia_was_connected_ = false;
@@ -4290,6 +4354,21 @@ static DataFrame make_estia_first_gen_frame(uint8_t src, uint8_t dst, const uint
   return frame;
 }
 
+void ToshibaAbClimate::update_estia_fault_poll_(uint32_t now) {
+  if (!this->is_estia_first_gen() || this->read_only_ ||
+      (!this->fault_code_text_sensor_ && !this->fault_active_binary_sensor_) ||
+      this->fault_poll_interval_ms_ == UINT32_MAX || this->fault_poll_interval_ms_ == 0 ||
+      this->is_initial_frame_send_block_active_(now) || !this->remote_address_available_ ||
+      !this->master_address_confirmed_ || this->last_master_alive_millis_ == 0 ||
+      now - this->last_master_alive_millis_ > LAST_ALIVE_TIMEOUT_MILLIS) return;
+  if (this->last_fault_poll_ms_ != 0 && now - this->last_fault_poll_ms_ < this->fault_poll_interval_ms_) return;
+  // Captured controller read: 0A:60:70:E0:61:29:44. Use our negotiated source.
+  const uint8_t payload[] = {0xE0, 0x61, 0x29};
+  const auto query = make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload));
+  this->last_fault_poll_ms_ = now;
+  if (this->enqueue_command_(query)) log_tu2c_data_frame("Enqueue fault status query", &query);
+}
+
 void ToshibaAbClimate::send_estia_first_gen_zone1(bool on) {
   if (this->read_only_) return;
   const uint8_t payload[] = {0xE0, 0x01, 0x21, static_cast<uint8_t>(on ? 0x03 : 0x02)};
@@ -4456,6 +4535,9 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
   const bool is_master_source = src == this->master_address_ ||
                                 (this->master_address_auto_ && !this->master_address_confirmed_ &&
                                  is_possible_master_source && has_master_keepalive_signature);
+  const bool is_master_fault_status = len == 0x0C && is_master_source && frame->raw[2] == 0xFF &&
+                                      frame->raw[3] == 0xE0 &&
+                                      (frame->raw[4] == 0xC0 || frame->raw[4] == 0xA0) && frame->raw[5] == 0x29;
   auto unknown_label = [&]() -> std::string {
     char buf[40];
     if (is_master_source) {
@@ -4474,6 +4556,9 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     }
     if (is_master_source && has_master_status_signature) {
       return "Master status";
+    }
+    if (is_master_fault_status) {
+      return frame->raw[4] == 0xA0 ? "Master fault status reply" : "Master fault status announcement";
     }
     if (is_master_source && frame->raw[4] == 0x80 && frame->raw[5] == 0x5C) {
       return "Master reporting data/sensor value";
@@ -4522,6 +4607,11 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     return;
   }
   this->decode_estia_first_gen_dn_(frame);
+  // Captured Series 5 fault announcement (C0) and polled response (A0).
+  // raw[6] is retained as an uninterpreted payload byte, not an A/F selector.
+  if (is_master_fault_status) {
+    this->update_pump_fault_(frame->raw[7]);
+  }
   if (has_master_keepalive_signature && is_possible_master_source)
     this->record_discovered_address_(src, false);
   if (has_remote_ping_signature && is_remote_source) this->record_discovered_address_(src, true);

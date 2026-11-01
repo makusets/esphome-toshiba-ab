@@ -1,5 +1,6 @@
 #include "esphome/components/toshiba_ab/toshiba_ab.h"
 #include "esphome/core/application.h"
+#include "esphome/components/host/preferences.h"
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -586,6 +587,290 @@ struct RecordingUart : uart::UARTComponent {
   void check_logger_conflict() override {}
 };
 
+static DataFrame pump_fault_frame(FrameFormat format, uint8_t code);
+
+static void fault_initial_query_checks() {
+  RecordingUart uart;
+  TestEstia unit;
+  unit.set_uart_parent(&uart);
+  unit.set_frame_format(FrameFormat::ESTIA);
+  unit.set_remote_address(0x61);
+  unit.set_master_address(0x70);
+  unit.master_address_confirmed_ = true;
+  unit.set_autonomous(false);
+  unit.set_ping_enabled(false);
+  text_sensor::TextSensor code;
+  binary_sensor::BinarySensor active;
+  unit.set_fault_code_text_sensor(&code);
+  unit.set_fault_active_binary_sensor(&active);
+  if (millis() == 0) delay(1);
+  const auto now = millis();
+  unit.last_master_alive_millis_ = now;
+  unit.last_received_frame_millis_ = now;  // Hold TX while checking the queued read.
+  unit.last_sent_frame_millis_ = now;
+  unit.boot_millis_ = now;
+  unit.loop(); assert(unit.write_queue_.empty());
+  unit.boot_millis_ = now - INITIAL_FRAME_SEND_BLOCK_MILLIS - 1;
+  unit.set_read_only(true);
+  unit.loop(); assert(unit.write_queue_.empty());
+  unit.set_read_only(false);
+  unit.master_address_confirmed_ = false;
+  unit.loop(); assert(unit.write_queue_.empty());
+  unit.master_address_confirmed_ = true;
+  unit.remote_address_available_ = false;
+  unit.loop(); assert(unit.write_queue_.empty());
+  unit.remote_address_available_ = true;
+  unit.last_master_alive_millis_ = now - LAST_ALIVE_TIMEOUT_MILLIS - 1;
+  unit.loop(); assert(unit.write_queue_.empty());
+  unit.last_master_alive_millis_ = now;
+  unit.loop();
+  assert(!code.has_state() && !active.has_state());  // A query is not an OK response.
+  if (unit.write_queue_.empty()) {
+    std::cerr << "Initial pump fault-status query missing; startup fault state can remain unknown forever\n";
+    std::abort();
+  }
+  const auto query = unit.write_queue_.front();
+  const uint8_t expected[] = {0x0A, 0x61, 0x70, 0xE0, 0x61, 0x29, 0x45};
+  assert(query.size() == sizeof(expected));
+  assert(std::equal(std::begin(expected), std::end(expected), query.raw));
+  assert(!unit.should_track_command_ack_(query));
+  unit.write_queue_.pop();
+  unit.loop(); assert(unit.write_queue_.empty());
+  assert(!code.has_state() && !active.has_state());
+  auto clear = pump_fault_frame(FrameFormat::ESTIA, 0);
+  assert(unit.receive_data_frame(&clear));
+  assert(code.state == "None" && active.has_state() && !active.state);
+  unit.last_fault_poll_ms_ = millis() - 30001;
+  unit.last_master_alive_millis_ = millis();
+  unit.loop(); assert(unit.write_queue_.size() == 1);
+  unit.write_queue_.pop();
+  unit.set_fault_poll_interval(UINT32_MAX);
+  unit.last_fault_poll_ms_ = 0;
+  unit.loop(); assert(unit.write_queue_.empty());
+  unit.set_fault_poll_interval(30000);
+  unit.set_read_only(true);
+  unit.loop(); assert(unit.write_queue_.empty() && uart.transmitted == 0);
+  unit.set_read_only(false);
+  unit.last_master_alive_millis_ = millis() - LAST_ALIVE_TIMEOUT_MILLIS - 1;
+  unit.loop(); assert(!code.has_state() && !active.has_state());
+  unit.last_master_alive_millis_ = millis();
+  unit.loop(); assert(unit.write_queue_.size() == 1);  // Refresh after reconnection.
+}
+
+static void a0_initial_fault_checks() {
+  for (auto format : {FrameFormat::A0, FrameFormat::ESTIA}) {
+    RecordingUart uart;
+    TestEstia unit;
+    unit.set_uart_parent(&uart);
+    unit.set_frame_format(format);
+    unit.set_read_only(true);
+    text_sensor::TextSensor code;
+    binary_sensor::BinarySensor active;
+    unit.set_fault_code_text_sensor(&code);
+    unit.set_fault_active_binary_sensor(&active);
+    unit.setup();
+    assert(unit.last_master_alive_millis_ == 0);  // Assumed OK must not fake connectivity.
+    if (format == FrameFormat::A0) {
+      assert(code.has_state() && code.state == "None");
+      assert(active.has_state() && !active.state);
+      auto alarm = pump_fault_frame(format, 0x77);
+      assert(unit.receive_data_frame(&alarm));
+      assert(code.state == "F23" && active.state);
+      unit.last_master_alive_millis_ = millis() - LAST_ALIVE_TIMEOUT_MILLIS - 1;
+      unit.loop(); assert(!code.has_state() && !active.has_state());
+      auto clear = pump_fault_frame(format, 0);
+      assert(unit.receive_data_frame(&clear));
+      assert(code.state == "None" && active.has_state() && !active.state);
+    } else {
+      assert(!code.has_state() && !active.has_state());
+    }
+    assert(uart.transmitted == 0 && unit.write_queue_.empty());
+  }
+}
+
+static DataFrame pump_fault_frame(FrameFormat format, uint8_t code) {
+  if (format == FrameFormat::ESTIA) {
+    DataFrame f{};
+    f.set_tu2c(true);
+    const uint8_t bytes[] = {0x0C, 0x70, 0xFF, 0xE0, 0xA0, 0x29, 0x70, code, 0};
+    std::copy(std::begin(bytes), std::end(bytes), f.raw);
+    f.raw[8] = dn_checksum(f.raw, 8);
+    return f;
+  }
+  // Constructed A0 alarm: no physical R32 alarm capture is available.
+  auto f = frame(0x1C, 0x0049, 10);
+  f.raw[3] = 0x08;
+  f.raw[6] = 0xFE;
+  f.raw[9] = code;
+  const auto crc = f.calculate_estia_crc();
+  f.raw[10] = crc >> 8; f.raw[11] = crc;
+  return f;
+}
+
+static void pump_fault_checks() {
+  for (auto format : {FrameFormat::ESTIA, FrameFormat::A0}) {
+    for (unsigned entities = 0; entities < 4; ++entities) {
+      RecordingUart uart;
+      TestEstia unit;
+      unit.set_uart_parent(&uart);
+      unit.set_frame_format(format);
+      unit.set_read_only(true);
+      text_sensor::TextSensor code;
+      binary_sensor::BinarySensor active, remote_error;
+      unsigned code_publications = 0;
+      code.add_on_state_callback([&](const std::string &) { ++code_publications; });
+      if (entities & 1) unit.set_fault_code_text_sensor(&code);
+      if (entities & 2) unit.set_fault_active_binary_sensor(&active);
+      unit.set_remote_error_binary_sensor(&remote_error);
+      assert(!code.has_state() && !active.has_state());
+      auto expect = [&](const char *value, bool problem) {
+        assert(code.has_state() == bool(entities & 1));
+        assert(active.has_state() == bool(entities & 2));
+        if (entities & 1) assert(code.state == value);
+        if (entities & 2) assert(active.state == problem);
+      };
+      // Literal expected results cover every existing family boundary and gaps.
+      const std::pair<uint8_t, const char *> samples[] = {
+          {0x00, "None"}, {0x01, "A01"}, {0x0D, "A13"}, {0x0E, "0x0E"},
+          {0x40, "0x40"}, {0x41, "E01"}, {0x52, "E18"}, {0x53, "0x53"},
+          {0x62, "0x62"}, {0x63, "F03"}, {0x77, "F23"}, {0x7F, "F31"},
+          {0x80, "0x80"}, {0x81, "H01"}, {0x84, "H04"}, {0x85, "0x85"},
+          {0xC1, "0xC1"}, {0xC2, "L02"}, {0xDD, "L29"}, {0xDE, "0xDE"},
+          {0xE2, "0xE2"}, {0xE3, "P03"}, {0xFF, "P31"},
+      };
+      for (const auto &sample : samples) {
+        auto f = pump_fault_frame(format, sample.first);
+        assert(unit.receive_data_frame(&f));
+        expect(sample.second, sample.first != 0);
+      }
+      auto fault = pump_fault_frame(format, 0x77);
+      assert(unit.receive_data_frame(&fault));
+      expect("F23", true);
+      const auto publications = code_publications;
+      assert(unit.receive_data_frame(&fault));
+      assert(code_publications == publications);
+      auto damaged = pump_fault_frame(format, 0);
+      const auto damaged_size = damaged.is_estia() ? damaged.estia_size() : damaged.size();
+      damaged.raw[damaged_size - 1] ^= 1;
+      assert(!unit.receive_data_frame(&damaged));
+      expect("F23", true);
+      // A different source cannot overwrite the configured pump's fault.
+      auto other = pump_fault_frame(format, 0);
+      if (format == FrameFormat::ESTIA) {
+        other.raw[1] = 0x71;
+        other.raw[8] = dn_checksum(other.raw, 8);
+      } else {
+        other.raw[4] = 1;
+        const auto crc = other.calculate_estia_crc();
+        other.raw[10] = crc >> 8; other.raw[11] = crc;
+      }
+      assert(unit.receive_data_frame(&other));
+      expect("F23", true);
+      if (format == FrameFormat::ESTIA) {
+        // Existing remote status/error reports must never clear or replace a pump fault.
+        DataFrame remote{};
+        remote.set_tu2c(true);
+        const uint8_t bytes[] = {0x0B, 0x60, 0x70, 0xE0, 0x61, 0x31, 0x49, 0};
+        std::copy(std::begin(bytes), std::end(bytes), remote.raw);
+        for (uint8_t value : {0x49, 0x00}) {
+          remote.raw[6] = value; remote.raw[7] = dn_checksum(remote.raw, 7);
+          assert(unit.receive_data_frame(&remote));
+          assert(remote_error.has_state() && remote_error.state == (value != 0));
+          expect("F23", true);
+        }
+        auto wrong_kind = pump_fault_frame(format, 0);
+        wrong_kind.raw[4] = 0x80; wrong_kind.raw[8] = dn_checksum(wrong_kind.raw, 8);
+        assert(unit.receive_data_frame(&wrong_kind)); expect("F23", true);
+        auto short_frame = pump_fault_frame(format, 0);
+        short_frame.raw[0] = 0x0B; short_frame.raw[7] = dn_checksum(short_frame.raw, 7);
+        assert(unit.receive_data_frame(&short_frame)); expect("F23", true);
+      } else {
+        // Missing error payload used to be logged as zero; it is not a clear.
+        auto short_frame = frame(0x1C, 0x0049, 9);
+        short_frame.raw[3] = 0x08;
+        auto crc = short_frame.calculate_estia_crc();
+        short_frame.raw[9] = crc >> 8; short_frame.raw[10] = crc;
+        assert(unit.receive_data_frame(&short_frame)); expect("F23", true);
+        auto unrelated = pump_fault_frame(format, 0);
+        unrelated.raw[7] = 0; unrelated.raw[8] = 0;
+        crc = unrelated.calculate_estia_crc();
+        unrelated.raw[10] = crc >> 8; unrelated.raw[11] = crc;
+        assert(unit.receive_data_frame(&unrelated)); expect("F23", true);
+        // Retain recognition of the other dtype byte used by the existing A0 logger.
+        auto alternate = pump_fault_frame(format, 1);
+        alternate.raw[7] = 0x49; alternate.raw[8] = 0;
+        crc = alternate.calculate_estia_crc();
+        alternate.raw[10] = crc >> 8; alternate.raw[11] = crc;
+        assert(unit.receive_data_frame(&alternate)); expect("A01", true);
+      }
+      // Exercise the real loop's existing connection timeout, including repeated expiry.
+      unit.last_master_alive_millis_ = millis() - LAST_ALIVE_TIMEOUT_MILLIS - 1;
+      unit.loop(); unit.loop();
+      assert(!code.has_state() && !active.has_state());
+      DataFrame heartbeat{};
+      if (format == FrameFormat::ESTIA) {
+        heartbeat.set_tu2c(true);
+        const uint8_t bytes[] = {0x0A, 0x70, 0xFF, 0xE0, 0xC0, 0x3A, 0};
+        std::copy(std::begin(bytes), std::end(bytes), heartbeat.raw);
+        heartbeat.raw[6] = dn_checksum(heartbeat.raw, 6);
+      } else {
+        heartbeat = frame(0x10, 0, 9); heartbeat.raw[3] = 0x08;
+        const auto crc = heartbeat.calculate_estia_crc();
+        heartbeat.raw[9] = crc >> 8; heartbeat.raw[10] = crc;
+      }
+      assert(unit.receive_data_frame(&heartbeat));
+      assert(!code.has_state() && !active.has_state());
+      // Identical fault after reconnect must republish; then only explicit zero clears it.
+      assert(unit.receive_data_frame(&fault)); expect("F23", true);
+      auto clear = pump_fault_frame(format, 0);
+      assert(unit.receive_data_frame(&clear)); expect("None", false);
+      unit.last_master_alive_millis_ = millis() - LAST_ALIVE_TIMEOUT_MILLIS - 1;
+      unit.loop();
+      assert(!code.has_state() && !active.has_state());
+      assert(uart.transmitted == 0 && unit.commands_empty() && unit.write_queue_.empty());
+    }
+  }
+  // Actual Series 5 captures: A01/F23 announcements, polled reports and both clears.
+  TestEstia captured;
+  captured.set_frame_format(FrameFormat::ESTIA);
+  captured.set_read_only(true);
+  text_sensor::TextSensor code;
+  binary_sensor::BinarySensor active;
+  captured.set_fault_code_text_sensor(&code);
+  captured.set_fault_active_binary_sensor(&active);
+  const uint8_t frames[][9] = {
+      {0x0C, 0x70, 0xFF, 0xE0, 0xC0, 0x29, 0x70, 0x01, 0xB5},
+      {0x0C, 0x70, 0xFF, 0xE0, 0xA0, 0x29, 0x70, 0x01, 0x95},
+      {0x0C, 0x70, 0xFF, 0xE0, 0xC0, 0x29, 0x70, 0x00, 0xB4},
+      {0x0C, 0x70, 0xFF, 0xE0, 0xA0, 0x29, 0x70, 0x00, 0x94},
+      {0x0C, 0x70, 0xFF, 0xE0, 0xC0, 0x29, 0x70, 0x77, 0x2B},
+      {0x0C, 0x70, 0xFF, 0xE0, 0xA0, 0x29, 0x70, 0x77, 0x0B},
+      {0x0C, 0x70, 0xFF, 0xE0, 0xC0, 0x29, 0x70, 0x00, 0xB4},
+  };
+  const char *expected[] = {"A01", "A01", "None", "None", "F23", "F23", "None"};
+  for (unsigned i = 0; i < 7; ++i) {
+    DataFrame f{}; f.set_tu2c(true);
+    std::copy(std::begin(frames[i]), std::end(frames[i]), f.raw);
+    assert(captured.receive_data_frame(&f));
+    assert(code.state == expected[i] && active.state == (frames[i][7] != 0));
+  }
+  for (auto format : {FrameFormat::ESTIA, FrameFormat::A0}) {
+    TestEstia configured;
+    configured.set_frame_format(format);
+    configured.set_master_address(format == FrameFormat::ESTIA ? 0x71 : 0x01);
+    configured.set_fault_code_text_sensor(&code);
+    auto report = pump_fault_frame(format, 0x77);
+    if (format == FrameFormat::ESTIA) {
+      report.raw[1] = 0x71; report.raw[8] = dn_checksum(report.raw, 8);
+    } else {
+      report.raw[4] = 1;
+      const auto crc = report.calculate_estia_crc();
+      report.raw[10] = crc >> 8; report.raw[11] = crc;
+    }
+    assert(configured.receive_data_frame(&report) && code.state == "F23");
+  }
+}
+
 static void read_only_transmission_checks() {
   for (auto format : {FrameFormat::A0, FrameFormat::NORMAL, FrameFormat::HM,
                       FrameFormat::TU2C, FrameFormat::ESTIA}) {
@@ -798,9 +1083,13 @@ static void command_retry_checks() {
 }
 
 int main() {
+  new (&App) Application();
+  host::setup_preferences();
+  fault_initial_query_checks();
+  a0_initial_fault_checks();
+  pump_fault_checks();
   first_gen_temperature_checks();
   dn_checks();
-  new (&App) Application();
   control_checks();
   tu2c_address_checks();
   startup_address_checks();

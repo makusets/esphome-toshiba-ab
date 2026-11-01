@@ -116,6 +116,13 @@ climate:
 
     frame_format: a0  #required
 
+    # Optional passive faults: A0 starts assumed None/off until an alarm report.
+    # No A0 pump is available for validation; the fault-query packet is unknown.
+    # fault_code:
+    #   name: "Estia Fault Code"
+    # fault_active:
+    #   name: "Estia Fault Active"
+
     # Optional one-byte addresses, the defaults below may be omitted.
     # remote: 0x40
     # master: 0x00

@@ -1,4 +1,4 @@
-"""Generate real ESPHome configurations to verify zone defaults and overrides."""
+"""Generate real ESPHome configurations to verify zones and fault entities."""
 from pathlib import Path
 import re
 import subprocess
@@ -56,4 +56,38 @@ with tempfile.TemporaryDirectory(prefix="estia-config-", dir=work) as temp:
         else:
             assert result.returncode != 0
             assert "curve_shift requires frame_format: estia" in result.stdout + result.stderr
+    for framing in ["estia", "a0", "estia_a0", "normal", "hm", "tu2c", "auto"]:
+        for entity_keys in [("fault_code",), ("fault_active",), ("fault_code", "fault_active")]:
+            config["climate"] = [{"platform": "toshiba_ab", "name": "DHW", "frame_format": framing,
+                                  **{key: {"name": key} for key in entity_keys}}]
+            path = temp / f"fault-{framing}-{'-'.join(entity_keys)}.yaml"
+            path.write_text(yaml.safe_dump(config))
+            result = subprocess.run([sys.executable, "-m", "esphome", "compile", "--only-generate", str(path)],
+                                    capture_output=True, text=True)
+            if framing in ("estia", "a0", "estia_a0"):
+                assert result.returncode == 0, result.stdout + result.stderr
+                source = (build / "src/main.cpp").read_text()
+                assert ("set_fault_code_text_sensor(" in source) == ("fault_code" in entity_keys)
+                assert ("set_fault_active_binary_sensor(" in source) == ("fault_active" in entity_keys)
+            else:
+                assert result.returncode != 0
+                assert "fault_code and fault_active require frame_format: estia or a0" in result.stdout + result.stderr
+    poll_cases = [
+        ("estia", {"fault_code": {"name": "Fault"}}, "30s", True),
+        ("estia", {"fault_active": {"name": "Fault"}}, "never", True),
+        ("estia", {}, "30s", False),
+        ("a0", {"fault_code": {"name": "Fault"}}, "30s", False),
+        ("estia", {"fault_code": {"name": "Fault"}}, "0s", False),
+        ("estia", {"fault_code": {"name": "Fault"}}, "500ms", False),
+    ]
+    for index, (framing, entities, interval, valid) in enumerate(poll_cases):
+        config["climate"] = [{"platform": "toshiba_ab", "name": "DHW", "frame_format": framing,
+                              "fault_poll_interval": interval, **entities}]
+        path = temp / f"fault-poll-{index}.yaml"
+        path.write_text(yaml.safe_dump(config))
+        result = subprocess.run([sys.executable, "-m", "esphome", "compile", "--only-generate", str(path)],
+                                capture_output=True, text=True)
+        assert (result.returncode == 0) == valid, result.stdout + result.stderr
+        if valid:
+            assert "set_fault_poll_interval(" in (build / "src/main.cpp").read_text()
 print("Estia configuration checks passed")
