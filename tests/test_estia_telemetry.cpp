@@ -586,6 +586,51 @@ struct RecordingUart : uart::UARTComponent {
   void check_logger_conflict() override {}
 };
 
+static DataFrame first_gen_status(uint8_t enables, bool automatic, uint8_t activity = 0) {
+  DataFrame status{};
+  status.set_tu2c(true);
+  const uint8_t bytes[] = {0x15, 0x70, 0xFF, 0xE0, 0xA0, 0x31, enables,
+                           static_cast<uint8_t>(automatic ? 0x04 : 0), activity,
+                           0xA2, 0x7A, 0x66, 0x00, 0x48, 0x00, 0x00, 0x00, 0x00};
+  std::copy(std::begin(bytes), std::end(bytes), status.raw);
+  status.raw[17] = dn_checksum(status.raw, 17);
+  return status;
+}
+
+static void first_gen_dhw_demand_checks() {
+  RecordingUart uart;
+  TestEstia unit;
+  unit.set_uart_parent(&uart);
+  unit.set_frame_format(FrameFormat::ESTIA);
+  unit.set_master_address(0x70);
+  unit.set_read_only(true);
+  ToshibaAbEstiaZoneClimate zone(&unit);
+  ToshibaAbEstiaZone1Switch enabled(&unit);
+  binary_sensor::BinarySensor resistor, pump;
+  unit.set_zone1_climate(&zone);
+  unit.set_zone1_switch(&enabled);
+  unit.set_hotwater_resistor_heating_binary_sensor(&resistor);
+  unit.set_hotwater_pump_heating_binary_sensor(&pump);
+  for (bool automatic : {false, true}) {
+    for (bool dhw : {false, true}) {
+      for (bool zone_on : {false, true}) {
+        for (uint8_t activity : {0x00, 0x04, 0x08, 0x0C}) {
+          auto status = first_gen_status((zone_on ? 1 : 0) | (dhw ? 2 : 0), automatic, activity);
+          assert(unit.receive_data_frame(&status));
+          assert(unit.mode == (dhw ? climate::CLIMATE_MODE_HEAT : climate::CLIMATE_MODE_OFF));
+          assert(enabled.has_state() && enabled.state == zone_on);
+          assert(zone.mode == (!zone_on ? climate::CLIMATE_MODE_OFF
+                              : automatic ? climate::CLIMATE_MODE_AUTO : climate::CLIMATE_MODE_HEAT));
+          assert(resistor.has_state() && resistor.state == bool(activity & 0x04));
+          assert(pump.has_state() && pump.state == bool(activity & 0x08));
+          near(unit.target_temperature, 65); near(zone.target_temperature, 45);
+        }
+      }
+    }
+  }
+  assert(uart.transmitted == 0 && unit.write_queue_.empty() && unit.commands_empty());
+}
+
 static void read_only_transmission_checks() {
   for (auto format : {FrameFormat::A0, FrameFormat::NORMAL, FrameFormat::HM,
                       FrameFormat::TU2C, FrameFormat::ESTIA}) {
@@ -801,6 +846,7 @@ int main() {
   first_gen_temperature_checks();
   dn_checks();
   new (&App) Application();
+  first_gen_dhw_demand_checks();
   control_checks();
   tu2c_address_checks();
   startup_address_checks();

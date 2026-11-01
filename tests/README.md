@@ -70,3 +70,9 @@ layout from issue #242. They cover byte-13 Zone 1 readings when byte 14 is empty
 byte-14 precedence when populated, empty temperature slots, absent DHW sensors,
 short status frames and checksum rejection. Byte-14 compatibility is tested at
 the same length; the leading `0x15` includes three framing bytes stripped by the reader.
+
+First-generation DHW demand checks cross all four Auto/DHW-enable combinations
+with Zone 1 enable and both heating-activity bits through the CRC-validated
+receive path. DHW reports its own enable; Zone 1 Auto and both temperature
+targets remain independent. These logical states do not establish physical
+heating or compressor operation.

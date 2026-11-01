@@ -4573,9 +4573,7 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     this->estia_first_gen_hotwater_pump_heating_ = frame->raw[8] & 0x08;
     this->estia_first_gen_dhw_encoded_ = frame->raw[9];
     this->estia_first_gen_zone1_encoded_ = frame->raw[10];
-    this->mode = (this->estia_first_gen_auto_mode_active_ || this->estia_first_gen_dhw_active_)
-                     ? climate::CLIMATE_MODE_HEAT
-                     : climate::CLIMATE_MODE_OFF;
+    this->mode = this->estia_first_gen_dhw_active_ ? climate::CLIMATE_MODE_HEAT : climate::CLIMATE_MODE_OFF;
     this->target_temperature = static_cast<float>(frame->raw[9]) / 2.0f - 16.0f;
     this->publish_state();
     if (this->zone1_switch_) this->zone1_switch_->publish_state(this->estia_first_gen_zone1_active_);
