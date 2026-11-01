@@ -4535,6 +4535,9 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
   const bool is_master_source = src == this->master_address_ ||
                                 (this->master_address_auto_ && !this->master_address_confirmed_ &&
                                  is_possible_master_source && has_master_keepalive_signature);
+  const bool is_master_fault_status = len == 0x0C && is_master_source && frame->raw[2] == 0xFF &&
+                                      frame->raw[3] == 0xE0 &&
+                                      (frame->raw[4] == 0xC0 || frame->raw[4] == 0xA0) && frame->raw[5] == 0x29;
   auto unknown_label = [&]() -> std::string {
     char buf[40];
     if (is_master_source) {
@@ -4553,6 +4556,9 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     }
     if (is_master_source && has_master_status_signature) {
       return "Master status";
+    }
+    if (is_master_fault_status) {
+      return frame->raw[4] == 0xA0 ? "Master fault status reply" : "Master fault status announcement";
     }
     if (is_master_source && frame->raw[4] == 0x80 && frame->raw[5] == 0x5C) {
       return "Master reporting data/sensor value";
@@ -4603,9 +4609,7 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
   this->decode_estia_first_gen_dn_(frame);
   // Captured Series 5 fault announcement (C0) and polled response (A0).
   // raw[6] is retained as an uninterpreted payload byte, not an A/F selector.
-  if (len == 0x0C && is_master_source && frame->raw[2] == 0xFF &&
-      frame->raw[3] == 0xE0 && (frame->raw[4] == 0xC0 || frame->raw[4] == 0xA0) &&
-      frame->raw[5] == 0x29) {
+  if (is_master_fault_status) {
     this->update_pump_fault_(frame->raw[7]);
   }
   if (has_master_keepalive_signature && is_possible_master_source)
