@@ -1127,6 +1127,7 @@ int main() {
   startup_address_checks();
   intake_air_temperature_checks();
   regular_temperature_checks();
+  tu2c_fan_level_checks();
   read_only_transmission_checks();
   command_retry_checks();
   TestEstia unit;

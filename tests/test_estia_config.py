@@ -68,4 +68,27 @@ with tempfile.TemporaryDirectory(prefix="estia-config-", dir=work) as temp:
         else:
             assert result.returncode != 0
             assert "curve_shift requires frame_format: estia" in result.stdout + result.stderr
+    for framing, explicit, expected in [
+        ("tu2c", None, 5), ("u", None, 5), ("wrapped", None, 5),
+        ("tu2c", 3, 3), ("tu2c", 5, 5), ("normal", None, 3),
+        ("auto", None, 3), ("hm", None, 3), ("a0", None, 3), ("estia", None, 3),
+        ("normal", 3, 3), ("normal", 5, None), ("auto", 5, None),
+        ("hm", 5, None), ("a0", 5, None), ("estia", 5, None), ("tu2c", 4, None),
+    ]:
+        entity = {"platform": "toshiba_ab", "name": "Fan test", "frame_format": framing}
+        if explicit is not None:
+            entity["fan_levels"] = explicit
+        config["climate"] = [entity]
+        config["uart"]["parity"] = "NONE" if framing in ("tu2c", "u", "wrapped") else "EVEN"
+        path = temp / "fan.yaml"
+        path.write_text(yaml.safe_dump(config))
+        result = subprocess.run([sys.executable, "-m", "esphome", "compile", "--only-generate", str(path)],
+                                capture_output=True, text=True)
+        if expected is None:
+            assert result.returncode != 0, (framing, explicit)
+            assert "fan_levels" in result.stdout + result.stderr
+        else:
+            assert result.returncode == 0, result.stderr
+            source = (build / "src/main.cpp").read_text()
+            assert f"set_fan_levels({expected})" in source, (framing, explicit)
 print("Estia configuration checks passed")

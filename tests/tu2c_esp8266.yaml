@@ -1,0 +1,21 @@
+esphome:
+  name: tu2c-fan-test
+  build_path: ../../work/tu2c-fan-esp8266
+  compile_process_limit: 2
+esp8266:
+  board: esp12e
+logger:
+  baud_rate: 0
+external_components:
+  - source:
+      type: local
+      path: ../components
+uart:
+  tx_pin: GPIO12
+  rx_pin: GPIO13
+  baud_rate: 2400
+  parity: NONE
+climate:
+  - platform: toshiba_ab
+    name: TU2C
+    frame_format: tu2c

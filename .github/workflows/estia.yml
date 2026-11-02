@@ -28,3 +28,4 @@ jobs:
       - run: pip install esphome==2026.9.1
       - run: esphome compile tests/estia_esp8266.yaml
       - run: esphome compile tests/estia_curve_esp8266.yaml
+      - run: esphome compile tests/tu2c_esp8266.yaml
