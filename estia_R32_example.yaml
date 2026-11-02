@@ -76,6 +76,12 @@ climate:
       name: "Toshiba Estia Zone 1"
       id: estia_zone1
 
+     # Optionally disable cooling for heating-only installations, or auto mode
+     # this restricts the zone thermostat's advertised modes:
+
+     # supports_cool: false
+     # supports_auto: false
+
       # Optional Zone 1 thermostat display limits; defaults: 20–65 °C in 0.5 °C steps.
       # visual sets one fixed Home Assistant display range for both Heat and Cool;
       # the range does not change with mode and does not set operating limits.
@@ -91,12 +97,18 @@ climate:
       #   max_temperature: 65
       #   temperature_step: 0.5
 
-    # Zone 2 defaults to disabled; use true or a block to enable it.
+    # Zone 2 defaults to disabled; use true or the block below to enable it.
     # Operating mode is shared with Zone 1.
     # zone2_climate:
     #   name: "Toshiba Estia Zone 2"
     #   id: estia_zone2
-    #
+   
+    # Optionally disable cooling for heating-only installations, or auto mode
+    # this restricts the zone thermostat's advertised modes:
+
+    # supports_cool: false
+    # supports_auto: false
+    
     #   Optional Zone 2 thermostat display limits; defaults: 20–40 °C in 0.5 °C steps.
     #   visual sets one fixed Home Assistant display range for both Heat and Cool;
     #   it does not restrict the component's accepted water targets (7–65 °C).
