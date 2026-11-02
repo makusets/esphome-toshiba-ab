@@ -106,8 +106,8 @@ climate:
     # Optionally disable cooling for heating-only installations, or auto mode
     # this restricts the zone thermostat's advertised modes:
 
-    # supports_cool: false
-    # supports_auto: false
+      # supports_cool: false
+      # supports_auto: false
     
     #   Optional Zone 2 thermostat display limits; defaults: 20–40 °C in 0.5 °C steps.
     #   visual sets one fixed Home Assistant display range for both Heat and Cool;
