@@ -289,23 +289,22 @@ climate:
 
 ### DHW availability and mode commands
 
-First-generation Series 5 captures show that status bit `0x80` in `raw[6]`
-(the seventh byte, starting with the length byte) indicates configured DHW
-availability. The component learns this from a checksum-valid master `0x31`
-status and preserves it in both `0x22` mode-command bytes:
+In first-generation estia status frame bit `0x80` in `raw[6]`
+(the seventh byte, starting with the length byte) indicates DHW
+availability. The component learns this from a master `0x31`
+status frame. This availability changes `0x22` mode-command bytes to send:
 
 | Configured DHW | Cool | Heat / Auto |
 | --- | --- | --- |
 | Disabled | `22:01:01` | `22:02:02` |
 | Enabled | `22:05:05` | `22:06:06` |
 
-No encoding option is needed. A mode request waits for status before choosing
+A change of mode request waits for status before choosing
 the bytes; the existing Zone 1 enable/startup sequence remains in place. Auto
 still uses its separate weather-compensation command before the Heat payload.
-Each new valid status updates the configured availability for the next request.
+Each new valid status updates the configured availability.
 
-This reports the controller's configured DHW state; a cylinder or its probe
-can still be absent or faulty. DHW operation On/Off is independently reported
+DHW operation On/Off is independently reported
 by status bit `0x02`. The separate Zone 1 and DHW On/Off commands are unchanged.
 Other frame formats are unchanged. The capture comparison is discussed in
 [issue #284](https://github.com/makusets/esphome-toshiba-ab/issues/284).
@@ -367,8 +366,8 @@ F0:F0:0D:50:<MASTER>:C0:61:38:<FLAG>:<TEMP>:00:<CRC>:A0
 the reading. Otherwise the report uses current temperature minus 0.5 °C, then
 target temperature, then 20 °C. `FLAG` is always `01`, regardless of temperature
 source: regular TU2C header-remote reports start with `61:38:01`. Only address `0x50` reports: automatic
-collision recovery to another address disables these reports. Startup silence,
-read-only mode, and autonomous registration gating also apply.
+collision recovery to another address disables these reports. Startup silence and
+read-only mode also apply.
 
 Incoming `61 38` reports are logged with their sensor flag. The unit's status
 frames remain the source of control-temperature state. This regular report is
