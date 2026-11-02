@@ -70,3 +70,20 @@ layout from issue #242. They cover byte-13 Zone 1 readings when byte 14 is empty
 byte-14 precedence when populated, empty temperature slots, absent DHW sensors,
 short status frames and checksum rejection. Byte-14 compatibility is tested at
 the same length; the leading `0x15` includes three framing bytes stripped by the reader.
+
+First-generation setpoint checks replay the accepted 20°C cooling command and
+exercise Cool 7–25°C, unchanged Heat 20–65°C, full companion bytes and checksums,
+both remote addresses, pending/explicit modes, selected mode while Off, running
+Auto and retained Auto while Off,
+invalid values, read-only mode and startup transmission guards. See
+[the setpoint reference](../docs/estia_first_gen_setpoints.md) for provenance and
+hardware-validation limits.
+First-generation DHW demand checks cross all four Auto/DHW-enable combinations
+with Zone 1 enable and both heating-activity bits through the CRC-validated
+receive path. DHW reports its own enable; Zone 1 Auto and both temperature
+targets remain independent. These logical states do not establish physical
+heating or compressor operation.
+First-generation mode checks replay the Series 5 DHW-availability status bit
+with both captured status lengths. They verify Heat/Cool/Auto command bytes,
+independence from DHW On/Off, startup deferral and cancellation, live status
+updates, malformed/wrong-source rejection, and read-only/boot send guards.

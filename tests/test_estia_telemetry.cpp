@@ -1,5 +1,6 @@
 #include "esphome/components/toshiba_ab/toshiba_ab.h"
 #include "esphome/core/application.h"
+#include "esphome/components/host/preferences.h"
 #include <cassert>
 #include <cmath>
 #include <iostream>
@@ -103,6 +104,110 @@ static uint8_t dn_checksum(const uint8_t *bytes, size_t size) {
   unsigned sum = 0;
   for (size_t i = 0; i < size; ++i) sum += bytes[i];
   return static_cast<uint8_t>(sum);
+}
+
+static void first_gen_cooling_setpoint_checks() {
+  TestEstia unit;
+  unit.set_frame_format(FrameFormat::ESTIA);
+  unit.set_remote_address(0x60);
+  unit.set_master_address(0x70);
+  unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+  ToshibaAbEstiaZoneClimate zone(&unit);
+  unit.set_zone1_climate(&zone);
+  zone.mode = climate::CLIMATE_MODE_COOL;
+  zone.make_call().set_target_temperature(20).perform();
+  assert(unit.write_queue_.size() == 1);
+  const auto command = unit.write_queue_.front();
+  // Physical auxiliary controller's accepted 20 C cooling command, including CRC.
+  const uint8_t captured[] = {0x0F, 0x60, 0x70, 0xE0, 0x01, 0x23,
+                              0x01, 0x48, 0x48, 0xA2, 0x48, 0x5E};
+  if (!std::equal(std::begin(captured), std::end(captured), command.raw)) {
+    std::cerr << "Cooling20 packet does not match accepted wall-controller capture\n";
+    for (size_t i = 0; i < sizeof(captured); i++)
+      std::cerr << std::hex << static_cast<unsigned>(command.raw[i]) << ':';
+    std::cerr << '\n';
+    std::abort();
+  }
+  unit.write_queue_.pop();
+  auto expect_target = [&](float target, bool cooling, uint8_t remote = 0x60) {
+    assert(unit.write_queue_.size() == 1);
+    const auto next = unit.write_queue_.front();
+    unit.write_queue_.pop();
+    const uint8_t encoded = static_cast<uint8_t>(std::round((target + 16) * 2));
+    std::vector<uint8_t> expected{0x0F, remote, 0x70, 0xE0, 0x01, 0x23,
+                                static_cast<uint8_t>(cooling ? 0x01 : 0x02), encoded,
+                                static_cast<uint8_t>(cooling ? encoded : 0x66), 0xA2, encoded};
+    expected.push_back(dn_checksum(expected.data(), expected.size()));
+    assert(std::equal(expected.begin(), expected.end(), next.raw));
+  };
+  for (uint8_t remote : {0x60, 0x61}) {
+    unit.set_remote_address(remote);
+    zone.mode = climate::CLIMATE_MODE_COOL;
+    for (float target : {7.0f, 15.0f, 20.0f, 24.5f, 25.0f}) {
+      zone.make_call().set_target_temperature(target).perform();
+      expect_target(target, true, remote);
+    }
+    for (float target : {6.5f, 25.5f, NAN, INFINITY, -INFINITY})
+      unit.send_estia_first_gen_zone1_setpoint(target, climate::CLIMATE_MODE_COOL);
+    assert(unit.write_queue_.empty());
+    zone.mode = climate::CLIMATE_MODE_HEAT;
+    for (float target : {20.0f, 30.0f, 49.5f, 65.0f}) {
+      zone.make_call().set_target_temperature(target).perform();
+      expect_target(target, false, remote);
+    }
+    for (float target : {19.5f, 65.5f, NAN, INFINITY, -INFINITY})
+      unit.send_estia_first_gen_zone1_setpoint(target);
+    assert(unit.write_queue_.empty());
+  }
+  unit.set_remote_address(0x60);
+  // The physical status retains the selected mode even with Zone 1 switched Off.
+  for (auto selected_mode : {climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_COOL, climate::CLIMATE_MODE_AUTO}) {
+    const bool cooling = selected_mode == climate::CLIMATE_MODE_COOL;
+    const bool automatic = selected_mode == climate::CLIMATE_MODE_AUTO;
+    DataFrame status{};
+    status.set_tu2c(true);
+    const uint8_t report[] = {0x15, 0x70, 0xFF, 0xE0, 0xA0, 0x31, 0x40, 0x00, 0x10,
+                              0xA2, 0x60, 0x66, 0x00, 0x48, 0x00, 0x00, 0x00, 0x35};
+    std::copy(std::begin(report), std::end(report), status.raw);
+    status.raw[6] = cooling ? 0x20 : 0x40;
+    status.raw[7] = automatic ? 0x04 : 0x00;
+    status.raw[17] = dn_checksum(status.raw, 17);
+    assert(unit.receive_data_frame(&status));
+    assert(zone.mode == climate::CLIMATE_MODE_OFF);
+    zone.make_call().set_target_temperature(cooling ? 15 : 30).perform();
+    if (automatic) {
+      assert(unit.write_queue_.empty());  // Off must not hide retained Auto.
+      status.raw[6] |= 1;
+      status.raw[17] = dn_checksum(status.raw, 17);
+      assert(unit.receive_data_frame(&status));
+      assert(zone.mode == climate::CLIMATE_MODE_AUTO);
+      zone.make_call().set_target_temperature(30).perform();
+      assert(unit.write_queue_.empty());  // Running Auto is also curve-controlled.
+      status.raw[6] &= ~1;
+      status.raw[17] = dn_checksum(status.raw, 17);
+      assert(unit.receive_data_frame(&status));
+    } else {
+      expect_target(cooling ? 15 : 30, cooling);
+    }
+  }
+  // An explicit or deferred mode takes precedence over the previous report.
+  zone.make_call().set_mode(climate::CLIMATE_MODE_HEAT).set_target_temperature(30).perform();
+  unit.write_queue_.pop();  // On; mode is deferred until an active status arrives.
+  expect_target(30, false);
+  zone.make_call().set_mode(climate::CLIMATE_MODE_COOL).perform();
+  unit.write_queue_.pop();  // A replacement pending Cool request.
+  zone.make_call().set_target_temperature(15).perform();
+  expect_target(15, true);
+  zone.make_call().set_mode(climate::CLIMATE_MODE_AUTO).set_target_temperature(35).perform();
+  unit.write_queue_.pop();
+  assert(unit.write_queue_.empty());  // No fixed target in weather compensation.
+  unit.set_read_only(true);
+  zone.make_call().set_mode(climate::CLIMATE_MODE_COOL).set_target_temperature(15).perform();
+  assert(unit.write_queue_.empty());
+  unit.set_read_only(false);
+  unit.boot_millis_ = millis();
+  unit.send_estia_first_gen_zone1_setpoint(15, climate::CLIMATE_MODE_COOL);
+  assert(unit.write_queue_.empty());
 }
 
 static void dn_checks() {
@@ -366,6 +471,141 @@ static void first_gen_temperature_checks() {
   near(dhw.state, 50.0f);
 }
 
+static DataFrame first_gen_mode_status(uint8_t flags, bool long_status) {
+  DataFrame status{};
+  status.set_tu2c(true);
+  // Captured Series 5 status layouts, with mode/availability varied below.
+  const uint8_t captured[] = {0x15, 0x70, 0xFF, 0xE0, 0xA0, 0x31, 0xA0, 0x00, 0x00,
+                              0xA2, 0x48, 0x48, 0x00, 0x7A, 0x52, 0x00, 0x00, 0xD3};
+  std::copy(std::begin(captured), std::end(captured), status.raw);
+  status.raw[6] = flags;
+  if (!long_status) {
+    status.raw[0] = 0x11;
+    status.raw[4] = 0xC0;
+  }
+  const size_t end = status.raw[0] - 4;
+  status.raw[end] = dn_checksum(status.raw, end);
+  return status;
+}
+
+static void first_gen_mode_setup(TestEstia &unit) {
+  unit.set_frame_format(FrameFormat::ESTIA);
+  unit.set_remote_address(0x61);
+  unit.set_master_address(0x70);
+  unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+}
+
+static DataFrame pop_first_gen_mode_command(TestEstia &unit) {
+  assert(!unit.write_queue_.empty());
+  auto command = unit.write_queue_.front();
+  unit.write_queue_.pop();
+  assert(command.raw[1] == 0x61 && command.raw[2] == 0x70);
+  assert(command.raw[command.size() - 1] == dn_checksum(command.raw, command.size() - 1));
+  return command;
+}
+
+static void check_first_gen_mode_commands(TestEstia &unit, climate::ClimateMode mode, bool dhw_available) {
+  auto automatic = pop_first_gen_mode_command(unit);
+  assert(automatic.raw[5] == 0x24 && automatic.raw[6] == 0x01);
+  assert(automatic.raw[7] == (mode == climate::CLIMATE_MODE_AUTO ? 1 : 0));
+  auto command = pop_first_gen_mode_command(unit);
+  const uint8_t expected = (mode == climate::CLIMATE_MODE_COOL ? 0x01 : 0x02) | (dhw_available ? 0x04 : 0);
+  assert(command.raw[5] == 0x22 && command.raw[6] == expected && command.raw[7] == expected);
+  assert(unit.write_queue_.empty());
+}
+
+static void first_gen_dhw_mode_checks() {
+  // The physical DIP reversal changes status bit 7, independently of DHW On/Off.
+  for (bool available : {false, true}) {
+    for (bool long_status : {false, true}) {
+      for (bool dhw_on : {false, true}) {
+        for (auto mode : {climate::CLIMATE_MODE_HEAT, climate::CLIMATE_MODE_COOL, climate::CLIMATE_MODE_AUTO}) {
+          TestEstia unit;
+          first_gen_mode_setup(unit);
+          ToshibaAbEstiaZoneClimate zone(&unit);
+          unit.set_zone1_climate(&zone);
+          auto status = first_gen_mode_status(0x21 | (available ? 0x80 : 0) | (dhw_on ? 2 : 0), long_status);
+          assert(unit.receive_data_frame(&status));
+          zone.make_call().set_mode(mode).perform();
+          check_first_gen_mode_commands(unit, mode, available);
+        }
+      }
+    }
+  }
+
+  // Before the first status, retain the request and enable only; learn availability
+  // from the first active report before sending the deferred mode.
+  for (bool available : {false, true}) {
+    TestEstia unit;
+    first_gen_mode_setup(unit);
+    ToshibaAbEstiaZoneClimate zone(&unit);
+    unit.set_zone1_climate(&zone);
+    zone.make_call().set_mode(climate::CLIMATE_MODE_AUTO).perform();
+    auto on = pop_first_gen_mode_command(unit);
+    assert(on.raw[5] == 0x21 && on.raw[6] == 0x03 && unit.write_queue_.empty());
+    auto inactive = first_gen_mode_status(available ? 0xC0 : 0x40, true);
+    assert(unit.receive_data_frame(&inactive));
+    assert(unit.write_queue_.empty());
+    auto active = first_gen_mode_status(available ? 0xC1 : 0x41, false);
+    assert(unit.receive_data_frame(&active));
+    check_first_gen_mode_commands(unit, climate::CLIMATE_MODE_AUTO, available);
+    assert(unit.receive_data_frame(&active));
+    assert(unit.write_queue_.empty());  // No repeated request on later status.
+  }
+
+  TestEstia unit;
+  first_gen_mode_setup(unit);
+  ToshibaAbEstiaZoneClimate zone(&unit);
+  unit.set_zone1_climate(&zone);
+  unit.send_estia_first_gen_zone1_mode(climate::CLIMATE_MODE_HEAT);
+  assert(unit.write_queue_.empty());  // Unknown must not mean "no DHW".
+  auto valid = first_gen_mode_status(0xC1, false);
+  for (int malformed = 0; malformed < 6; ++malformed) {
+    auto invalid = valid;
+    if (malformed == 0) invalid.raw[13] ^= 1;  // Bad checksum.
+    if (malformed == 1) invalid.raw[1] = 0x71;  // Another master.
+    if (malformed == 2) invalid.raw[3] = 0xC0;  // Other protocol signature.
+    if (malformed >= 3) invalid.raw[0] = 0x0C + (malformed - 3);  // Missing target fields/checksum space.
+    if (malformed != 0) {
+      const size_t end = invalid.raw[0] - 4;
+      invalid.raw[end] = dn_checksum(invalid.raw, end);
+    }
+    unit.receive_data_frame(&invalid);
+    assert(unit.write_queue_.empty());
+  }
+  assert(unit.receive_data_frame(&valid));
+  check_first_gen_mode_commands(unit, climate::CLIMATE_MODE_HEAT, true);
+
+  // A later valid DIP report changes the next mode command, even with DHW OFF.
+  auto no_dhw = first_gen_mode_status(0x41, true);
+  assert(unit.receive_data_frame(&no_dhw));
+  zone.make_call().set_mode(climate::CLIMATE_MODE_COOL).perform();
+  check_first_gen_mode_commands(unit, climate::CLIMATE_MODE_COOL, false);
+  assert(unit.receive_data_frame(&valid));
+  zone.make_call().set_mode(climate::CLIMATE_MODE_HEAT).perform();
+  check_first_gen_mode_commands(unit, climate::CLIMATE_MODE_HEAT, true);
+  unit.set_read_only(true);
+  zone.make_call().set_mode(climate::CLIMATE_MODE_COOL).perform();
+  assert(unit.write_queue_.empty());
+  unit.set_read_only(false);
+  unit.boot_millis_ = millis();
+  zone.make_call().set_mode(climate::CLIMATE_MODE_COOL).perform();
+  assert(unit.write_queue_.empty());
+
+  // Off cancels a pre-status request; later status cannot revive it.
+  TestEstia cancelled;
+  first_gen_mode_setup(cancelled);
+  ToshibaAbEstiaZoneClimate cancelled_zone(&cancelled);
+  cancelled.set_zone1_climate(&cancelled_zone);
+  cancelled_zone.make_call().set_mode(climate::CLIMATE_MODE_HEAT).perform();
+  pop_first_gen_mode_command(cancelled);
+  cancelled_zone.make_call().set_mode(climate::CLIMATE_MODE_OFF).perform();
+  auto off = pop_first_gen_mode_command(cancelled);
+  assert(off.raw[5] == 0x21 && off.raw[6] == 0x02);
+  assert(cancelled.receive_data_frame(&valid));
+  assert(cancelled.write_queue_.empty());
+}
+
 static void intake_air_temperature_checks() {
   TestEstia unit;
   unit.set_frame_format(FrameFormat::NORMAL);
@@ -585,6 +825,51 @@ struct RecordingUart : uart::UARTComponent {
   uart::UARTFlushResult flush() override { return uart::UARTFlushResult::UART_FLUSH_RESULT_SUCCESS; }
   void check_logger_conflict() override {}
 };
+
+static DataFrame first_gen_status(uint8_t enables, bool automatic, uint8_t activity = 0) {
+  DataFrame status{};
+  status.set_tu2c(true);
+  const uint8_t bytes[] = {0x15, 0x70, 0xFF, 0xE0, 0xA0, 0x31, enables,
+                           static_cast<uint8_t>(automatic ? 0x04 : 0), activity,
+                           0xA2, 0x7A, 0x66, 0x00, 0x48, 0x00, 0x00, 0x00, 0x00};
+  std::copy(std::begin(bytes), std::end(bytes), status.raw);
+  status.raw[17] = dn_checksum(status.raw, 17);
+  return status;
+}
+
+static void first_gen_dhw_demand_checks() {
+  RecordingUart uart;
+  TestEstia unit;
+  unit.set_uart_parent(&uart);
+  unit.set_frame_format(FrameFormat::ESTIA);
+  unit.set_master_address(0x70);
+  unit.set_read_only(true);
+  ToshibaAbEstiaZoneClimate zone(&unit);
+  ToshibaAbEstiaZone1Switch enabled(&unit);
+  binary_sensor::BinarySensor resistor, pump;
+  unit.set_zone1_climate(&zone);
+  unit.set_zone1_switch(&enabled);
+  unit.set_hotwater_resistor_heating_binary_sensor(&resistor);
+  unit.set_hotwater_pump_heating_binary_sensor(&pump);
+  for (bool automatic : {false, true}) {
+    for (bool dhw : {false, true}) {
+      for (bool zone_on : {false, true}) {
+        for (uint8_t activity : {0x00, 0x04, 0x08, 0x0C}) {
+          auto status = first_gen_status((zone_on ? 1 : 0) | (dhw ? 2 : 0), automatic, activity);
+          assert(unit.receive_data_frame(&status));
+          assert(unit.mode == (dhw ? climate::CLIMATE_MODE_HEAT : climate::CLIMATE_MODE_OFF));
+          assert(enabled.has_state() && enabled.state == zone_on);
+          assert(zone.mode == (!zone_on ? climate::CLIMATE_MODE_OFF
+                              : automatic ? climate::CLIMATE_MODE_AUTO : climate::CLIMATE_MODE_HEAT));
+          assert(resistor.has_state() && resistor.state == bool(activity & 0x04));
+          assert(pump.has_state() && pump.state == bool(activity & 0x08));
+          near(unit.target_temperature, 65); near(zone.target_temperature, 45);
+        }
+      }
+    }
+  }
+  assert(uart.transmitted == 0 && unit.write_queue_.empty() && unit.commands_empty());
+}
 
 static void read_only_transmission_checks() {
   for (auto format : {FrameFormat::A0, FrameFormat::NORMAL, FrameFormat::HM,
@@ -829,9 +1114,14 @@ static void zone_mode_capability_checks() {
 
 int main() {
   zone_mode_capability_checks();
+  new (&App) Application();
+  host::setup_preferences();
+  first_gen_cooling_setpoint_checks();
+  first_gen_dhw_mode_checks();
   first_gen_temperature_checks();
   dn_checks();
   new (&App) Application();
+  first_gen_dhw_demand_checks();
   control_checks();
   tu2c_address_checks();
   startup_address_checks();
