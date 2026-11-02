@@ -1488,16 +1488,14 @@ static void zone_mode_capability_checks() {
 }
 
 int main() {
+  zone_mode_capability_checks();
   new (&App) Application();
   host::setup_preferences();
-  zone_mode_capability_checks();
   first_gen_cooling_setpoint_checks();
   first_gen_dhw_mode_checks();
-  fault_initial_query_checks();
-  a0_initial_fault_checks();
-  pump_fault_checks();
   first_gen_temperature_checks();
   dn_checks();
+  new (&App) Application();
   first_gen_dhw_demand_checks();
   control_checks();
   tu2c_address_checks();
@@ -1507,6 +1505,9 @@ int main() {
   tu2c_fan_level_checks();
   read_only_transmission_checks();
   command_retry_checks();
+  fault_initial_query_checks();
+  a0_initial_fault_checks();
+  pump_fault_checks();
   TestEstia unit;
   unit.set_frame_format(FrameFormat::A0);
   ToshibaAbEstiaZoneClimate z1(&unit), z2(&unit, 2);
