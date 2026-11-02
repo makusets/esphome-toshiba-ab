@@ -71,12 +71,18 @@ climate:
     #   temperature_step: 0.5
 
     # Zone 1 thermostat controls space heating/cooling independently of DHW.
-    # Supports Off, Heat, Cool and weather-compensated Auto.
+    # Supports Off, Heat, Cool and weather-compensated Auto by default.
     # When starting from Off, the mode command waits for Zone 1 ON status.
     # Auto uses the heating curve and ignores manual target changes.
     zone1_climate:
       name: "${friendly_name} Zone 1"
       id: estia_zone1
+
+    # Optionally disable cooling for heating-only installations, or auto mode
+    # this restricts the zone thermostat's advertised modes:
+
+     # supports_cool: false
+     # supports_auto: false
 
       # Optional Zone 1 thermostat display limits; defaults: 20–65 °C in 0.5 °C steps.
       # visual sets one fixed Home Assistant display range for both Heat and Cool;
