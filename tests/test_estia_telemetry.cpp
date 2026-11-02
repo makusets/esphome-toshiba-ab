@@ -1082,6 +1082,97 @@ static void command_retry_checks() {
   }
 }
 
+static void tu2c_fan_level_checks() {
+  const uint8_t status_fans[] = {0x40, 0xA0, 0xB0, 0x80, 0x90, 0x60};
+  const uint8_t command_fans[] = {0x24, 0x2A, 0x2B, 0x28, 0x29, 0x26};
+  const climate::ClimateFanMode standard[] = {
+      climate::CLIMATE_FAN_AUTO, climate::CLIMATE_FAN_LOW, climate::CLIMATE_FAN_LOW,
+      climate::CLIMATE_FAN_MEDIUM, climate::CLIMATE_FAN_MEDIUM, climate::CLIMATE_FAN_HIGH};
+  for (uint8_t levels : {3, 5}) {
+    TestEstia unit;
+    unit.set_frame_format(FrameFormat::TU2C);
+    if (levels == 3) unit.set_fan_levels(3);  // Five is the TU2C default.
+    unit.announce_ack_received_ = true;
+    unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+    assert(unit.get_traits().get_supported_custom_fan_modes().size() == (levels == 5 ? 2 : 0));
+    auto pop_fan = [&](uint8_t expected) {
+      assert(unit.write_queue_.size() == 1);
+      auto command = unit.write_queue_.front(); unit.write_queue_.pop();
+      assert(command.is_tu2c() && command.raw[7] == expected);
+      assert(command.raw[command.size() - 1] == dn_checksum(command.raw, command.size() - 1));
+    };
+    for (uint8_t group : {0xC0, 0xA0}) {
+      for (size_t level = 0; level < 6; ++level) {
+        DataFrame status{};
+        status.set_tu2c(true);
+        const uint8_t bytes[] = {0x12, 0x90, 0xFF, 0xC0, group, 0x38, 0x41, status_fans[level],
+                                 0x00, 0x00, 120, 110, 0, 0, 0};
+        std::copy(std::begin(bytes), std::end(bytes), status.raw);
+        status.raw[14] = dn_checksum(status.raw, 14);
+        assert(unit.receive_data_frame(&status));
+        const bool half = level == 2 || level == 4;
+        assert(unit.tcc_state.fan_half == half);
+        if (levels == 5 && half) {
+          assert(unit.has_custom_fan_mode());
+          assert(unit.get_custom_fan_mode() == (level == 2 ? TU2C_FAN_LOW_MEDIUM : TU2C_FAN_MEDIUM_HIGH));
+        } else {
+          assert(!unit.has_custom_fan_mode() && unit.fan_mode == standard[level]);
+        }
+        if (!half || levels == 5) {
+          // Exercise all selectable levels through the public climate call path.
+          unit.tcc_state.fan = level == 5 ? FAN_PEED_LOW : FAN_PEED_HIGH;
+          unit.tcc_state.fan_half = false;
+          if (half) unit.make_call().set_fan_mode(level == 2 ? TU2C_FAN_LOW_MEDIUM : TU2C_FAN_MEDIUM_HIGH).perform();
+          else unit.make_call().set_fan_mode(standard[level]).perform();
+          pop_fan(command_fans[level]);
+          assert(unit.receive_data_frame(&status));
+        }
+        // Temperature changes must preserve the full fan byte from the remote,
+        // including hidden half steps when only three levels are exposed.
+        unit.make_call().set_target_temperature(26).perform();
+        pop_fan(command_fans[level]);
+        unit.make_call().set_mode(climate::CLIMATE_MODE_HEAT).perform();
+        assert(unit.write_queue_.size() == 1);
+        auto mode_command = unit.write_queue_.front(); unit.write_queue_.pop();
+        assert(mode_command.raw[5] == 0x22);  // Mode-only commands carry no fan byte.
+        assert(unit.tcc_state.fan_half == half);
+        // A standard selection clears the half-step bit even if its base speed matches.
+        if (half) {
+          unit.make_call().set_fan_mode(standard[level]).perform();
+          pop_fan(command_fans[level] & ~1);
+        }
+      }
+    }
+    if (levels == 5) {
+      for (const char *mode : {TU2C_FAN_LOW_MEDIUM, TU2C_FAN_MEDIUM_HIGH}) {
+        unit.make_call().set_fan_mode(mode).perform();
+        pop_fan(mode == TU2C_FAN_LOW_MEDIUM ? 0x2B : 0x29);
+      }
+      unit.set_read_only(true);
+      unit.make_call().set_fan_mode(TU2C_FAN_LOW_MEDIUM).perform();
+      assert(unit.write_queue_.empty());
+      unit.set_read_only(false);
+      unit.boot_millis_ = millis();
+      unit.make_call().set_fan_mode(TU2C_FAN_LOW_MEDIUM).perform();
+      assert(unit.write_queue_.empty());
+    }
+  }
+  for (auto format : {FrameFormat::NORMAL, FrameFormat::HM, FrameFormat::A0, FrameFormat::ESTIA}) {
+    TestEstia unit;
+    unit.set_frame_format(format);
+    assert(unit.get_traits().get_supported_custom_fan_modes().empty());
+    unit.tcc_state.power = 1;
+    unit.tcc_state.mode = MODE_COOL;
+    unit.tcc_state.fan = FAN_PEED_LOW;
+    unit.tcc_state.fan_half = true;
+    unit.tcc_state.target_temp = 25;
+    unit.sync_from_received_state();
+    assert(!unit.has_custom_fan_mode());
+    unit.make_call().set_fan_mode(TU2C_FAN_LOW_MEDIUM).perform();
+    assert(unit.write_queue_.empty() && unit.commands_empty());
+  }
+}
+
 int main() {
   new (&App) Application();
   host::setup_preferences();
@@ -1096,6 +1187,7 @@ int main() {
   startup_address_checks();
   intake_air_temperature_checks();
   regular_temperature_checks();
+  tu2c_fan_level_checks();
   read_only_transmission_checks();
   command_retry_checks();
   TestEstia unit;

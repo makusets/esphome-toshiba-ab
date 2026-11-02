@@ -108,6 +108,9 @@ const uint8_t STATUS_DATA_FLAGS_BYTE = 4;
 const uint8_t STATUS_DATA_FANVENT_BYTE = 3;
 const uint8_t STATUS_DATA_FAN_MASK = 0b11100000;
 const uint8_t STATUS_DATA_FAN_SHIFT_BITS = 5;
+const uint8_t TU2C_STATUS_FAN_HALF_MASK = 0x10;
+static const char *const TU2C_FAN_LOW_MEDIUM = "Low-Medium";
+static const char *const TU2C_FAN_MEDIUM_HIGH = "Medium-High";
 const uint8_t STATUS_DATA_VENT_MASK = 0b00000100;
 const uint8_t STATUS_DATA_VENT_SHIFT_BITS = 2;
 const uint8_t STATUS_DATA_TARGET_TEMP_BYTE = 6;
@@ -848,6 +851,7 @@ private:
 struct TccState {
   uint8_t mode;
   uint8_t fan;
+  bool fan_half{false};
   uint8_t vent;
   float room_temp = NAN;
   float target_temp = NAN;
@@ -864,6 +868,7 @@ struct TccState {
   TccState(const struct TccState *src) {
     mode = src->mode;
     fan = src->fan;
+    fan_half = src->fan_half;
     vent = src->vent;
     room_temp = src->room_temp;
     target_temp = src->target_temp;
@@ -997,6 +1002,10 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   }
 
  public:
+  void set_fan_levels(uint8_t levels) { fan_levels_ = levels; }
+  bool uses_five_fan_levels_() const {
+    return data_reader.frame_format() == FrameFormat::TU2C && fan_levels_ == 5;
+  }
   bool is_hm_variant() const { return data_reader.frame_format() == FrameFormat::HM; }
   bool is_estia_first_gen() const { return data_reader.frame_format() == FrameFormat::ESTIA; }
 
@@ -1320,6 +1329,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   // have elapsed by the time an existing wall remote is first observed.
   bool remote_reannounce_pending_{false};
   uint32_t remote_reannounce_started_ms_{0};
+  uint8_t fan_levels_{5};
+  bool fan_modes_registered_{false};
   // If true, component will not send any commands to the central unit
   // (useful for read-only deployments). Default: false
   bool read_only_{false};

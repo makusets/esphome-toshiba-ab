@@ -58,6 +58,7 @@ CONF_COMMAND_MODE_READ = "command_mode_read"
 CONF_COMMAND_MODE_WRITE = "command_mode_write"
 CONF_FRAME_FORMAT = "frame_format"
 CONF_FILTER_FRAMES = "filter_frames"
+CONF_FAN_LEVELS = "fan_levels"
 CONF_PACKET_MIN_WAIT = "packet_min_wait"
 CONF_AUTORESET_ERRORS = "autoreset_errors"
 CONF_FRAME = "frame"
@@ -280,6 +281,14 @@ def _water_thermostat(default_name, default_max=65):
     return validate
 
 
+def _validate_fan_levels(config):
+    tu2c = config[CONF_FRAME_FORMAT] in ("tu2c", "u", "wrapped")
+    config.setdefault(CONF_FAN_LEVELS, 5 if tu2c else 3)
+    if config[CONF_FAN_LEVELS] == 5 and not tu2c:
+        raise cv.Invalid("fan_levels: 5 requires frame_format: tu2c")
+    return config
+
+
 def _validate_wall_mounted_louvre(config):
     if CONF_WALL_MOUNTED_LOUVRE in config and config[CONF_FRAME_FORMAT] not in (
         "auto", "n", "normal", "tcc-link"
@@ -308,6 +317,7 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_COMMAND_MODE_WRITE, default=0x80): cv.uint8_t,
         cv.Optional(CONF_FRAME_FORMAT, default="auto"): cv.one_of(*FRAME_FORMATS, lower=True),
         cv.Optional(CONF_FILTER_FRAMES, default=True): cv.boolean,
+        cv.Optional(CONF_FAN_LEVELS): cv.one_of(3, 5, int=True),
         cv.Optional(CONF_PACKET_MIN_WAIT, default="200ms"): cv.positive_time_period_milliseconds,
         cv.Optional(CONF_AUTORESET_ERRORS, default=False): cv.boolean,
         # Manual override for hardware UART0 RX. The common ESP8266 case
@@ -630,6 +640,7 @@ CONFIG_SCHEMA = cv.All(
     }
     ).extend(uart.UART_DEVICE_SCHEMA).extend(cv.COMPONENT_SCHEMA),
     _validate_wall_mounted_louvre,
+    _validate_fan_levels,
 )
 
 
@@ -745,6 +756,7 @@ async def to_code(config):
             cg.add(var.set_frame_format_auto())
         else:
             cg.add(var.set_frame_format(FRAME_FORMATS[config[CONF_FRAME_FORMAT]]))
+    cg.add(var.set_fan_levels(config[CONF_FAN_LEVELS]))
     if CONF_FILTER_FRAMES in config:
         cg.add(var.set_filter_frames(config[CONF_FILTER_FRAMES]))
     if CONF_PACKET_MIN_WAIT in config:
