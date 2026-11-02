@@ -19,4 +19,5 @@ climate:
   - platform: toshiba_ab
     name: Estia DHW
     frame_format: a0
-    zone2_climate: true
+    zone2_climate:
+      supports_heat: false

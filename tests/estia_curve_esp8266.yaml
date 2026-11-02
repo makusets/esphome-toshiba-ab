@@ -19,5 +19,8 @@ climate:
   - platform: toshiba_ab
     name: Estia DHW
     frame_format: estia
+    zone1_climate:
+      supports_heat: false
+      supports_auto: false
     curve_shift:
       name: Heating Curve Shift

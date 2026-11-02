@@ -260,7 +260,11 @@ def _add_automatic_entities(config):
 
 
 def _water_thermostat(default_name, default_max=65):
-    schema = climate.climate_schema(ToshibaAbEstiaZoneClimate)
+    schema = climate.climate_schema(ToshibaAbEstiaZoneClimate).extend({
+        cv.Optional("supports_heat", default=True): cv.boolean,
+        cv.Optional("supports_cool", default=True): cv.boolean,
+        cv.Optional("supports_auto", default=True): cv.boolean,
+    })
 
     def validate(value):
         if value is False:
@@ -712,11 +716,17 @@ async def to_code(config):
     if config.get(CONF_ZONE2_CLIMATE):
         zone2 = cg.new_Pvariable(config[CONF_ZONE2_CLIMATE][CONF_ID], var, 2)
         await climate.register_climate(zone2, config[CONF_ZONE2_CLIMATE])
+        cg.add(zone2.set_supports_heat(config[CONF_ZONE2_CLIMATE]["supports_heat"]))
+        cg.add(zone2.set_supports_cool(config[CONF_ZONE2_CLIMATE]["supports_cool"]))
+        cg.add(zone2.set_supports_auto(config[CONF_ZONE2_CLIMATE]["supports_auto"]))
         cg.add(var.set_zone2_climate(zone2))
 
     if config.get(CONF_ZONE1_CLIMATE):
         zone1_climate = cg.new_Pvariable(config[CONF_ZONE1_CLIMATE][CONF_ID], var)
         await climate.register_climate(zone1_climate, config[CONF_ZONE1_CLIMATE])
+        cg.add(zone1_climate.set_supports_heat(config[CONF_ZONE1_CLIMATE]["supports_heat"]))
+        cg.add(zone1_climate.set_supports_cool(config[CONF_ZONE1_CLIMATE]["supports_cool"]))
+        cg.add(zone1_climate.set_supports_auto(config[CONF_ZONE1_CLIMATE]["supports_auto"]))
         cg.add(var.set_zone1_climate(zone1_climate))
 
     if CONF_WALL_MOUNTED_LOUVRE in config:
