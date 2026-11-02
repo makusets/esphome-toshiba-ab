@@ -76,3 +76,7 @@ with Zone 1 enable and both heating-activity bits through the CRC-validated
 receive path. DHW reports its own enable; Zone 1 Auto and both temperature
 targets remain independent. These logical states do not establish physical
 heating or compressor operation.
+First-generation mode checks replay the Series 5 DHW-availability status bit
+with both captured status lengths. They verify Heat/Cool/Auto command bytes,
+independence from DHW On/Off, startup deferral and cancellation, live status
+updates, malformed/wrong-source rejection, and read-only/boot send guards.
