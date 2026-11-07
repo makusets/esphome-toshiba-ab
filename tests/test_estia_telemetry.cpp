@@ -2,6 +2,7 @@
 #include "esphome/core/application.h"
 #include "esphome/components/host/preferences.h"
 #include <cassert>
+#include <array>
 #include <cmath>
 #include <iostream>
 
@@ -837,6 +838,277 @@ static DataFrame first_gen_status(uint8_t enables, bool automatic, uint8_t activ
   return status;
 }
 
+static void first_gen_activity_checks() {
+  struct Step {
+    uint8_t enables;
+    uint8_t activity;
+    bool waterpump;
+    bool heating_cooling_compressor;
+    bool dhw_compressor;
+    bool dhw_resistor;
+  };
+  // Heat/Cool starts, circulation run-on, DHW and the observed changeover.
+  const Step steps[] = {
+      {0x40, 0x00, false, false, false, false},
+      {0x41, 0x00, false, false, false, false},
+      {0x41, 0x10, true, false, false, false},
+      {0x41, 0x12, true, true, false, false},
+      {0x40, 0x10, true, false, false, false},
+      {0x40, 0x00, false, false, false, false},
+      {0x21, 0x12, true, true, false, false},
+      {0x20, 0x10, true, false, false, false},
+      {0xC2, 0x10, true, false, false, false},
+      {0xC2, 0x18, true, false, true, false},
+      {0xC1, 0x02, false, true, false, false},
+      {0xC1, 0x00, false, false, false, false},
+      {0xC1, 0x10, true, false, false, false},
+      // Independent resistor and activity bits, including unrelated bits.
+      {0xC0, 0x04, false, false, false, true},
+      {0xC0, 0x1E, true, true, true, true},
+      {0xC3, 0xE1, false, false, false, false},
+  };
+  for (bool full_status : {false, true}) {
+    RecordingUart uart;
+    TestEstia unit;
+    unit.set_uart_parent(&uart);
+    unit.set_frame_format(FrameFormat::ESTIA);
+    unit.set_master_address(0x70);
+    unit.set_read_only(true);
+    binary_sensor::BinarySensor waterpump, heating_cooling_compressor, dhw_compressor, dhw_resistor;
+    unit.set_waterpump_active_binary_sensor(&waterpump);
+    unit.set_heating_cooling_compressor_active_binary_sensor(&heating_cooling_compressor);
+    unit.set_dhw_compressor_active_binary_sensor(&dhw_compressor);
+    unit.set_dhw_resistor_active_binary_sensor(&dhw_resistor);
+    assert(!waterpump.has_state() && !heating_cooling_compressor.has_state() && !dhw_compressor.has_state());
+    for (const auto &step : steps) {
+      auto status = first_gen_status(step.enables, false, step.activity);
+      const size_t checksum_index = full_status ? 17 : 13;
+      if (!full_status) {
+        status.raw[0] = 0x11;
+        status.raw[4] = 0xC0;
+      }
+      status.raw[checksum_index] = dn_checksum(status.raw, checksum_index);
+      assert(unit.receive_data_frame(&status));
+      assert(waterpump.has_state() && waterpump.state == step.waterpump);
+      assert(heating_cooling_compressor.has_state() &&
+             heating_cooling_compressor.state == step.heating_cooling_compressor);
+      assert(dhw_compressor.has_state() && dhw_compressor.state == step.dhw_compressor);
+      assert(dhw_resistor.has_state() && dhw_resistor.state == step.dhw_resistor);
+      // Neither corrupted packets nor another source may change these states.
+      status.raw[8] ^= 0x1E;
+      unit.receive_data_frame(&status);
+      assert(waterpump.state == step.waterpump &&
+             heating_cooling_compressor.state == step.heating_cooling_compressor);
+      assert(dhw_compressor.state == step.dhw_compressor && dhw_resistor.state == step.dhw_resistor);
+      status.raw[1] = 0x71;
+      status.raw[checksum_index] = dn_checksum(status.raw, checksum_index);
+      unit.receive_data_frame(&status);
+      assert(waterpump.state == step.waterpump &&
+             heating_cooling_compressor.state == step.heating_cooling_compressor);
+      assert(dhw_compressor.state == step.dhw_compressor && dhw_resistor.state == step.dhw_resistor);
+    }
+    assert(uart.transmitted == 0 && unit.commands_empty());
+  }
+}
+
+static void first_gen_feature_control_checks() {
+  for (bool dhw_available : {false, true}) {
+    for (uint8_t remote : {0x60, 0x61}) {
+      TestEstia unit;
+      unit.set_frame_format(FrameFormat::ESTIA);
+      unit.set_remote_address(remote);
+      unit.set_master_address(0x70);
+      unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+      ToshibaAbEstiaZoneClimate zone(&unit);
+      ToshibaAbEstiaFrostProtectionSwitch frost(&unit);
+      ToshibaAbEstiaNightSetbackSwitch night(&unit);
+      ToshibaAbEstiaSilentModeSwitch silent(&unit);
+      unit.set_zone1_climate(&zone);
+      unit.set_frost_protection_switch(&frost);
+      unit.set_night_setback_switch(&night);
+      unit.set_silent_mode_switch(&silent);
+      auto status = first_gen_status(dhw_available ? 0xC0 : 0x40, false, 0);
+      auto receive = [&]() {
+        status.raw[17] = dn_checksum(status.raw, 17);
+        assert(unit.receive_data_frame(&status));
+        assert(zone.mode == climate::CLIMATE_MODE_OFF && unit.mode == climate::CLIMATE_MODE_OFF);
+        near(zone.target_temperature, 45);
+        assert(unit.write_queue_.empty() && unit.commands_empty());
+      };
+      receive();
+      struct Feature {
+        switch_::Switch *sw;
+        std::array<uint8_t, 9> on;
+        std::array<uint8_t, 9> off;
+        uint8_t mask;
+      };
+      // Literal wall-controller captures. Frost was confirmed on main and aux;
+      // Night Setback and Silent Mode were captured on aux.
+      Feature features[] = {
+          {&frost, {0x0C, 0x60, 0x70, 0xE0, 0x01, 0x24, 0x02, 0x02, 0xE5},
+                   {0x0C, 0x60, 0x70, 0xE0, 0x01, 0x24, 0x02, 0x00, 0xE3}, 0x08},
+          {&night, {0x0C, 0x60, 0x70, 0xE0, 0x01, 0x24, 0x88, 0x08, 0x71},
+                   {0x0C, 0x60, 0x70, 0xE0, 0x01, 0x24, 0x88, 0x00, 0x69}, 0x20},
+          {&silent, {0x0C, 0x60, 0x70, 0xE0, 0x01, 0x24, 0x04, 0x04, 0xE9},
+                    {0x0C, 0x60, 0x70, 0xE0, 0x01, 0x24, 0x04, 0x00, 0xE5}, 0x10},
+      };
+      for (auto &feature : features) {
+        assert(feature.sw->has_state() && !feature.sw->state);
+        auto expect_command = [&](bool on) {
+          auto expected = on ? feature.on : feature.off;
+          expected[1] = remote;
+          expected.back() = dn_checksum(expected.data(), expected.size() - 1);
+          assert(unit.write_queue_.size() == 1 && unit.commands_empty());
+          const auto command = unit.write_queue_.front();
+          unit.write_queue_.pop();
+          assert(std::equal(expected.begin(), expected.end(), command.raw));
+        };
+        feature.sw->turn_on();
+        expect_command(true);  // No accompanying heating-On or setpoint command.
+        assert(!feature.sw->state && zone.mode == climate::CLIMATE_MODE_OFF);
+        status.raw[7] = feature.mask;
+        receive();
+        assert(feature.sw->state);
+        feature.sw->turn_off();
+        expect_command(false);
+        assert(feature.sw->state);  // Wait for master feedback, not optimistic state.
+        status.raw[7] = 0;
+        receive();
+        assert(!feature.sw->state);
+      }
+      unit.set_read_only(true);
+      for (auto &feature : features) {
+        feature.sw->turn_on();
+        feature.sw->turn_off();
+        assert(!feature.sw->state);
+      }
+      assert(unit.write_queue_.empty() && unit.commands_empty());
+    }
+  }
+  // Preserve both existing A0 routes. Silent Mode has no A0 implementation.
+  TestEstia a0;
+  a0.set_frame_format(FrameFormat::A0);
+  ToshibaAbEstiaFrostProtectionSwitch frost(&a0);
+  ToshibaAbEstiaNightSetbackSwitch night(&a0);
+  ToshibaAbEstiaSilentModeSwitch silent(&a0);
+  switch_::Switch *switches[] = {&frost, &night};
+  for (size_t index = 0; index < 2; index++) {
+    for (bool on : {true, false}) {
+      if (on) switches[index]->turn_on(); else switches[index]->turn_off();
+      const auto command = a0.pop_command();
+      assert(command[9] == 0x03 && command[10] == 0xC4);
+      assert(command[11] == (index == 0 ? 0x02 : 0x88));
+      assert(command[12] == (on ? (index == 0 ? 0x02 : 0x08) : 0x00));
+      assert(a0.commands_empty() && a0.write_queue_.empty());
+    }
+  }
+  silent.turn_on();
+  silent.turn_off();
+  assert(a0.commands_empty() && a0.write_queue_.empty());
+  a0.set_read_only(true);
+  frost.turn_on();
+  frost.turn_off();
+  night.turn_on();
+  night.turn_off();
+  assert(a0.commands_empty() && a0.write_queue_.empty());
+}
+
+static void first_gen_indicator_checks() {
+  struct Case {
+    uint8_t operation;
+    uint8_t features;
+    uint8_t activity;
+    uint16_t expected;
+  };
+  // Controller-icon replay cases; expected bits follow the sensor order below.
+  const Case cases[] = {
+      {0x20, 0x00, 0x00, 0x000},
+      {0x20, 0x00, 0x10, 0x001},  // water pump, including run-on with operation Off
+      {0x20, 0x00, 0x02, 0x002},  // heating/cooling compressor
+      {0x20, 0x00, 0x01, 0x004},  // hydro-unit resistor
+      {0x20, 0x00, 0x08, 0x008},  // DHW compressor
+      {0x20, 0x00, 0x04, 0x010},  // DHW cylinder resistor
+      {0x41, 0x00, 0x80, 0x020},  // external boiler/booster
+      {0x41, 0x08, 0x00, 0x000},  // frost protection is reported by its existing switch
+      {0x40, 0x08, 0x00, 0x000},  // frost status does not imply heating operation On
+      {0x41, 0x10, 0x00, 0x000},  // silent mode is reported by its switch
+      {0x41, 0x20, 0x00, 0x000},  // night setback is reported by its switch
+      {0xA2, 0x40, 0x00, 0x000},  // DHW boost is reported by its existing switch
+      {0xA2, 0x80, 0x00, 0x000},  // antibacterial programme is reported by its existing switch
+      {0x45, 0x00, 0x00, 0x040},  // test-mode wrench and flashing Zone 1
+      {0x40, 0x20, 0x00, 0x000},  // enabled setting survives operation Off
+      {0xC0, 0x80, 0x00, 0x000},  // enabled setting is not an active DHW cycle
+      {0x45, 0xF8, 0x9F, 0x07F},  // all known flags remain independent
+      {0x59, 0x07, 0x60, 0x000},  // unknown flags and Auto are not new indicators
+  };
+  for (bool full_status : {false, true}) {
+    RecordingUart uart;
+    TestEstia unit;
+    unit.set_uart_parent(&uart);
+    unit.set_frame_format(FrameFormat::ESTIA);
+    unit.set_master_address(0x70);
+    unit.set_read_only(true);
+    std::array<binary_sensor::BinarySensor, 7> sensors;
+    ToshibaAbEstiaDhwBoostSwitch dhw_boost(&unit);
+    ToshibaAbEstiaAntibacteriaSwitch antibacteria(&unit);
+    ToshibaAbEstiaFrostProtectionSwitch frost_protection(&unit);
+    ToshibaAbEstiaNightSetbackSwitch night_setback(&unit);
+    ToshibaAbEstiaSilentModeSwitch silent_mode(&unit);
+    unit.set_dhw_boost_switch(&dhw_boost);
+    unit.set_antibacteria_switch(&antibacteria);
+    unit.set_frost_protection_switch(&frost_protection);
+    unit.set_night_setback_switch(&night_setback);
+    unit.set_silent_mode_switch(&silent_mode);
+    unit.set_waterpump_active_binary_sensor(&sensors[0]);
+    unit.set_heating_cooling_compressor_active_binary_sensor(&sensors[1]);
+    unit.set_heating_resistor_active_binary_sensor(&sensors[2]);
+    unit.set_dhw_compressor_active_binary_sensor(&sensors[3]);
+    unit.set_dhw_resistor_active_binary_sensor(&sensors[4]);
+    unit.set_heating_external_booster_active_binary_sensor(&sensors[5]);
+    unit.set_test_mode_active_binary_sensor(&sensors[6]);
+    for (const auto &sensor : sensors) assert(!sensor.has_state());
+    assert(!dhw_boost.has_state() && !antibacteria.has_state() && !frost_protection.has_state());
+    assert(!night_setback.has_state() && !silent_mode.has_state());
+    for (const auto &test : cases) {
+      auto status = first_gen_status(test.operation, false, test.activity);
+      status.raw[7] = test.features;
+      const size_t checksum_index = full_status ? 17 : 13;
+      if (!full_status) {
+        status.raw[0] = 0x11;
+        status.raw[4] = 0xC0;
+      }
+      status.raw[checksum_index] = dn_checksum(status.raw, checksum_index);
+      assert(unit.receive_data_frame(&status));
+      uint16_t actual = 0;
+      for (size_t index = 0; index < sensors.size(); index++) {
+        assert(sensors[index].has_state());
+        if (sensors[index].state) actual |= 1U << index;
+      }
+      assert(actual == test.expected);
+      assert(dhw_boost.has_state() && dhw_boost.state == bool(test.features & 0x40));
+      assert(antibacteria.has_state() && antibacteria.state == bool(test.features & 0x80));
+      assert(frost_protection.has_state() && frost_protection.state == bool(test.features & 0x08));
+      assert(night_setback.has_state() && night_setback.state == bool(test.features & 0x20));
+      assert(silent_mode.has_state() && silent_mode.state == bool(test.features & 0x10));
+      status.raw[6] ^= 0x04;
+      status.raw[7] ^= 0xF8;
+      status.raw[8] ^= 0x9F;
+      unit.receive_data_frame(&status);  // corrupted checksum
+      status.raw[1] = 0x71;
+      status.raw[checksum_index] = dn_checksum(status.raw, checksum_index);
+      unit.receive_data_frame(&status);  // valid checksum, different source
+      for (size_t index = 0; index < sensors.size(); index++)
+        assert(sensors[index].state == bool(test.expected & (1U << index)));
+      assert(dhw_boost.state == bool(test.features & 0x40));
+      assert(antibacteria.state == bool(test.features & 0x80));
+      assert(frost_protection.state == bool(test.features & 0x08));
+      assert(night_setback.state == bool(test.features & 0x20));
+      assert(silent_mode.state == bool(test.features & 0x10));
+    }
+    assert(uart.transmitted == 0 && unit.commands_empty());
+  }
+}
+
 static void first_gen_dhw_demand_checks() {
   RecordingUart uart;
   TestEstia unit;
@@ -846,11 +1118,12 @@ static void first_gen_dhw_demand_checks() {
   unit.set_read_only(true);
   ToshibaAbEstiaZoneClimate zone(&unit);
   ToshibaAbEstiaZone1Switch enabled(&unit);
-  binary_sensor::BinarySensor resistor, pump;
+  binary_sensor::BinarySensor dhw_resistor, dhw_compressor;
   unit.set_zone1_climate(&zone);
   unit.set_zone1_switch(&enabled);
-  unit.set_hotwater_resistor_heating_binary_sensor(&resistor);
-  unit.set_hotwater_pump_heating_binary_sensor(&pump);
+  // Exercise the retained C++ setter aliases against the canonical DHW indicators.
+  unit.set_hotwater_resistor_heating_binary_sensor(&dhw_resistor);
+  unit.set_hotwater_pump_heating_binary_sensor(&dhw_compressor);
   for (bool automatic : {false, true}) {
     for (bool dhw : {false, true}) {
       for (bool zone_on : {false, true}) {
@@ -861,8 +1134,8 @@ static void first_gen_dhw_demand_checks() {
           assert(enabled.state == zone_on);
           assert(zone.mode == (!zone_on ? climate::CLIMATE_MODE_OFF
                               : automatic ? climate::CLIMATE_MODE_AUTO : climate::CLIMATE_MODE_HEAT));
-          assert(resistor.has_state() && resistor.state == bool(activity & 0x04));
-          assert(pump.has_state() && pump.state == bool(activity & 0x08));
+          assert(dhw_resistor.has_state() && dhw_resistor.state == bool(activity & 0x04));
+          assert(dhw_compressor.has_state() && dhw_compressor.state == bool(activity & 0x08));
           near(unit.target_temperature, 65); near(zone.target_temperature, 45);
         }
       }
@@ -1213,6 +1486,9 @@ int main() {
   dn_checks();
   new (&App) Application();
   first_gen_dhw_demand_checks();
+  first_gen_activity_checks();
+  first_gen_indicator_checks();
+  first_gen_feature_control_checks();
   control_checks();
   tu2c_address_checks();
   startup_address_checks();

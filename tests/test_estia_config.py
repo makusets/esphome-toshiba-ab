@@ -53,6 +53,60 @@ with tempfile.TemporaryDirectory(prefix="estia-config-", dir=work) as temp:
             if "estiazoneclimate" in entity:
                 values.setdefault(entity, {})[bound] = float(value)
         assert [(v["min"], v["max"]) for v in values.values()] == expected, values
+    indicators = (
+        "waterpump_active", "heating_cooling_compressor_active", "heating_resistor_active",
+        "dhw_compressor_active", "dhw_resistor_active", "heating_external_booster_active",
+        "test_mode_active",
+    )
+    config["climate"] = [{
+        "platform": "toshiba_ab", "name": "DHW", "frame_format": "estia",
+        **{option: {"name": option} for option in indicators},
+        "dhw_boost": {"name": "DHW Boost", "id": "dhw_boost_switch"},
+        "antibacteria": {"name": "Antibacteria", "id": "antibacteria_switch"},
+        "frost_protection": {"name": "Frost Protection", "id": "frost_protection_switch"},
+        "night_setback": {"name": "Night Setback", "id": "night_setback_switch"},
+        "silent_mode": {"name": "Silent Mode", "id": "silent_mode_switch"},
+    }]
+    path = temp / "activity.yaml"
+    path.write_text(yaml.safe_dump(config))
+    subprocess.run([sys.executable, "-m", "esphome", "compile", "--only-generate", str(path)], check=True)
+    source = (build / "src/main.cpp").read_text()
+    for option in indicators:
+        assert f"set_{option}_binary_sensor(" in source, option
+    for option in ("dhw_boost", "antibacteria", "frost_protection", "night_setback", "silent_mode"):
+        assert f"set_{option}_switch({option}_switch)" in source, option
+
+    for framing in ("a0", "normal", "auto"):
+        config["climate"] = [{"platform": "toshiba_ab", "name": "DHW", "frame_format": framing,
+                              "silent_mode": {"name": "Silent Mode"}}]
+        path = temp / f"silent-{framing}.yaml"
+        path.write_text(yaml.safe_dump(config))
+        result = subprocess.run([sys.executable, "-m", "esphome", "compile", "--only-generate", str(path)],
+                                capture_output=True, text=True)
+        assert result.returncode != 0
+        assert "silent_mode requires frame_format: estia" in result.stdout + result.stderr
+
+    for legacy, canonical in (
+        ("hotwater_pump_heating", "dhw_compressor_active"),
+        ("hotwater_resistor_heating", "dhw_resistor_active"),
+    ):
+        config["climate"] = [{
+            "platform": "toshiba_ab", "name": "DHW", "frame_format": "estia",
+            legacy: {"name": "Existing DHW Indicator", "id": "existing_dhw_indicator"},
+        }]
+        path = temp / f"alias-{legacy}.yaml"
+        path.write_text(yaml.safe_dump(config))
+        subprocess.run([sys.executable, "-m", "esphome", "compile", "--only-generate", str(path)], check=True)
+        source = (build / "src/main.cpp").read_text()
+        assert f"set_{canonical}_binary_sensor(existing_dhw_indicator)" in source
+        assert source.count(f"set_{canonical}_binary_sensor(") == 1
+        config["climate"][0][canonical] = {"name": "Duplicate DHW Indicator"}
+        path.write_text(yaml.safe_dump(config))
+        result = subprocess.run([sys.executable, "-m", "esphome", "compile", "--only-generate", str(path)],
+                                capture_output=True, text=True)
+        assert result.returncode != 0
+        assert legacy in result.stdout + result.stderr and canonical in result.stdout + result.stderr
+
     for framing in ["estia", "a0", "normal", "auto"]:
         config["climate"] = [{"platform": "toshiba_ab", "name": "DHW",
                               "frame_format": framing, "curve_shift": {"name": "Curve Shift"}}]

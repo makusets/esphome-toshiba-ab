@@ -48,25 +48,115 @@ Frames are identified by examining specific byte positions: typically **[3]**, *
 
 **Frame layout:**
 ```
-[0]         - Frame length (typically 0x13 or 0x14)
+[0]         - Frame length (0x11 short announcement or 0x15 full status)
 [1]         - Source: master address (0x70, or auto-detected)
 [2]         - Destination address (remote address, e.g., 0x60)
 [3]         - 0xE0 (status marker)
-[4]         - (reserved)
+[4]         - 0xC0 announcement or 0xA0 status reply
 [5]         - 0x31 (status signature)
-[6]         - Flags byte: bit[0]=Zone1 active, bit[1]=DHW active
-[7]         - Auto-mode and heating flags: bit[2]=auto mode active, bit[3..4]=heating indicators
-[8]         - Hot water heating flags: bit[2]=resistor heating, bit[3]=pump heating
+[6]         - Operation flags: bit[0]=Zone1 active, bit[1]=DHW active,
+              bit[2]=test mode, bits[5..6]=Cool (0x20) / Heat (0x40), bit[7]=DHW available
+[7]         - Feature flags: bit[2]=Auto, bit[3]=frost protection, bit[4]=silent,
+              bit[5]=night setback enabled, bit[6]=DHW boost, bit[7]=antibacteria enabled
+[8]         - Activity flags: bit[0]=heating resistor, bit[1]=heating/cooling compressor,
+              bit[2]=DHW resistor, bit[3]=DHW compressor, bit[4]=water pump,
+              bit[7]=heating external booster
 [9]         - DHW setpoint temperature (encoded as: °C = value/2 - 16)
 [10]        - Zone 1 setpoint temperature
-[11]        - (reserved/padding)
-[12]        - Zone 1 water temperature (°C = value/2 - 16)
-[13]        - (optional) Zone 2 setpoint
-[14]        - (optional) Zone 2 water temperature
+[11]        - Uninterpreted
+[12]        - DHW water temperature in full 0x15 status (zero means no DHW sensor)
+[13..14]    - Zone 1 water temperature slots in full 0x15 status;
+              the decoder uses populated byte 14, otherwise byte 13 (°C = value/2 - 16)
 ... [N-1]   - Checksum
 ```
 
 **Auto-detected master**: If `master_address_auto_` is enabled and this frame signature appears, the source address is recorded as the master.
+
+The optional `waterpump_active` binary sensor reports bit 4, including circulation
+after heating/cooling is disabled. `heating_cooling_compressor_active` reports
+bit 1 in both Heat and Cool. The `dhw_compressor_active` binary sensor
+reports bit 3 for the DHW compressor indication. These bits are independent of the
+Zone 1 and DHW operation flags in byte 6 and appear in both short `0x11` and full
+`0x15` master status frames.
+
+### Optional status indicators
+
+All options below are binary sensors under the `toshiba_ab` climate entry. They
+decode reported flags directly from valid master status frames; they do not send
+commands or add polling. An omitted option creates no sensor.
+
+| Option | Byte | Mask | Controller indication |
+| --- | --- | --- | --- |
+| `waterpump_active` | 8 | `0x10` | Internal pump 1 or expansion pump 2 |
+| `heating_cooling_compressor_active` | 8 | `0x02` | Heating/cooling compressor |
+| `heating_resistor_active` | 8 | `0x01` | Heating resistor inside the hydro unit |
+| `dhw_compressor_active` | 8 | `0x08` | DHW compressor |
+| `dhw_resistor_active` | 8 | `0x04` | DHW cylinder resistor |
+| `heating_external_booster_active` | 8 | `0x80` | Heating external booster, including an auxiliary boiler |
+| `test_mode_active` | 6 | `0x04` | Test Mode / Floor Drying wrench indication |
+
+`_active` describes the controller's reported operation/output status, not
+independent physical feedback. Feature switches have unsuffixed names. Their
+state can mean an enabled setting rather than a function currently being applied:
+`night_setback` and `antibacteria` report retained programme settings. The
+HWS-P1105XWHM3-E owner's manual, pages 11 and 13, describes Night Setback as a
+temperature shift within configured start/end times and Antibacteria as a
+recurring programme at a configured time and day interval. Their settings can
+remain enabled between operating periods. The `dhw_boost` and `antibacteria`
+switches report byte 7 masks `0x40` and `0x80`, respectively, and send commands to
+change those states. No duplicate binary sensors are provided for the switchable
+features.
+
+Icon visibility also depends on the operating context: Night Setback needs
+heating/cooling selected; Antibacteria needs DHW selected. Their switches expose
+the underlying flags even when that context is absent and the icon is hidden.
+
+### Feature switches
+
+These options are switches under the same climate entry. Their displayed states
+follow valid master status packets rather than optimistic command results.
+
+| Option | On / Off after `E0:01:24` | Status byte 7 |
+| --- | --- | --- |
+| `frost_protection` | `02:02` / `02:00` | `0x08` |
+| `night_setback` | `88:08` / `88:00` | `0x20` |
+| `silent_mode` | `04:04` / `04:00` | `0x10` |
+
+Each command pair had matching short/full master statuses and observed icons.
+These commands change only their feature: they do not also turn heating On,
+change its thermostat mode, or rewrite its setpoint.
+Read-only mode suppresses all three commands.
+
+### Silent Mode: active control versus local scheduling
+
+`silent_mode` sends the active-mode On/Off command when the HA switch is toggled;
+its reported state follows the master's `0x10` bit. It does not configure the
+wall controller's local Silent Mode enable (remote-controller FC09) or start/end
+hours (FC0A/0B). Those settings are separate from the bus active state.
+
+In the capture, enabling the controller's menu setting inside an
+already-started window sent no On command, even with the compressor running.
+At the next configured start boundary it sent `24:04:04`, the master set `0x10`,
+and the Zzz icon appeared.
+
+For timed control from HA, schedule `switch.turn_on` and `switch.turn_off` for the
+configured Silent Mode switch in an HA automation. The component has no internal
+timer and sends the command when called; equipment response is reported by the
+master. An enabled wall-controller timer can still issue its own commands, so
+choose which scheduler should control the active mode.
+
+### DHW configuration aliases and mapping evidence
+
+The DHW names were changed for consistency with the other status indicators:
+
+| Retained configuration alias | Canonical option |
+| --- | --- |
+| `hotwater_pump_heating` | `dhw_compressor_active` |
+| `hotwater_resistor_heating` | `dhw_resistor_active` |
+
+Both spellings configure the same sensor; existing names, IDs and sensor options
+are preserved. Specifying both spellings of one option is rejected instead of
+creating duplicate sensors. There is no planned removal of the older aliases.
 
 ---
 

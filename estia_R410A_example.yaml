@@ -121,9 +121,20 @@ climate:
     # first-generation remote error reset command after error 0x49.
     autoreset_errors: false
 
-    # Switch to activate boost mode for domestic-hot-water operation.
+    # These switches also report their states from master status packets.
     dhw_boost:
       name: "Estia DHW Boost"
+    antibacteria:
+      name: "Estia Antibacteria"
+    # Changes only Frost Protection; heating On/Off is controlled separately.
+    frost_protection:
+      name: "Estia Frost Protection"
+    night_setback:
+      name: "Estia Night Setback"
+    # Active Silent Mode control. An HA automation can schedule this switch;
+    # it does not edit the wall controller's local timer or FC settings.
+    silent_mode:
+      name: "Estia Silent Mode"
       
     # Optional separate sensors for values also shown by the Zone 1 thermostat.
     # Current water temperature uses status byte 14; some Series 4/5 models
@@ -140,12 +151,29 @@ climate:
       name: "Heating Curve Shift"
 
 
-    # Heating-state binary sensors decoded from hot-water status flags.
-    hotwater_pump_heating:
-      name: "Estia Hot Water Pump Heating"
+    # Optional first-generation status indicators.
+    # _active reports controller operation/output status.
+    waterpump_active:
+      name: "Estia Water Pump Active"
 
-    hotwater_resistor_heating:
-      name: "Estia Hot Water Resistor Heating"
+    # Compressor indication for heating or cooling.
+    heating_cooling_compressor_active:
+      name: "Estia Heating Cooling Compressor Active"
+
+    heating_resistor_active:
+      name: "Estia Heating Resistor Active"
+
+    # Older keys hotwater_pump_heating and hotwater_resistor_heating remain aliases
+    # for the two DHW options below. Use only one spelling of each option.
+    dhw_compressor_active:
+      name: "Estia DHW Compressor Active"
+    dhw_resistor_active:
+      name: "Estia DHW Resistor Active"
+
+    heating_external_booster_active:
+      name: "Estia Heating External Booster Active"
+    test_mode_active:
+      name: "Estia Test Mode Active"
 
 
     # Optional generic first-generation Estia sensor queries. These poll extra
@@ -205,12 +233,12 @@ climate:
 # Discharge pressure (PD) × 1/10  =   0x7A
 
 # Micro computer energized accumulation   (time × 1/100)  =   0xF0
-# Hot water compressor ON accumulation    (time × 1/100)  =   0xF1
+# DHW compressor ON accumulation (time × 1/100) =   0xF1
 # Cooling compressor ON accumulation  (time × 1/100)  =   0xF2
 # Heating compressor ON accumulation  (time × 1/100)  =   0xF3
 # Built-in AC pump operation accumulation (time × 1/100)  =   0xF4
-# Hot water cylinder heater operation accumulation (time × 1/100) =   0xF5
-# Backup heater operation accumulation (time × 1/100) =   0xF6
-# Booster heater operation accumulation (time × 1/100)    =   0xF7
+# DHW cylinder resistor operation accumulation (time × 1/100) =   0xF5
+# Heating resistor operation accumulation (time × 1/100) =   0xF6
+# Heating external booster operation accumulation (time × 1/100) =   0xF7
 
 
