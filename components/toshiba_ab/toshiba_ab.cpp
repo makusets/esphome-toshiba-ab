@@ -19,6 +19,11 @@ namespace toshiba_ab {
 
 static const char *const TAG = "tcc_link.climate";
 
+// A single first-generation 0x5C reply may carry a sentinel or a delayed
+// reply for another sensor. Do not let such a value jump the outdoor
+// temperature by more than this amount.
+static constexpr float ESTIA_OUTDOOR_TEMP_MAX_JUMP_C = 10.0f;
+
 static uint16_t estia_crc16(const uint8_t *data, size_t len);
 
 static uint8_t command_opcode_for_ack_log(const DataFrame &frame) {
@@ -4672,8 +4677,18 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     if (this->last_sensor_query_id_ != 0xFF) {
       for (auto &ps : this->polled_sensors_) {
         if (ps.id == this->last_sensor_query_id_) {
-          if (ps.sensor != nullptr) {
-            ps.sensor->publish_state(static_cast<float>(value) * ps.scale);
+          const float sensor_value = static_cast<float>(value) * ps.scale;
+          bool plausible = true;
+          if (ps.sensor != nullptr && ps.sensor == this->outdoor_temp_sensor_ &&
+              std::isfinite(ps.sensor->state) &&
+              std::fabs(sensor_value - ps.sensor->state) > ESTIA_OUTDOOR_TEMP_MAX_JUMP_C) {
+            ESP_LOGW(TAG,
+                     "Ignoring outdoor temperature spike %.1f °C (previous %.1f °C, raw 0x%04X)",
+                     sensor_value, ps.sensor->state, value);
+            plausible = false;
+          }
+          if (ps.sensor != nullptr && plausible) {
+            ps.sensor->publish_state(sensor_value);
           }
           published_polled_sensor = true;
           ESP_LOGD(TAG, "Estia first-gen sensor: id=0x%02X raw=0x%04X", this->last_sensor_query_id_, value);
@@ -4683,7 +4698,9 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
       this->sensor_query_outstanding_ = false;
       this->last_sensor_query_id_ = 0xFF;
     }
-    if (!published_polled_sensor && this->outdoor_temp_sensor_) this->outdoor_temp_sensor_->publish_state(value);
+    if (!published_polled_sensor) {
+      ESP_LOGW(TAG, "Ignoring unmatched Estia sensor reply 0x5C raw=0x%04X", value);
+    }
   } else if (src == this->master_address_ && frame->raw[4] == 0x80 && frame->raw[5] == 0xA2) {
     if (this->sensor_query_outstanding_ || this->last_sensor_query_id_ != 0xFF) {
       ESP_LOGD(TAG, "Estia first-gen sensor not available: id=0x%02X", this->last_sensor_query_id_);
