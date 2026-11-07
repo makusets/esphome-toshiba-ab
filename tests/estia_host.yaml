@@ -16,6 +16,10 @@ climate:
   - platform: toshiba_ab
     name: Estia DHW
     frame_format: a0
+    fault_code:
+      name: Pump Fault Code
+    fault_active:
+      name: Pump Fault Active
     zone2_climate: true
     night_setback:
       name: Night Setback
