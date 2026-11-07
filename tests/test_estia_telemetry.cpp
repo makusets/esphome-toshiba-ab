@@ -923,6 +923,12 @@ static void first_gen_feature_control_checks() {
       ToshibaAbEstiaFrostProtectionSwitch frost(&unit);
       ToshibaAbEstiaNightSetbackSwitch night(&unit);
       ToshibaAbEstiaSilentModeSwitch silent(&unit);
+      const std::array<switch_::Switch *, 3> switches{&frost, &night, &silent};
+      std::array<optional<bool>, 3> reported_switch_states{};
+      for (size_t index = 0; index < switches.size(); index++) {
+        switches[index]->add_on_state_callback(
+            [&, index](bool state) { reported_switch_states[index] = state; });
+      }
       unit.set_zone1_climate(&zone);
       unit.set_frost_protection_switch(&frost);
       unit.set_night_setback_switch(&night);
@@ -936,6 +942,9 @@ static void first_gen_feature_control_checks() {
         assert(unit.write_queue_.empty() && unit.commands_empty());
       };
       receive();
+      for (const auto &state : reported_switch_states) {
+        assert(state.has_value() && !state.value());
+      }
       struct Feature {
         switch_::Switch *sw;
         std::array<uint8_t, 9> on;
@@ -953,7 +962,7 @@ static void first_gen_feature_control_checks() {
                     {0x0C, 0x60, 0x70, 0xE0, 0x01, 0x24, 0x04, 0x00, 0xE5}, 0x10},
       };
       for (auto &feature : features) {
-        assert(feature.sw->has_state() && !feature.sw->state);
+        assert(!feature.sw->state);
         auto expect_command = [&](bool on) {
           auto expected = on ? feature.on : feature.off;
           expected[1] = remote;
@@ -1054,6 +1063,14 @@ static void first_gen_indicator_checks() {
     ToshibaAbEstiaFrostProtectionSwitch frost_protection(&unit);
     ToshibaAbEstiaNightSetbackSwitch night_setback(&unit);
     ToshibaAbEstiaSilentModeSwitch silent_mode(&unit);
+    const std::array<switch_::Switch *, 5> switches{
+        &dhw_boost, &antibacteria, &frost_protection, &night_setback, &silent_mode};
+    const std::array<uint8_t, 5> switch_masks{0x40, 0x80, 0x08, 0x20, 0x10};
+    std::array<optional<bool>, 5> reported_switch_states{};
+    for (size_t index = 0; index < switches.size(); index++) {
+      switches[index]->add_on_state_callback(
+          [&, index](bool state) { reported_switch_states[index] = state; });
+    }
     unit.set_dhw_boost_switch(&dhw_boost);
     unit.set_antibacteria_switch(&antibacteria);
     unit.set_frost_protection_switch(&frost_protection);
@@ -1067,8 +1084,7 @@ static void first_gen_indicator_checks() {
     unit.set_heating_external_booster_active_binary_sensor(&sensors[5]);
     unit.set_test_mode_active_binary_sensor(&sensors[6]);
     for (const auto &sensor : sensors) assert(!sensor.has_state());
-    assert(!dhw_boost.has_state() && !antibacteria.has_state() && !frost_protection.has_state());
-    assert(!night_setback.has_state() && !silent_mode.has_state());
+    for (const auto &state : reported_switch_states) assert(!state.has_value());
     for (const auto &test : cases) {
       auto status = first_gen_status(test.operation, false, test.activity);
       status.raw[7] = test.features;
@@ -1085,11 +1101,12 @@ static void first_gen_indicator_checks() {
         if (sensors[index].state) actual |= 1U << index;
       }
       assert(actual == test.expected);
-      assert(dhw_boost.has_state() && dhw_boost.state == bool(test.features & 0x40));
-      assert(antibacteria.has_state() && antibacteria.state == bool(test.features & 0x80));
-      assert(frost_protection.has_state() && frost_protection.state == bool(test.features & 0x08));
-      assert(night_setback.has_state() && night_setback.state == bool(test.features & 0x20));
-      assert(silent_mode.has_state() && silent_mode.state == bool(test.features & 0x10));
+      // ESPHome 2026.9.1 publishes callbacks without setting Switch::has_state().
+      for (size_t index = 0; index < switches.size(); index++) {
+        assert(reported_switch_states[index].has_value());
+        assert(reported_switch_states[index].value() == bool(test.features & switch_masks[index]));
+        assert(switches[index]->state == bool(test.features & switch_masks[index]));
+      }
       status.raw[6] ^= 0x04;
       status.raw[7] ^= 0xF8;
       status.raw[8] ^= 0x9F;
@@ -1099,11 +1116,10 @@ static void first_gen_indicator_checks() {
       unit.receive_data_frame(&status);  // valid checksum, different source
       for (size_t index = 0; index < sensors.size(); index++)
         assert(sensors[index].state == bool(test.expected & (1U << index)));
-      assert(dhw_boost.state == bool(test.features & 0x40));
-      assert(antibacteria.state == bool(test.features & 0x80));
-      assert(frost_protection.state == bool(test.features & 0x08));
-      assert(night_setback.state == bool(test.features & 0x20));
-      assert(silent_mode.state == bool(test.features & 0x10));
+      for (size_t index = 0; index < switches.size(); index++) {
+        assert(reported_switch_states[index].value() == bool(test.features & switch_masks[index]));
+        assert(switches[index]->state == bool(test.features & switch_masks[index]));
+      }
     }
     assert(uart.transmitted == 0 && unit.commands_empty());
   }
