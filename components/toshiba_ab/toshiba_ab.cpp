@@ -19,11 +19,6 @@ namespace toshiba_ab {
 
 static const char *const TAG = "tcc_link.climate";
 
-// A single first-generation 0x5C reply may carry a sentinel or a delayed
-// reply for another sensor. Do not let such a value jump the outdoor
-// temperature by more than this amount.
-static constexpr float ESTIA_OUTDOOR_TEMP_MAX_JUMP_C = 10.0f;
-
 static uint16_t estia_crc16(const uint8_t *data, size_t len);
 
 static uint8_t command_opcode_for_ack_log(const DataFrame &frame) {
@@ -4671,28 +4666,25 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
       }
       this->zone1_climate_->publish_state();
     }
-  } else if (src == this->master_address_ && frame->raw[4] == 0x80 && frame->raw[5] == 0x5C && len > 8) {
+  } else if (src == this->master_address_ &&
+             (frame->raw[2] == this->remote_address_ || frame->raw[2] == 0xFF) &&
+             frame->raw[4] == 0x80 && frame->raw[5] == 0x5C && len > 8) {
     const uint16_t value = encode_uint16(frame->raw[6], frame->raw[7]);
     bool published_polled_sensor = false;
     if (this->last_sensor_query_id_ != 0xFF) {
       for (auto &ps : this->polled_sensors_) {
         if (ps.id == this->last_sensor_query_id_) {
           const float sensor_value = static_cast<float>(value) * ps.scale;
-          bool plausible = true;
-          if (ps.sensor != nullptr && (ps.id == 0x61 || ps.sensor == this->outdoor_temp_sensor_)) {
-            const bool plausible_range = sensor_value >= -40.0f && sensor_value <= 60.0f;
-            const bool plausible_jump = !std::isfinite(ps.sensor->state) ||
-                                        std::fabs(sensor_value - ps.sensor->state) <=
-                                            ESTIA_OUTDOOR_TEMP_MAX_JUMP_C;
-            if (!plausible_range || !plausible_jump) {
+          if (ps.sensor != nullptr) {
+            if ((ps.id == 0x61 || ps.sensor == this->outdoor_temp_sensor_) &&
+                (sensor_value < -40.0f || sensor_value > 60.0f)) {
               ESP_LOGW(TAG,
-                       "Ignoring outdoor temperature spike %.1f °C (previous %.1f °C, raw 0x%04X)",
-                       sensor_value, ps.sensor->state, value);
-              plausible = false;
+                       "Ignoring outdoor temperature %.1f °C outside -40..60 °C (raw 0x%04X)",
+                       sensor_value, value);
+              ps.sensor->publish_state(NAN);
+            } else {
+              ps.sensor->publish_state(sensor_value);
             }
-          }
-          if (ps.sensor != nullptr && plausible) {
-            ps.sensor->publish_state(sensor_value);
           }
           published_polled_sensor = true;
           ESP_LOGD(TAG, "Estia first-gen sensor: id=0x%02X raw=0x%04X", this->last_sensor_query_id_, value);

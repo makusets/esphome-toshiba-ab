@@ -475,36 +475,41 @@ static void first_gen_outdoor_temperature_spike_checks() {
   TestEstia unit;
   unit.set_frame_format(FrameFormat::ESTIA);
   unit.set_master_address(0x70);
+  unit.set_remote_address(0x61);
   sensor::Sensor outdoor;
   unit.set_outdoor_temp_sensor(&outdoor);
   unit.add_polled_sensor(0x61, 1.0f, 0, &outdoor);
 
-  auto make_reply = [](uint16_t value) {
+  auto make_reply = [](uint16_t value, uint8_t dest = 0x61) {
     DataFrame f{};
-    const uint8_t base[] = {0x0C, 0x70, 0x60, 0xE0, 0x80, 0x5C, 0x00, 0x00, 0x00};
+    const uint8_t base[] = {0x0C, 0x70, dest, 0xE0, 0x80, 0x5C, 0x00, 0x00, 0x00};
     std::copy(std::begin(base), std::end(base), f.raw);
     f.raw[6] = value >> 8;
     f.raw[7] = value & 0xFF;
     f.raw[8] = dn_checksum(f.raw, 8);
     return f;
   };
-  auto feed = [&](uint16_t value, uint8_t query_id) {
+  auto feed = [&](uint16_t value, uint8_t query_id, uint8_t dest = 0x61) {
     unit.last_sensor_query_id_ = query_id;
     unit.sensor_query_outstanding_ = query_id != 0xFF;
-    auto reply = make_reply(value);
+    auto reply = make_reply(value, dest);
     unit.process_received_data_estia_first_gen_(&reply);
   };
 
   feed(5, 0x61);
   near(outdoor.state, 5.0f);
-  // 0x00A9 is a sentinel/foreign reply observed on first-generation R410A.
+  // Out-of-range sentinels publish unknown rather than an implausible value.
   feed(0x00A9, 0x61);
-  near(outdoor.state, 5.0f);
-  // Plausible-looking values from a delayed reply must not jump the sensor.
+  assert(!std::isfinite(outdoor.state));
+  feed(0xFFFF, 0x61);
+  assert(!std::isfinite(outdoor.state));
+  // A plausible value is accepted; the HA layer filters rate-of-change.
   feed(28, 0x61);
-  near(outdoor.state, 5.0f);
-  // A normal change is accepted.
+  near(outdoor.state, 28.0f);
   feed(8, 0x61);
+  near(outdoor.state, 8.0f);
+  // A reply addressed to another remote must not be consumed.
+  feed(0x00A9, 0x61, 0x60);
   near(outdoor.state, 8.0f);
   // Unmatched 0x5C replies must never be published as outdoor temperature.
   feed(0x00A9, 0xFF);
@@ -514,15 +519,16 @@ static void first_gen_outdoor_temperature_spike_checks() {
 
   // The R410A example defines the outdoor temperature as a polled sensor with
   // address 0x61, so outdoor_temp_sensor_ may be null. The ID check must still
-  // reject the sentinel.
+  // reject out-of-range values.
   TestEstia polled;
   polled.set_frame_format(FrameFormat::ESTIA);
   polled.set_master_address(0x70);
+  polled.set_remote_address(0x61);
   sensor::Sensor polled_outdoor;
   polled.add_polled_sensor(0x61, 1.0f, 0, &polled_outdoor);
   auto make_polled_reply = [](uint16_t value) {
     DataFrame f{};
-    const uint8_t base[] = {0x0C, 0x70, 0x60, 0xE0, 0x80, 0x5C, 0x00, 0x00, 0x00};
+    const uint8_t base[] = {0x0C, 0x70, 0x61, 0xE0, 0x80, 0x5C, 0x00, 0x00, 0x00};
     std::copy(std::begin(base), std::end(base), f.raw);
     f.raw[6] = value >> 8;
     f.raw[7] = value & 0xFF;
@@ -538,9 +544,9 @@ static void first_gen_outdoor_temperature_spike_checks() {
   feed_polled(5, 0x61);
   near(polled_outdoor.state, 5.0f);
   feed_polled(0xFFFF, 0x61);
-  near(polled_outdoor.state, 5.0f);
+  assert(!std::isfinite(polled_outdoor.state));
   feed_polled(0x00A9, 0x61);
-  near(polled_outdoor.state, 5.0f);
+  assert(!std::isfinite(polled_outdoor.state));
   feed_polled(8, 0x61);
   near(polled_outdoor.state, 8.0f);
 
@@ -549,6 +555,7 @@ static void first_gen_outdoor_temperature_spike_checks() {
   TestEstia startup;
   startup.set_frame_format(FrameFormat::ESTIA);
   startup.set_master_address(0x70);
+  startup.set_remote_address(0x61);
   sensor::Sensor startup_outdoor;
   startup.add_polled_sensor(0x61, 1.0f, 0, &startup_outdoor);
   auto feed_startup = [&](uint16_t value, uint8_t query_id) {
