@@ -511,6 +511,38 @@ static void first_gen_outdoor_temperature_spike_checks() {
   near(outdoor.state, 8.0f);
   feed(0x00A9, 0x02);
   near(outdoor.state, 8.0f);
+
+  // The R410A example defines the outdoor temperature as a polled sensor with
+  // address 0x61, so outdoor_temp_sensor_ may be null. The ID check must still
+  // reject the sentinel.
+  TestEstia polled;
+  polled.set_frame_format(FrameFormat::ESTIA);
+  polled.set_master_address(0x70);
+  sensor::Sensor polled_outdoor;
+  polled.add_polled_sensor(0x61, 1.0f, 0, &polled_outdoor);
+  auto make_polled_reply = [](uint16_t value) {
+    DataFrame f{};
+    const uint8_t base[] = {0x0C, 0x70, 0x60, 0xE0, 0x80, 0x5C, 0x00, 0x00, 0x00};
+    std::copy(std::begin(base), std::end(base), f.raw);
+    f.raw[6] = value >> 8;
+    f.raw[7] = value & 0xFF;
+    f.raw[8] = dn_checksum(f.raw, 8);
+    return f;
+  };
+  auto feed_polled = [&](uint16_t value, uint8_t query_id) {
+    polled.last_sensor_query_id_ = query_id;
+    polled.sensor_query_outstanding_ = query_id != 0xFF;
+    auto reply = make_polled_reply(value);
+    polled.process_received_data_estia_first_gen_(&reply);
+  };
+  feed_polled(5, 0x61);
+  near(polled_outdoor.state, 5.0f);
+  feed_polled(0xFFFF, 0x61);
+  near(polled_outdoor.state, 5.0f);
+  feed_polled(0x00A9, 0x61);
+  near(polled_outdoor.state, 5.0f);
+  feed_polled(8, 0x61);
+  near(polled_outdoor.state, 8.0f);
 }
 
 static DataFrame first_gen_mode_status(uint8_t flags, bool long_status) {

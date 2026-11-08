@@ -4679,7 +4679,7 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
         if (ps.id == this->last_sensor_query_id_) {
           const float sensor_value = static_cast<float>(value) * ps.scale;
           bool plausible = true;
-          if (ps.sensor != nullptr && ps.sensor == this->outdoor_temp_sensor_ &&
+          if (ps.sensor != nullptr && (ps.id == 0x61 || ps.sensor == this->outdoor_temp_sensor_) &&
               std::isfinite(ps.sensor->state) &&
               std::fabs(sensor_value - ps.sensor->state) > ESTIA_OUTDOOR_TEMP_MAX_JUMP_C) {
             ESP_LOGW(TAG,
