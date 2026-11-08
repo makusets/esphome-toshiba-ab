@@ -133,6 +133,9 @@ climate:
       name: "Estia Night Setback"
     # Active Silent Mode control. An HA automation can schedule this switch;
     # it does not edit the wall controller's local timer or FC settings.
+    # A physical remote in Header mode with FC09=0 cancels On;
+    # FC09=1 still allows timer commands.
+    # See docs/estia_first_gen_configuration.md for Header and Second mode requirements.
     silent_mode:
       name: "Estia Silent Mode"
       

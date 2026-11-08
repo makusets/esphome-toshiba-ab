@@ -4,6 +4,9 @@
 
 The **Estia first-generation protocol** (also called "Estia TU2C" in this codebase) is used by older Toshiba Estia R410A heat pumps. It uses a wrapped TU2C-style frame format with a simple 8-bit checksum.
 
+ESPHome options and setup are documented in the
+[configuration guide](estia_first_gen_configuration.md).
+
 **Key Characteristics:**
 - **UART**: 2400 baud, 8N1 (NO parity)
 - **Frame wrapping**: `F0:F0:[frame]:CRC:A0`
@@ -72,91 +75,28 @@ Frames are identified by examining specific byte positions: typically **[3]**, *
 
 **Auto-detected master**: If `master_address_auto_` is enabled and this frame signature appears, the source address is recorded as the master.
 
-The optional `waterpump_active` binary sensor reports bit 4, including circulation
-after heating/cooling is disabled. `heating_cooling_compressor_active` reports
-bit 1 in both Heat and Cool. The `dhw_compressor_active` binary sensor
-reports bit 3 for the DHW compressor indication. These bits are independent of the
-Zone 1 and DHW operation flags in byte 6 and appear in both short `0x11` and full
-`0x15` master status frames.
+The following operation/output flags are independent of the Zone 1 and DHW
+operation flags in byte 6 and appear in both short `0x11` and full `0x15` master
+status frames. They describe controller-reported status, not independent physical
+feedback.
 
-### Optional status indicators
-
-All options below are binary sensors under the `toshiba_ab` climate entry. They
-decode reported flags directly from valid master status frames; they do not send
-commands or add polling. An omitted option creates no sensor.
-
-| Option | Byte | Mask | Controller indication |
-| --- | --- | --- | --- |
-| `waterpump_active` | 8 | `0x10` | Internal pump 1 or expansion pump 2 |
-| `heating_cooling_compressor_active` | 8 | `0x02` | Heating/cooling compressor |
-| `heating_resistor_active` | 8 | `0x01` | Heating resistor inside the hydro unit |
-| `dhw_compressor_active` | 8 | `0x08` | DHW compressor |
-| `dhw_resistor_active` | 8 | `0x04` | DHW cylinder resistor |
-| `heating_external_booster_active` | 8 | `0x80` | Heating external booster, including an auxiliary boiler |
-| `test_mode_active` | 6 | `0x04` | Test Mode / Floor Drying wrench indication |
-
-`_active` describes the controller's reported operation/output status, not
-independent physical feedback. Feature switches have unsuffixed names. Their
-state can mean an enabled setting rather than a function currently being applied:
-`night_setback` and `antibacteria` report retained programme settings. The
-HWS-P1105XWHM3-E owner's manual, pages 11 and 13, describes Night Setback as a
-temperature shift within configured start/end times and Antibacteria as a
-recurring programme at a configured time and day interval. Their settings can
-remain enabled between operating periods. The `dhw_boost` and `antibacteria`
-switches report byte 7 masks `0x40` and `0x80`, respectively, and send commands to
-change those states. No duplicate binary sensors are provided for the switchable
-features.
-
-Icon visibility also depends on the operating context: Night Setback needs
-heating/cooling selected; Antibacteria needs DHW selected. Their switches expose
-the underlying flags even when that context is absent and the icon is hidden.
-
-### Feature switches
-
-These options are switches under the same climate entry. Their displayed states
-follow valid master status packets rather than optimistic command results.
-
-| Option | On / Off after `E0:01:24` | Status byte 7 |
+| Byte | Mask | Controller indication |
 | --- | --- | --- |
-| `frost_protection` | `02:02` / `02:00` | `0x08` |
-| `night_setback` | `88:08` / `88:00` | `0x20` |
-| `silent_mode` | `04:04` / `04:00` | `0x10` |
+| 8 | `0x10` | Internal pump 1 or expansion pump 2 |
+| 8 | `0x02` | Heating/cooling compressor |
+| 8 | `0x01` | Heating resistor inside the hydro unit |
+| 8 | `0x08` | DHW compressor |
+| 8 | `0x04` | DHW cylinder resistor |
+| 8 | `0x80` | Heating external booster, including an auxiliary boiler |
+| 6 | `0x04` | Test Mode / Floor Drying wrench indication |
 
-Each command pair had matching short/full master statuses and observed icons.
-These commands change only their feature: they do not also turn heating On,
-change its thermostat mode, or rewrite its setpoint.
-Read-only mode suppresses all three commands.
+The water-pump status bit can remain set during circulation after heating/cooling
+is disabled. The heating/cooling compressor bit applies in both Heat and Cool.
 
-### Silent Mode: active control versus local scheduling
-
-`silent_mode` sends the active-mode On/Off command when the HA switch is toggled;
-its reported state follows the master's `0x10` bit. It does not configure the
-wall controller's local Silent Mode enable (remote-controller FC09) or start/end
-hours (FC0A/0B). Those settings are separate from the bus active state.
-
-In the capture, enabling the controller's menu setting inside an
-already-started window sent no On command, even with the compressor running.
-At the next configured start boundary it sent `24:04:04`, the master set `0x10`,
-and the Zzz icon appeared.
-
-For timed control from HA, schedule `switch.turn_on` and `switch.turn_off` for the
-configured Silent Mode switch in an HA automation. The component has no internal
-timer and sends the command when called; equipment response is reported by the
-master. An enabled wall-controller timer can still issue its own commands, so
-choose which scheduler should control the active mode.
-
-### DHW configuration aliases and mapping evidence
-
-The DHW names were changed for consistency with the other status indicators:
-
-| Retained configuration alias | Canonical option |
-| --- | --- |
-| `hotwater_pump_heating` | `dhw_compressor_active` |
-| `hotwater_resistor_heating` | `dhw_resistor_active` |
-
-Both spellings configure the same sensor; existing names, IDs and sensor options
-are preserved. Specifying both spellings of one option is rejected instead of
-creating duplicate sensors. There is no planned removal of the older aliases.
+Byte 7 masks `0x20` (Night Setback) and `0x80` (Antibacteria) report retained
+programme settings that can remain enabled between operating periods. The
+Night Setback icon needs heating/cooling selected; the Antibacteria icon needs
+DHW selected. The underlying flags can remain set while their icons are hidden.
 
 ---
 
@@ -276,6 +216,22 @@ Common sub-commands at [6]:
 
 ---
 
+#### 10. **Feature Control Commands**
+
+Frost Protection, Night Setback and Silent Mode use `E0:01:24` commands:
+
+| Feature | On / Off after `E0:01:24` | Status byte 7 mask |
+| --- | --- | --- |
+| Frost Protection | `02:02` / `02:00` | `0x08` |
+| Night Setback | `88:08` / `88:00` | `0x20` |
+| Silent Mode | `04:04` / `04:00` | `0x10` |
+
+Each command pair had matching short/full master statuses and observed icons.
+These commands change only their feature: they do not also turn heating On,
+change the selected Heat/Cool mode, or rewrite its setpoint.
+
+---
+
 ## Address Space
 
 | Address Range | Meaning | Default | Notes |
@@ -348,6 +304,27 @@ When `master_address_auto_` is enabled:
 2. Master responds with sensor data (0x80:0x5C) or "unavailable" (0x80:0xA2)
 3. Query is marked complete; next polled sensor can be queried
 4. If no response within timeout (~2.5s), query is abandoned
+
+---
+
+### Silent Mode controller behaviour
+
+The active Silent Mode flag in status byte 7 (`0x10`) is separate from the
+physical remote's local enable (FC09) and start/end hours (FC0A/0B). Those FC
+numbers belong to the remote controller; the hydro unit uses the same numbers
+for different settings.
+
+With FC09 = 0, the physical remote in Header mode was observed responding to an
+active Silent Mode flag with `E0:01:24:04:00`, which clears it. With FC09 = 1,
+externally issued On/Off commands were accepted without this cancellation,
+including outside the local
+schedule window. A physical remote in Second mode did not cancel those commands.
+
+Enabling the local setting on the physical remote in Header mode inside an
+already-started window sent no On command, even with the compressor running.
+At the next configured start boundary it sent `E0:01:24:04:04`, the master set
+`0x10`, and the Zzz icon
+appeared. The exact scheduled stop-boundary timing has not been verified.
 
 ---
 
@@ -521,6 +498,7 @@ Enable `DEBUG` log level on the `TAG` to see all frame details.
 
 ## References
 
+- [Controller manuals](estia_first_gen_configuration.md#manuals) — programme settings and controller roles
 - Source: `components/toshiba_ab/toshiba_ab.cpp` — `process_received_data_estia_first_gen_()` (line 3264)
 - Frame building: `toshiba_ab.cpp` — `make_estia_first_gen_frame()` (line 3203)
 - Commands: `send_estia_first_gen_*()` family of functions
