@@ -543,6 +543,24 @@ static void first_gen_outdoor_temperature_spike_checks() {
   near(polled_outdoor.state, 5.0f);
   feed_polled(8, 0x61);
   near(polled_outdoor.state, 8.0f);
+
+  // A sentinel arriving before the first valid sample must not be published
+  // just because the previous state is still unknown.
+  TestEstia startup;
+  startup.set_frame_format(FrameFormat::ESTIA);
+  startup.set_master_address(0x70);
+  sensor::Sensor startup_outdoor;
+  startup.add_polled_sensor(0x61, 1.0f, 0, &startup_outdoor);
+  auto feed_startup = [&](uint16_t value, uint8_t query_id) {
+    startup.last_sensor_query_id_ = query_id;
+    startup.sensor_query_outstanding_ = query_id != 0xFF;
+    auto reply = make_polled_reply(value);
+    startup.process_received_data_estia_first_gen_(&reply);
+  };
+  feed_startup(0xFFFF, 0x61);
+  assert(!std::isfinite(startup_outdoor.state));
+  feed_startup(5, 0x61);
+  near(startup_outdoor.state, 5.0f);
 }
 
 static DataFrame first_gen_mode_status(uint8_t flags, bool long_status) {

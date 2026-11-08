@@ -4679,13 +4679,17 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
         if (ps.id == this->last_sensor_query_id_) {
           const float sensor_value = static_cast<float>(value) * ps.scale;
           bool plausible = true;
-          if (ps.sensor != nullptr && (ps.id == 0x61 || ps.sensor == this->outdoor_temp_sensor_) &&
-              std::isfinite(ps.sensor->state) &&
-              std::fabs(sensor_value - ps.sensor->state) > ESTIA_OUTDOOR_TEMP_MAX_JUMP_C) {
-            ESP_LOGW(TAG,
-                     "Ignoring outdoor temperature spike %.1f °C (previous %.1f °C, raw 0x%04X)",
-                     sensor_value, ps.sensor->state, value);
-            plausible = false;
+          if (ps.sensor != nullptr && (ps.id == 0x61 || ps.sensor == this->outdoor_temp_sensor_)) {
+            const bool plausible_range = sensor_value >= -40.0f && sensor_value <= 60.0f;
+            const bool plausible_jump = !std::isfinite(ps.sensor->state) ||
+                                        std::fabs(sensor_value - ps.sensor->state) <=
+                                            ESTIA_OUTDOOR_TEMP_MAX_JUMP_C;
+            if (!plausible_range || !plausible_jump) {
+              ESP_LOGW(TAG,
+                       "Ignoring outdoor temperature spike %.1f °C (previous %.1f °C, raw 0x%04X)",
+                       sensor_value, ps.sensor->state, value);
+              plausible = false;
+            }
           }
           if (ps.sensor != nullptr && plausible) {
             ps.sensor->publish_state(sensor_value);
