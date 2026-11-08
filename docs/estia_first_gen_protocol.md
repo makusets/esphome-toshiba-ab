@@ -156,9 +156,27 @@ Common sub-commands at [6]:
 
 ---
 
-#### 7. **Remote Status (Echo)**
+#### 7. **Remote Status**
 **Signature**: `raw[3] == 0xE0 && raw[5] == 0x31`  
-**Meaning**: Remote reports its own status (mirrors master status structure)
+**Meaning**: Remote reports its own status; `raw[6] == 0x00` means OK.
+
+The Header controller at `0x60` sends the following approximately every 30 seconds:
+
+```
+0B:60:70:E0:61:31:00:4D
+```
+
+The master responds with a full `E0:A0:31` status broadcast. The Second controller
+was observed sending PINGs without this status announcement. Whether another
+source address can satisfy the master's Header communication requirement is
+unverified.
+
+The component sends this announcement at `ping_interval` while its selected
+remote address is `0x60`, after startup silence and master-address confirmation.
+`ping: false` or `read_only: true` disables it. Automatic collision recovery stops
+the announcement when the component moves away from `0x60`. This implements the
+periodic status announcement only; the Header startup queries and separate PING
+exchange are not added here.
 
 ---
 

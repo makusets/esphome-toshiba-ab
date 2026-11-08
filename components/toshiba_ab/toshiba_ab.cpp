@@ -1707,6 +1707,10 @@ void ToshibaAbClimate::setup() {
   if (this->ping_enabled_) {
     this->set_interval(this->ping_interval_ms_, [this]() {
       const FrameFormat format = this->data_reader.frame_format();
+      if (format == FrameFormat::ESTIA) {
+        this->send_estia_first_gen_header_status_();
+        return;
+      }
       if (format != FrameFormat::NORMAL && format != FrameFormat::HM) {
         return;
       }
@@ -4400,6 +4404,14 @@ void ToshibaAbClimate::send_estia_first_gen_zone1_setpoint(float target_temp, cl
 void ToshibaAbClimate::send_estia_first_gen_request_data(uint8_t request_code) {
   if (this->read_only_) return;
   const uint8_t payload[] = {0xE0, 0x41, 0x5C, 0x70, request_code};
+  this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
+}
+
+void ToshibaAbClimate::send_estia_first_gen_header_status_() {
+  // Only the physical Header (0x60) was observed sending this announcement.
+  if (!this->is_estia_first_gen() || !this->ping_enabled_ ||
+      this->remote_address_ != TOSHIBA_ESTIA_REMOTE_DEFAULT || !this->master_address_confirmed_) return;
+  const uint8_t payload[] = {0xE0, 0x61, 0x31, 0x00};
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 

@@ -701,6 +701,47 @@ static void intake_air_temperature_checks() {
   near(current.state, 4.2f);
 }
 
+static void first_gen_header_status_checks() {
+  TestEstia unit;
+  unit.set_frame_format(FrameFormat::ESTIA);
+  unit.set_master_address(0x70);
+  unit.boot_millis_ = millis();
+  unit.send_estia_first_gen_header_status_();
+  assert(unit.write_queue_.empty());  // Preserve startup silence.
+  unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+  unit.master_address_confirmed_ = false;
+  unit.send_estia_first_gen_header_status_();
+  assert(unit.write_queue_.empty());
+  unit.master_address_confirmed_ = true;
+  unit.send_estia_first_gen_header_status_();
+  assert(unit.write_queue_.size() == 1);
+  const auto command = unit.write_queue_.front();
+  const std::vector<uint8_t> captured{0x0B, 0x60, 0x70, 0xE0, 0x61, 0x31, 0x00, 0x4D};
+  assert(command.is_tu2c() && command.get_data() == captured);
+  assert(!unit.should_track_command_ack_(command));
+  unit.write_queue_.pop();
+  unit.set_read_only(true);
+  unit.send_estia_first_gen_header_status_();
+  assert(unit.write_queue_.empty());
+  unit.set_read_only(false);
+  unit.set_ping_enabled(false);
+  unit.send_estia_first_gen_header_status_();
+  assert(unit.write_queue_.empty());
+  unit.set_ping_enabled(true);
+  unit.send_estia_first_gen_header_status_();
+  assert(unit.write_queue_.size() == 1);
+  unit.handle_remote_address_collision_(0x60, "test");
+  assert(unit.remote_address_ == 0x61 && unit.write_queue_.empty());
+  unit.send_estia_first_gen_header_status_();
+  assert(unit.write_queue_.empty());  // A replacement address is not the Header.
+  for (auto format : {FrameFormat::NORMAL, FrameFormat::HM, FrameFormat::TU2C, FrameFormat::A0}) {
+    unit.set_frame_format(format);
+    unit.set_remote_address(0x60);
+    unit.send_estia_first_gen_header_status_();
+    assert(unit.write_queue_.empty());
+  }
+}
+
 static void regular_temperature_checks() {
   TestEstia unit;
   unit.set_frame_format(FrameFormat::TU2C);
@@ -1218,6 +1259,7 @@ int main() {
   startup_address_checks();
   intake_air_temperature_checks();
   regular_temperature_checks();
+  first_gen_header_status_checks();
   tu2c_fan_level_checks();
   read_only_transmission_checks();
   command_retry_checks();
