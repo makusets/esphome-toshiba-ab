@@ -503,6 +503,11 @@ static void first_gen_outdoor_temperature_spike_checks() {
   assert(!std::isfinite(outdoor.state));
   feed(0xFFFF, 0x61);
   assert(!std::isfinite(outdoor.state));
+  feed(0xFFFE, 0x61);
+  assert(!std::isfinite(outdoor.state));
+  // Signed temperatures: 0xFFFB is -5 C, not 65531.
+  feed(0xFFFB, 0x61);
+  near(outdoor.state, -5.0f);
   // A plausible value is accepted; the HA layer filters rate-of-change.
   feed(28, 0x61);
   near(outdoor.state, 28.0f);
@@ -545,10 +550,22 @@ static void first_gen_outdoor_temperature_spike_checks() {
   near(polled_outdoor.state, 5.0f);
   feed_polled(0xFFFF, 0x61);
   assert(!std::isfinite(polled_outdoor.state));
+  feed_polled(0xFFFE, 0x61);
+  assert(!std::isfinite(polled_outdoor.state));
+  feed_polled(0xFFFB, 0x61);
+  near(polled_outdoor.state, -5.0f);
   feed_polled(0x00A9, 0x61);
   assert(!std::isfinite(polled_outdoor.state));
   feed_polled(8, 0x61);
   near(polled_outdoor.state, 8.0f);
+
+  // Non-outdoor 0x5C sensors are signed too (e.g. TS/TE at -2 C).
+  sensor::Sensor signed_temp;
+  polled.add_polled_sensor(0x02, 1.0f, 0, &signed_temp);
+  feed_polled(0xFFFE, 0x02);
+  near(signed_temp.state, -2.0f);
+  feed_polled(5, 0x02);
+  near(signed_temp.state, 5.0f);
 
   // A sentinel arriving before the first valid sample must not be published
   // just because the previous state is still unknown.

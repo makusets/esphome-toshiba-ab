@@ -4674,13 +4674,16 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     if (this->last_sensor_query_id_ != 0xFF) {
       for (auto &ps : this->polled_sensors_) {
         if (ps.id == this->last_sensor_query_id_) {
-          const float sensor_value = static_cast<float>(value) * ps.scale;
+          const bool is_outdoor =
+              ps.sensor != nullptr && (ps.id == 0x61 || ps.sensor == this->outdoor_temp_sensor_);
+          const bool outdoor_sentinel = is_outdoor && (value == 0xFFFF || value == 0xFFFE);
+          // 0x5C carries signed 16-bit values; refrigerant temperatures can be
+          // negative. The outdoor sentinel is still raw 0xFFFF/0xFFFE.
+          const float sensor_value = static_cast<float>(static_cast<int16_t>(value)) * ps.scale;
           if (ps.sensor != nullptr) {
-            if ((ps.id == 0x61 || ps.sensor == this->outdoor_temp_sensor_) &&
-                (sensor_value < -40.0f || sensor_value > 60.0f)) {
-              ESP_LOGW(TAG,
-                       "Ignoring outdoor temperature %.1f °C outside -40..60 °C (raw 0x%04X)",
-                       sensor_value, value);
+            if (outdoor_sentinel || (is_outdoor && (sensor_value < -40.0f || sensor_value > 60.0f))) {
+              ESP_LOGW(TAG, "Ignoring outdoor temperature %s (raw 0x%04X)",
+                       outdoor_sentinel ? "sentinel" : "outside -40..60 C", value);
               ps.sensor->publish_state(NAN);
             } else {
               ps.sensor->publish_state(sensor_value);
