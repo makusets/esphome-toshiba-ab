@@ -498,16 +498,15 @@ static void first_gen_outdoor_temperature_spike_checks() {
 
   feed(5, 0x61);
   near(outdoor.state, 5.0f);
-  // Out-of-range sentinels publish unknown rather than an implausible value.
-  feed(0x00A9, 0x61);
-  assert(!std::isfinite(outdoor.state));
+  // Signed values: 0xFFFF/0xFFFE/0xFFFB are -1/-2/-5 C, not sentinels.
   feed(0xFFFF, 0x61);
-  assert(!std::isfinite(outdoor.state));
+  near(outdoor.state, -1.0f);
   feed(0xFFFE, 0x61);
-  assert(!std::isfinite(outdoor.state));
-  // Signed temperatures: 0xFFFB is -5 C, not 65531.
+  near(outdoor.state, -2.0f);
   feed(0xFFFB, 0x61);
   near(outdoor.state, -5.0f);
+  feed(0x00A9, 0x61);
+  near(outdoor.state, 169.0f);
   // A plausible value is accepted; the HA layer filters rate-of-change.
   feed(28, 0x61);
   near(outdoor.state, 28.0f);
@@ -549,13 +548,13 @@ static void first_gen_outdoor_temperature_spike_checks() {
   feed_polled(5, 0x61);
   near(polled_outdoor.state, 5.0f);
   feed_polled(0xFFFF, 0x61);
-  assert(!std::isfinite(polled_outdoor.state));
+  near(polled_outdoor.state, -1.0f);
   feed_polled(0xFFFE, 0x61);
-  assert(!std::isfinite(polled_outdoor.state));
+  near(polled_outdoor.state, -2.0f);
   feed_polled(0xFFFB, 0x61);
   near(polled_outdoor.state, -5.0f);
   feed_polled(0x00A9, 0x61);
-  assert(!std::isfinite(polled_outdoor.state));
+  near(polled_outdoor.state, 169.0f);
   feed_polled(8, 0x61);
   near(polled_outdoor.state, 8.0f);
 
@@ -582,7 +581,7 @@ static void first_gen_outdoor_temperature_spike_checks() {
     startup.process_received_data_estia_first_gen_(&reply);
   };
   feed_startup(0xFFFF, 0x61);
-  assert(!std::isfinite(startup_outdoor.state));
+  near(startup_outdoor.state, -1.0f);
   feed_startup(5, 0x61);
   near(startup_outdoor.state, 5.0f);
 }
