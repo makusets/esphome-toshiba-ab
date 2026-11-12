@@ -54,6 +54,11 @@ esphome compile tests/estia_esp8266.yaml
 
 GitHub Actions runs these checks and the ESP8266 build for pull requests.
 
+A0 demand checks verify unknown startup without zero heartbeats, master-echo and
+interface payload offsets, CRC/length/address/range rejection, retained AI2/AI3
+channels, explicit zero, pending-command protection, startup silence, read-only
+decoding, enable/disable behavior and isolation from the other protocols.
+
 Custom preset API compatibility checks (legacy traits API, current entity API,
 and transitional releases exposing both):
 

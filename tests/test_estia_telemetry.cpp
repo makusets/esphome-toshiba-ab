@@ -1380,6 +1380,138 @@ static void master_keepalive_silence_checks() {
   }
 }
 
+static DataFrame a0_demand_report(uint8_t type, uint8_t ai1, uint8_t ai2 = 0, uint8_t ai3 = 0,
+                                 uint16_t source = 0x0800, uint16_t destination = 0x00FE) {
+  const size_t end = type == 0x58 ? 15 : type == 0x55 ? 14 : 12;
+  auto f = frame(type, type == 0x11 ? 0x005F : 0x009F, end);
+  f.raw[3] = source >> 8; f.raw[4] = source;
+  f.raw[5] = destination >> 8; f.raw[6] = destination;
+  if (type == 0x58) {
+    // Master echo layout reported in #197: AI1 at payload[0], AI2/3 at [4]/[5].
+    f.raw[9] = ai1; f.raw[10] = 0; f.raw[11] = 137;
+    f.raw[13] = ai2; f.raw[14] = ai3;
+  } else if (type == 0x55) {
+    f.raw[9] = 0; f.raw[10] = ai1; f.raw[11] = 0x14;
+    f.raw[12] = ai2; f.raw[13] = ai3;
+  } else {
+    f.raw[9] = ai1; f.raw[10] = ai2; f.raw[11] = ai3;
+  }
+  const auto crc = f.calculate_estia_crc();
+  f.raw[end] = crc >> 8; f.raw[end + 1] = crc;
+  return f;
+}
+
+static void a0_demand_startup_checks() {
+  RecordingUart uart;
+  TestEstia unit;
+  unit.set_uart_parent(&uart);
+  unit.set_frame_format(FrameFormat::A0);
+  unit.set_autonomous(false);
+  unit.set_demand_enabled(true);
+  unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+  unit.estia_last_demand_heartbeat_ms_ = millis() - 5000;
+  sensor::Sensor reported;
+  unit.set_demand_sensor(&reported);
+  unit.loop();
+  unit.send_estia_demand_heartbeat();
+  assert(!unit.estia_demand_value_.has_value() && !reported.has_state());
+  assert(unit.commands_empty() && uart.transmitted == 0);  // Never bootstrap by sending zero.
+  auto invalid = a0_demand_report(0x58, 6);
+  invalid.raw[16] ^= 1;
+  assert(!unit.receive_data_frame(&invalid));
+  for (auto wrong : {a0_demand_report(0x58, 6, 0, 0, 0x0801),
+                     a0_demand_report(0x58, 6, 0, 0, 0x0800, 0x0099),
+                     a0_demand_report(0x55, 6, 0, 0, 0x0042, 0x0800),
+                     a0_demand_report(0x11, 6, 0, 0, 0x0041, 0x0801),
+                     a0_demand_report(0x58, 16), a0_demand_report(0x58, 6, 16),
+                     a0_demand_report(0x58, 6, 0, 16)}) {
+    assert(unit.receive_data_frame(&wrong));
+    assert(!unit.estia_demand_value_.has_value());
+  }
+  for (uint8_t type : {0x58, 0x55, 0x11}) {
+    auto short_reply = frame(type, type == 0x11 ? 0x005F : 0x009F, 10);
+    short_reply.raw[3] = type == 0x58 ? 0x08 : 0x00;
+    short_reply.raw[4] = type == 0x58 ? 0x00 : 0x41;
+    short_reply.raw[5] = type == 0x58 ? 0x00 : 0x08;
+    short_reply.raw[6] = type == 0x58 ? 0xFE : 0x00;
+    short_reply.raw[9] = 6;
+    const auto crc = short_reply.calculate_estia_crc();
+    short_reply.raw[10] = crc >> 8; short_reply.raw[11] = crc;
+    assert(unit.receive_data_frame(&short_reply));
+    assert(!unit.estia_demand_value_.has_value());
+  }
+  acknowledge(unit, 0x005F);
+  assert(!unit.estia_demand_value_.has_value());  // An ACK contains no demand value.
+  auto echo = a0_demand_report(0x58, 6, 3, 4);
+  assert(unit.receive_data_frame(&echo));
+  assert(unit.estia_demand_value_ == 6);
+  near(reported.state, 6);
+  unit.loop();
+  auto heartbeat = unit.pop_command();
+  assert(heartbeat[2] == 0x55 && heartbeat[12] == 6 && heartbeat[14] == 3 && heartbeat[15] == 4);
+  assert(unit.commands_empty());
+  unit.send_estia_demand(0);  // Explicit zero is a real request, not unknown.
+  auto command = unit.pop_command();
+  assert(command[2] == 0x11 && command[11] == 0 && command[12] == 3 && command[13] == 4);
+  assert(unit.receive_data_frame(&echo));
+  assert(unit.estia_demand_value_ == 0);  // Older echo must not overwrite a pending request.
+  unit.send_estia_demand_heartbeat();
+  heartbeat = unit.pop_command();
+  assert(heartbeat[12] == 0);
+  acknowledge(unit, 0x005F);
+  echo = a0_demand_report(0x58, 0, 3, 4);
+  assert(unit.receive_data_frame(&echo));
+  near(reported.state, 0);
+  unit.set_read_only(true);
+  echo = a0_demand_report(0x58, 7, 3, 4);
+  assert(unit.receive_data_frame(&echo));
+  unit.send_estia_demand(5);
+  unit.send_estia_demand_heartbeat();
+  assert(unit.estia_demand_value_ == 7 && unit.commands_empty());
+  unit.set_read_only(false);
+  unit.send_estia_demand_heartbeat();
+  heartbeat = unit.pop_command();
+  assert(heartbeat[12] == 7);
+  unit.set_demand_enabled(false);
+  unit.send_estia_demand_heartbeat();
+  assert(unit.commands_empty());
+  // Preserve the two interface-originated layouts and configured master address.
+  for (uint8_t type : {0x55, 0x11, 0x58}) {
+    TestEstia observer;
+    observer.set_frame_format(FrameFormat::A0);
+    observer.set_master_address(0x01);
+    auto f = a0_demand_report(type, 9, 2, 1, type == 0x58 ? 0x0801 : 0x0041,
+                             type == 0x58 ? 0x00FE : 0x0801);
+    assert(observer.receive_data_frame(&f));
+    assert(observer.estia_demand_value_ == 9 && observer.estia_demand_ai2_ == 2 && observer.estia_demand_ai3_ == 1);
+  }
+  TestEstia explicit_request;
+  explicit_request.set_frame_format(FrameFormat::A0);
+  explicit_request.send_estia_demand(6);
+  assert(explicit_request.estia_demand_value_ == 6 && !explicit_request.commands_empty());
+  TestEstia booting;
+  booting.set_frame_format(FrameFormat::A0);
+  booting.set_demand_enabled(true);
+  booting.boot_millis_ = millis();
+  auto initial = a0_demand_report(0x58, 6);
+  assert(booting.receive_data_frame(&initial));
+  booting.send_estia_demand_heartbeat();
+  assert(booting.commands_empty());  // Do not queue stale heartbeats during startup silence.
+  initial = a0_demand_report(0x58, 7);
+  assert(booting.receive_data_frame(&initial));
+  booting.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+  booting.send_estia_demand_heartbeat();
+  assert(booting.pop_command()[12] == 7);
+  for (auto format : {FrameFormat::NORMAL, FrameFormat::HM, FrameFormat::TU2C, FrameFormat::ESTIA}) {
+    TestEstia other;
+    other.set_frame_format(format);
+    other.set_demand_enabled(true);
+    other.send_estia_demand(6);
+    other.send_estia_demand_heartbeat();
+    assert(!other.estia_demand_value_.has_value() && other.commands_empty() && other.write_queue_.empty());
+  }
+}
+
 static void first_gen_fault_checks() {
   for (bool read_only : {false, true}) {
     RecordingUart uart;
@@ -1833,6 +1965,7 @@ int main() {
   zone_mode_capability_checks();
   new (&App) Application();
   host::setup_preferences();
+  a0_demand_startup_checks();
   master_keepalive_silence_checks();
   first_gen_fault_checks();
   first_gen_cooling_setpoint_checks();

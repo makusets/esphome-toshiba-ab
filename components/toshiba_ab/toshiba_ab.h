@@ -1215,6 +1215,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   EstiaDnReadCallback estia_dn_callback_;
   bool begin_remote_error_autoreset_();
   void update_remote_error_(bool active);
+  void update_estia_demand_(uint8_t ai1, uint8_t ai2, uint8_t ai3);
   void update_estia_first_gen_fault_(uint8_t code);
   void invalidate_estia_first_gen_fault_();
   bool is_own_tx_echo_(const DataFrame *f) const; //used to filter echo after sending frame
@@ -1469,7 +1470,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   static const uint32_t ESTIA_E8C1_INTERVAL_MS = 60000;
   static const uint32_t ESTIA_DEMAND_HEARTBEAT_MS = 5000;  // 0-10V heartbeat every 5s
   bool demand_enabled_{false};
-  uint8_t estia_demand_value_{0};         // current demand value (0..15)
+  optional<uint8_t> estia_demand_value_;  // Unknown until decoded or explicitly set (0..15).
+  uint8_t estia_demand_ai2_{0};
+  uint8_t estia_demand_ai3_{0};
   uint32_t estia_last_demand_heartbeat_ms_{0};
 
   bool estia_first_gen_pump_state_known_{false};

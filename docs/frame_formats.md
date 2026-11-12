@@ -271,6 +271,9 @@ climate:
     demand_enabled: false  # optional: 0-10 V demand emulation
 ```
 
+Demand emulation waits for a decoded value or explicit request instead of
+transmitting zero at boot. See [demand startup synchronization](estia_demand_emulation.md).
+
 ## `estia` / first-generation Estia R410A
 
 ### Structure

@@ -276,6 +276,10 @@ climate:
 # Uncomment the sections below to emulate the physical 0-10V interface
 # in software. This sends periodic heartbeats as address 0x0041.
 # Also set demand_enabled: true in the climate section above.
+# Heartbeats wait for decoded bus state or an explicit slider request; they no
+# longer start at zero. restore_value below restores only the slider's state.
+# Optional readback under the climate entry: demand: {name: "Estia Reported Demand"}
+# See docs/estia_demand_emulation.md for packet layouts and startup behavior.
 
 # number:
 #   - platform: template

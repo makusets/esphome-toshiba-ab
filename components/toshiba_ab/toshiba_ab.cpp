@@ -2606,16 +2606,15 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
         else if (ack_d1 == 0x00 && ack_d2 == 0x41) ack_what = "POWER";
         else if (ack_d1 == 0x00 && ack_d2 == 0x5F) ack_what = "DEMAND";
         ESP_LOGV(TAG, "    ACK for %s(%02X:%02X)", ack_what, ack_d1, ack_d2);
-      } else if (dtype == 0x005F) {
-        // 0-10V demand command
-        uint8_t demand = frame->raw[9];
-        ESP_LOGV(TAG, "    DEMAND cmd=%u/15 -> setpoint=%d°C", demand, demand > 0 ? 10 + demand * 3 : 20);
+      } else if (dtype == 0x005F && fsz >= 14) {
+        ESP_LOGV(TAG, "    DEMAND command AI1=%u AI2=%u AI3=%u", frame->raw[9], frame->raw[10], frame->raw[11]);
       } else if (dtype == 0x009F) {
-        // 0-10V status
-        uint8_t demand = frame->raw[10];
-        uint8_t min_temp = frame->raw[11];
-        ESP_LOGV(TAG, "    DEMAND status=%u/15 min_temp=%u°C -> setpoint=%d°C",
-                 demand, min_temp, demand > 0 ? 10 + demand * 3 : 20);
+        // Interface status and master echo use different payload offsets.
+        // 0x14 is not a decoded minimum temperature; demand meaning depends on DN 680.
+        if (frame_type == 0x55 && fsz >= 16)
+          ESP_LOGV(TAG, "    DEMAND interface AI1=%u AI2=%u AI3=%u", frame->raw[10], frame->raw[12], frame->raw[13]);
+        else if (frame_type == 0x58 && fsz >= 17)
+          ESP_LOGV(TAG, "    DEMAND master echo AI1=%u AI2=%u AI3=%u", frame->raw[9], frame->raw[13], frame->raw[14]);
       } else if (dtype == 0x00E8 && frame_len >= 10) {
         uint8_t subtype = frame->raw[9];
         if (frame_type == 0x15) {
@@ -2907,33 +2906,22 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       }
     }
 
-    // 0-10V interface status (0x55 from 0x0041, dtype 00:9F)
-    // Frame: 55:0C:00:00:41:08:00:00:9F:00:DD:14:00:00  (DD=demand, 0x14=min temp config)
-    if (frame_type == 0x55 && frame->raw[3] == 0x00 && frame->raw[4] == 0x41 &&
-        frame->raw[7] == 0x00 && frame->raw[8] == 0x9F) {
-      uint8_t demand = frame->raw[10];
-      ESP_LOGV(TAG, "0-10V status: demand=%u/15", demand);
-      if (demand != estia_demand_value_) {
-        estia_demand_value_ = demand;
-        ESP_LOGI(TAG, "Status: demand=%u/15 (setpoint %d°C)", demand, demand > 0 ? 10 + demand * 3 : 20);
-      }
-      if (this->demand_sensor_ != nullptr) {
-        this->demand_sensor_->publish_state(demand);
-      }
+    const uint16_t demand_source = (uint16_t(frame->raw[3]) << 8) | frame->raw[4];
+    const uint16_t demand_destination = (uint16_t(frame->raw[5]) << 8) | frame->raw[6];
+    // Master echo: 58:0D:00:08:00:00:FE:00:9F:<AI1>:...:<AI2>:<AI3>:CRC16.
+    // Learn the pump's retained state without first emitting a zero heartbeat.
+    if (frame_type == 0x58 && fsz >= 17 && demand_source == this->estia_master_address_ &&
+        (demand_destination == 0x00FE || demand_destination == this->estia_source_address_ ||
+         demand_destination == 0x0041) && frame->raw[7] == 0x00 && frame->raw[8] == 0x9F) {
+      this->update_estia_demand_(frame->raw[9], frame->raw[13], frame->raw[14]);
     }
-
-    // 0-10V interface command (0x11 from 0x0041, dtype 00:5F) — immediate demand update
-    // Frame: 11:0A:00:00:41:08:00:00:5F:DD:00:00
-    if (frame_type == 0x11 && frame->raw[3] == 0x00 && frame->raw[4] == 0x41 &&
-        frame->raw[7] == 0x00 && frame->raw[8] == 0x5F) {
-      uint8_t demand = frame->raw[9];
-      ESP_LOGV(TAG, "0-10V command: demand=%u/15", demand);
-      if (demand != estia_demand_value_) {
-        estia_demand_value_ = demand;
-        ESP_LOGI(TAG, "Status: demand=%u/15 (setpoint %d°C)", demand, demand > 0 ? 10 + demand * 3 : 20);
-      }
-      if (this->demand_sensor_ != nullptr) {
-        this->demand_sensor_->publish_state(demand);
+    // Physical/emulated interface reports use 00:<AI1>:14:<AI2>:<AI3>.
+    if (demand_source == 0x0041 && demand_destination == this->estia_master_address_) {
+      if (frame_type == 0x55 && fsz >= 16 && frame->raw[7] == 0x00 && frame->raw[8] == 0x9F &&
+          frame->raw[9] == 0x00) {
+        this->update_estia_demand_(frame->raw[10], frame->raw[12], frame->raw[13]);
+      } else if (frame_type == 0x11 && fsz >= 14 && frame->raw[7] == 0x00 && frame->raw[8] == 0x5F) {
+        this->update_estia_demand_(frame->raw[9], frame->raw[10], frame->raw[11]);
       }
     }
 
@@ -3263,7 +3251,8 @@ void ToshibaAbClimate::loop() {
   }
 
   // 0-10V demand emulation: periodic heartbeat as 0x0041
-  if (!this->read_only_ && this->demand_enabled_ && this->data_reader.frame_format() == FrameFormat::A0) {
+  if (!this->read_only_ && !initial_send_block_active && this->demand_enabled_ && this->estia_demand_value_.has_value() &&
+      this->data_reader.frame_format() == FrameFormat::A0) {
     uint32_t now = millis();
     if (now - estia_last_demand_heartbeat_ms_ >= ESTIA_DEMAND_HEARTBEAT_MS) {
       estia_last_demand_heartbeat_ms_ = now;
@@ -4267,7 +4256,22 @@ void ToshibaAbClimate::estia_mode_retry_timeout_() {
   }
 }
 
+void ToshibaAbClimate::update_estia_demand_(uint8_t ai1, uint8_t ai2, uint8_t ai3) {
+  if (ai1 > 15 || ai2 > 15 || ai3 > 15) {
+    ESP_LOGW(TAG, "Ignoring invalid demand channels: %u/%u/%u", ai1, ai2, ai3);
+    return;
+  }
+  if (this->demand_sensor_) this->demand_sensor_->publish_state(ai1);
+  // Do not let an older echo replace a demand command still awaiting its ACK.
+  if (!this->estia_pending_cmd_.empty() && this->estia_pending_ack_dtype_ == 0x005F) return;
+  this->estia_demand_value_ = ai1;
+  this->estia_demand_ai2_ = ai2;
+  this->estia_demand_ai3_ = ai3;
+  ESP_LOGV(TAG, "Demand state: AI1=%u AI2=%u AI3=%u", ai1, ai2, ai3);
+}
+
 void ToshibaAbClimate::send_estia_demand(uint8_t demand) {
+  if (!this->is_estia_r32()) return;
   if (this->read_only_) {
     ESP_LOGW(TAG, "Read-only mode: not sending Estia demand command");
     return;
@@ -4287,7 +4291,7 @@ void ToshibaAbClimate::send_estia_demand(uint8_t demand) {
     (uint8_t)(dst >> 8), (uint8_t)(dst & 0xFF),  // dest: master
     0x00, 0x5F,                         // dtype: demand control
     demand,                             // demand value (0..15)
-    0x00, 0x00,                         // padding
+    this->estia_demand_ai2_, this->estia_demand_ai3_,  // Retain the other demand channels.
     0x00, 0x00                          // CRC placeholder
   };
 
@@ -4303,9 +4307,11 @@ void ToshibaAbClimate::send_estia_demand(uint8_t demand) {
 }
 
 void ToshibaAbClimate::send_estia_demand_heartbeat() {
+  if (!this->is_estia_r32() || this->read_only_ || !this->demand_enabled_ ||
+      !this->estia_demand_value_.has_value() || this->is_initial_frame_send_block_active_(millis())) return;
   // Emulate 0-10V interface periodic status (0x55 from 0x0041)
   // Captured: 55:0C:00:00:41:08:00:00:9F:00:DD:14:00:00:CRC
-  // raw[10]=demand, raw[11]=0x14 (min temp config = 20°C)
+  // raw[10]=AI1, raw[11]=constant 0x14, raw[12:13]=AI2/AI3.
   uint16_t dst = this->estia_master_address_;
   uint8_t frame[] = {
     0xA0, 0x00,                         // prefix
@@ -4315,9 +4321,9 @@ void ToshibaAbClimate::send_estia_demand_heartbeat() {
     0x00, 0x41,                         // source: 0-10V interface address
     (uint8_t)(dst >> 8), (uint8_t)(dst & 0xFF),  // dest: master
     0x00, 0x9F,                         // dtype: 0-10V status
-    0x00, estia_demand_value_,          // 0x00 + demand value
-    0x14,                               // min temp config (20°C)
-    0x00, 0x00,                         // padding
+    0x00, *estia_demand_value_,          // 0x00 + known demand value
+    0x14,                               // Observed constant, meaning unverified.
+    this->estia_demand_ai2_, this->estia_demand_ai3_,
     0x00, 0x00                          // CRC placeholder
   };
 
@@ -4326,7 +4332,7 @@ void ToshibaAbClimate::send_estia_demand_heartbeat() {
   frame[crc_len]     = (crc >> 8) & 0xFF;
   frame[crc_len + 1] = crc & 0xFF;
 
-  ESP_LOGV(TAG, "TX: demand heartbeat (demand=%u/15)", estia_demand_value_);
+  ESP_LOGV(TAG, "TX: demand heartbeat (demand=%u/15)", *estia_demand_value_);
   log_raw_data("Estia TX", frame, sizeof(frame));
 
   std::vector<uint8_t> raw(frame, frame + sizeof(frame));
