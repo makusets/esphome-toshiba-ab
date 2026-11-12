@@ -287,6 +287,9 @@ climate:
       name: "Estia DHW Boost"
 ```
 
+For optional indicators, feature switches and physical-controller overrides, see
+the [first-generation configuration guide](estia_first_gen_configuration.md).
+
 ### DHW availability and mode commands
 
 In first-generation estia status frame bit `0x80` in `raw[6]`

@@ -19,3 +19,24 @@ climate:
     zone2_climate: true
     night_setback:
       name: Night Setback
+    waterpump_active:
+      name: Water Pump Active
+    heating_cooling_compressor_active:
+      name: Heating Cooling Compressor Active
+    dhw_compressor_active:
+      name: DHW Compressor Active
+    dhw_resistor_active:
+      name: DHW Resistor Active
+    heating_resistor_active:
+      name: Heating Resistor Active
+    heating_external_booster_active:
+      name: Heating External Booster Active
+    frost_protection:
+      name: Frost Protection
+    # Silent Mode is available only in first-generation ESTIA configurations.
+    dhw_boost:
+      name: DHW Boost
+    antibacteria:
+      name: Antibacteria
+    test_mode_active:
+      name: Test Mode Active

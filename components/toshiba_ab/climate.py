@@ -90,6 +90,7 @@ CONF_DHW_BOOST = "dhw_boost"
 CONF_ANTIBACTERIA = "antibacteria"
 CONF_FROST_PROTECTION = "frost_protection"
 CONF_NIGHT_SETBACK = "night_setback"
+CONF_SILENT_MODE = "silent_mode"
 CONF_ZONE1_WATER_TEMPERATURE = "zone1_water_temperature"
 CONF_ZONE1_TARGET_TEMPERATURE = "zone1_target_temperature"
 CONF_DHW_CURRENT_TEMPERATURE = "dhw_current_temperature"
@@ -111,8 +112,16 @@ CONF_WATERPUMP_DUTY = "waterpump_duty"
 CONF_DHW_COMPRESSOR_HOURS = "dhw_compressor_hours"
 CONF_ZONE2_CLIMATE = "zone2_climate"
 CONF_ZONE1_CLIMATE = "zone1_climate"
+# Retained YAML aliases for the canonical DHW indicator names below.
 CONF_HOTWATER_PUMP_HEATING = "hotwater_pump_heating"
 CONF_HOTWATER_RESISTOR_HEATING = "hotwater_resistor_heating"
+CONF_WATERPUMP_ACTIVE = "waterpump_active"
+CONF_HEATING_COOLING_COMPRESSOR_ACTIVE = "heating_cooling_compressor_active"
+CONF_HEATING_RESISTOR_ACTIVE = "heating_resistor_active"
+CONF_DHW_COMPRESSOR_ACTIVE = "dhw_compressor_active"
+CONF_DHW_RESISTOR_ACTIVE = "dhw_resistor_active"
+CONF_HEATING_EXTERNAL_BOOSTER_ACTIVE = "heating_external_booster_active"
+CONF_TEST_MODE_ACTIVE = "test_mode_active"
 CONF_REMOTE_ERROR = "remote_error"
 
 #AC Sensors addresses
@@ -162,6 +171,10 @@ ToshibaAbEstiaFrostProtectionSwitch = toshiba_ab_ns.class_(
 
 ToshibaAbEstiaNightSetbackSwitch = toshiba_ab_ns.class_(
     "ToshibaAbEstiaNightSetbackSwitch", switch.Switch, cg.Component
+)
+
+ToshibaAbEstiaSilentModeSwitch = toshiba_ab_ns.class_(
+    "ToshibaAbEstiaSilentModeSwitch", switch.Switch, cg.Component
 )
 
 ToshibaAbOnDataReceivedTrigger = toshiba_ab_ns.class_(
@@ -302,10 +315,14 @@ def _validate_wall_mounted_louvre(config):
         raise cv.Invalid("zone2_climate requires frame_format: a0")
     if CONF_CURVE_SHIFT in config and config[CONF_FRAME_FORMAT] != "estia":
         raise cv.Invalid("curve_shift requires frame_format: estia (first-generation R410A)")
+    if CONF_SILENT_MODE in config and config[CONF_FRAME_FORMAT] != "estia":
+        raise cv.Invalid("silent_mode requires frame_format: estia (first-generation R410A)")
     return config
 
 
 CONFIG_SCHEMA = cv.All(
+    cv.rename_key(CONF_HOTWATER_PUMP_HEATING, CONF_DHW_COMPRESSOR_ACTIVE),
+    cv.rename_key(CONF_HOTWATER_RESISTOR_HEATING, CONF_DHW_RESISTOR_ACTIVE),
     _add_automatic_entities,
     climate._CLIMATE_SCHEMA.extend(
     {
@@ -393,6 +410,12 @@ CONFIG_SCHEMA = cv.All(
         cv.Optional(CONF_NIGHT_SETBACK): cv.maybe_simple_value(
             switch._SWITCH_SCHEMA.extend(
                 {cv.GenerateID(): cv.declare_id(ToshibaAbEstiaNightSetbackSwitch)}
+            ),
+            key=CONF_NAME,
+        ),
+        cv.Optional(CONF_SILENT_MODE): cv.maybe_simple_value(
+            switch._SWITCH_SCHEMA.extend(
+                {cv.GenerateID(): cv.declare_id(ToshibaAbEstiaSilentModeSwitch)}
             ),
             key=CONF_NAME,
         ),
@@ -499,8 +522,13 @@ CONFIG_SCHEMA = cv.All(
         ),
         cv.Optional(CONF_ZONE2_CLIMATE, default=False): _water_thermostat("Toshiba Estia Zone 2 Water", 40),
         cv.Optional(CONF_ZONE1_CLIMATE): _water_thermostat("Toshiba Estia Zone 1 Water"),
-        cv.Optional(CONF_HOTWATER_PUMP_HEATING): binary_sensor.binary_sensor_schema(),
-        cv.Optional(CONF_HOTWATER_RESISTOR_HEATING): binary_sensor.binary_sensor_schema(),
+        cv.Optional(CONF_DHW_COMPRESSOR_ACTIVE): binary_sensor.binary_sensor_schema(),
+        cv.Optional(CONF_DHW_RESISTOR_ACTIVE): binary_sensor.binary_sensor_schema(),
+        cv.Optional(CONF_WATERPUMP_ACTIVE): binary_sensor.binary_sensor_schema(),
+        cv.Optional(CONF_HEATING_COOLING_COMPRESSOR_ACTIVE): binary_sensor.binary_sensor_schema(),
+        cv.Optional(CONF_HEATING_RESISTOR_ACTIVE): binary_sensor.binary_sensor_schema(),
+        cv.Optional(CONF_HEATING_EXTERNAL_BOOSTER_ACTIVE): binary_sensor.binary_sensor_schema(),
+        cv.Optional(CONF_TEST_MODE_ACTIVE): binary_sensor.binary_sensor_schema(),
         cv.Optional(CONF_REMOTE_ERROR): binary_sensor.binary_sensor_schema(
             device_class=DEVICE_CLASS_PROBLEM,
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
@@ -822,6 +850,9 @@ async def to_code(config):
     if CONF_NIGHT_SETBACK in config:
         sw = await switch.new_switch(config[CONF_NIGHT_SETBACK], var)
         cg.add(var.set_night_setback_switch(sw))
+    if CONF_SILENT_MODE in config:
+        sw = await switch.new_switch(config[CONF_SILENT_MODE], var)
+        cg.add(var.set_silent_mode_switch(sw))
 
     if CONF_ON_DATA_RECEIVED in config:
         for on_data_received in config.get(CONF_ON_DATA_RECEIVED, []):
@@ -897,12 +928,18 @@ async def to_code(config):
         if config_key in config:
             sens = await sensor.new_sensor(config[config_key])
             cg.add(setter(sens))
-    if CONF_HOTWATER_PUMP_HEATING in config:
-        sens = await binary_sensor.new_binary_sensor(config[CONF_HOTWATER_PUMP_HEATING])
-        cg.add(var.set_hotwater_pump_heating_binary_sensor(sens))
-    if CONF_HOTWATER_RESISTOR_HEATING in config:
-        sens = await binary_sensor.new_binary_sensor(config[CONF_HOTWATER_RESISTOR_HEATING])
-        cg.add(var.set_hotwater_resistor_heating_binary_sensor(sens))
+    for config_key, setter in (
+        (CONF_DHW_COMPRESSOR_ACTIVE, var.set_dhw_compressor_active_binary_sensor),
+        (CONF_DHW_RESISTOR_ACTIVE, var.set_dhw_resistor_active_binary_sensor),
+        (CONF_WATERPUMP_ACTIVE, var.set_waterpump_active_binary_sensor),
+        (CONF_HEATING_COOLING_COMPRESSOR_ACTIVE, var.set_heating_cooling_compressor_active_binary_sensor),
+        (CONF_HEATING_RESISTOR_ACTIVE, var.set_heating_resistor_active_binary_sensor),
+        (CONF_HEATING_EXTERNAL_BOOSTER_ACTIVE, var.set_heating_external_booster_active_binary_sensor),
+        (CONF_TEST_MODE_ACTIVE, var.set_test_mode_active_binary_sensor),
+    ):
+        if config_key in config:
+            sens = await binary_sensor.new_binary_sensor(config[config_key])
+            cg.add(setter(sens))
     if CONF_REMOTE_ERROR in config:
         sens = await binary_sensor.new_binary_sensor(config[CONF_REMOTE_ERROR])
         cg.add(var.set_remote_error_binary_sensor(sens))

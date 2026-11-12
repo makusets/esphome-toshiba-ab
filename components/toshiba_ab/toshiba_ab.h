@@ -966,8 +966,32 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_zone2_climate(ToshibaAbEstiaZoneClimate *zone) { zone2_climate_ = zone; }
   void control_estia_zone2(const climate::ClimateCall &call);
   void set_zone1_climate(ToshibaAbEstiaZoneClimate *zone1_climate) { zone1_climate_ = zone1_climate; }
-  void set_hotwater_pump_heating_binary_sensor(binary_sensor::BinarySensor *sensor) { hotwater_pump_heating_binary_sensor_ = sensor; }
-  void set_hotwater_resistor_heating_binary_sensor(binary_sensor::BinarySensor *sensor) { hotwater_resistor_heating_binary_sensor_ = sensor; }
+  void set_waterpump_active_binary_sensor(binary_sensor::BinarySensor *sensor) { waterpump_active_binary_sensor_ = sensor; }
+  void set_heating_cooling_compressor_active_binary_sensor(binary_sensor::BinarySensor *sensor) {
+    heating_cooling_compressor_active_binary_sensor_ = sensor;
+  }
+  void set_dhw_compressor_active_binary_sensor(binary_sensor::BinarySensor *sensor) {
+    dhw_compressor_active_binary_sensor_ = sensor;
+  }
+  void set_dhw_resistor_active_binary_sensor(binary_sensor::BinarySensor *sensor) {
+    dhw_resistor_active_binary_sensor_ = sensor;
+  }
+  void set_heating_resistor_active_binary_sensor(binary_sensor::BinarySensor *sensor) {
+    heating_resistor_active_binary_sensor_ = sensor;
+  }
+  void set_heating_external_booster_active_binary_sensor(binary_sensor::BinarySensor *sensor) {
+    heating_external_booster_active_binary_sensor_ = sensor;
+  }
+  void set_test_mode_active_binary_sensor(binary_sensor::BinarySensor *sensor) {
+    test_mode_active_binary_sensor_ = sensor;
+  }
+  // Retained C++ aliases for integrations using the older DHW setter names.
+  void set_hotwater_pump_heating_binary_sensor(binary_sensor::BinarySensor *sensor) {
+    this->set_dhw_compressor_active_binary_sensor(sensor);
+  }
+  void set_hotwater_resistor_heating_binary_sensor(binary_sensor::BinarySensor *sensor) {
+    this->set_dhw_resistor_active_binary_sensor(sensor);
+  }
   void set_frame_format(FrameFormat format) {
     data_reader.set_frame_format(format);
     frame_format_auto_ = false;
@@ -1041,6 +1065,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void set_dhw_boost_switch(switch_::Switch *dhw_boost_switch) { dhw_boost_switch_ = dhw_boost_switch; }
   void set_frost_protection_switch(switch_::Switch *sw) { frost_protection_switch_ = sw; }
   void set_night_setback_switch(switch_::Switch *sw) { night_setback_switch_ = sw; }
+  void set_silent_mode_switch(switch_::Switch *sw) { silent_mode_switch_ = sw; }
   void set_antibacteria_switch(switch_::Switch *antibacteria_switch) { antibacteria_switch_ = antibacteria_switch; }
 
   void set_failed_crcs_sensor(sensor::Sensor *failed_crcs_sensor) { this->failed_crcs_sensor_ = failed_crcs_sensor; }
@@ -1102,6 +1127,9 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void send_estia_first_gen_dhw_off();
   void send_estia_first_gen_dhw_boost(bool on);
   void send_estia_first_gen_antibacteria(bool on);
+  void send_estia_first_gen_frost_protection(bool on);
+  void send_estia_first_gen_night_setback(bool on);
+  void send_estia_first_gen_silent_mode(bool on);
   void send_estia_first_gen_auto_mode(bool on);
   void send_estia_first_gen_request_data(uint8_t request_code);
   void send_estia_first_gen_ping_();
@@ -1217,6 +1245,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   switch_::Switch *dhw_boost_switch_{nullptr};
   switch_::Switch *frost_protection_switch_{nullptr};
   switch_::Switch *night_setback_switch_{nullptr};
+  switch_::Switch *silent_mode_switch_{nullptr};
   switch_::Switch *antibacteria_switch_{nullptr};
   sensor::Sensor *failed_crcs_sensor_{nullptr};
   sensor::Sensor *noise_rate_sensor_{nullptr};
@@ -1276,8 +1305,13 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void publish_estia_zone_state_(ToshibaAbEstiaZoneClimate *zone, bool zone1_on, bool is_cooling,
                                  bool automatik, float setpoint);
   bool estia_night_setback_applied_{false};
-  binary_sensor::BinarySensor *hotwater_pump_heating_binary_sensor_{nullptr};
-  binary_sensor::BinarySensor *hotwater_resistor_heating_binary_sensor_{nullptr};
+  binary_sensor::BinarySensor *dhw_compressor_active_binary_sensor_{nullptr};
+  binary_sensor::BinarySensor *dhw_resistor_active_binary_sensor_{nullptr};
+  binary_sensor::BinarySensor *waterpump_active_binary_sensor_{nullptr};
+  binary_sensor::BinarySensor *heating_cooling_compressor_active_binary_sensor_{nullptr};
+  binary_sensor::BinarySensor *heating_resistor_active_binary_sensor_{nullptr};
+  binary_sensor::BinarySensor *heating_external_booster_active_binary_sensor_{nullptr};
+  binary_sensor::BinarySensor *test_mode_active_binary_sensor_{nullptr};
   binary_sensor::BinarySensor *remote_error_binary_sensor_{nullptr};
   bool remote_error_active_{false};
   uint8_t remote_error_autoreset_attempts_{0};
@@ -1429,11 +1463,11 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   bool estia_first_gen_zone1_active_{false};
   bool estia_first_gen_zone1_cooling_{false};
   bool estia_first_gen_dhw_active_{false};
-  bool estia_first_gen_dhw_boost_{false};
-  bool estia_first_gen_antibacteria_{false};
+  bool estia_first_gen_dhw_boost_active_{false};
+  bool estia_first_gen_antibacteria_enabled_{false};
   bool estia_first_gen_auto_mode_active_{false};
-  bool estia_first_gen_hotwater_pump_heating_{false};
-  bool estia_first_gen_hotwater_resistor_heating_{false};
+  bool estia_first_gen_dhw_compressor_active_{false};
+  bool estia_first_gen_dhw_resistor_active_{false};
   uint8_t estia_first_gen_dhw_encoded_{0};
   uint8_t estia_first_gen_zone1_encoded_{0};
   optional<climate::ClimateMode> estia_first_gen_pending_zone1_mode_;
@@ -1497,6 +1531,14 @@ class ToshibaAbEstiaFrostProtectionSwitch : public switch_::Switch, public Compo
 class ToshibaAbEstiaNightSetbackSwitch : public switch_::Switch, public Component {
  public:
   ToshibaAbEstiaNightSetbackSwitch(ToshibaAbClimate *climate) { climate_ = climate; }
+ protected:
+  void write_state(bool state) override;
+  ToshibaAbClimate *climate_;
+};
+
+class ToshibaAbEstiaSilentModeSwitch : public switch_::Switch, public Component {
+ public:
+  ToshibaAbEstiaSilentModeSwitch(ToshibaAbClimate *climate) { climate_ = climate; }
  protected:
   void write_state(bool state) override;
   ToshibaAbClimate *climate_;

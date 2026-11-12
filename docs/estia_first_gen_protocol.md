@@ -4,6 +4,9 @@
 
 The **Estia first-generation protocol** (also called "Estia TU2C" in this codebase) is used by older Toshiba Estia R410A heat pumps. It uses a wrapped TU2C-style frame format with a simple 8-bit checksum.
 
+ESPHome options and setup are documented in the
+[configuration guide](estia_first_gen_configuration.md).
+
 **Key Characteristics:**
 - **UART**: 2400 baud, 8N1 (NO parity)
 - **Frame wrapping**: `F0:F0:[frame]:CRC:A0`
@@ -48,25 +51,52 @@ Frames are identified by examining specific byte positions: typically **[3]**, *
 
 **Frame layout:**
 ```
-[0]         - Frame length (typically 0x13 or 0x14)
+[0]         - Frame length (0x11 short announcement or 0x15 full status)
 [1]         - Source: master address (0x70, or auto-detected)
 [2]         - Destination address (remote address, e.g., 0x60)
 [3]         - 0xE0 (status marker)
-[4]         - (reserved)
+[4]         - 0xC0 announcement or 0xA0 status reply
 [5]         - 0x31 (status signature)
-[6]         - Flags byte: bit[0]=Zone1 active, bit[1]=DHW active
-[7]         - Auto-mode and heating flags: bit[2]=auto mode active, bit[3..4]=heating indicators
-[8]         - Hot water heating flags: bit[2]=resistor heating, bit[3]=pump heating
+[6]         - Operation flags: bit[0]=Zone1 active, bit[1]=DHW active,
+              bit[2]=test mode, bits[5..6]=Cool (0x20) / Heat (0x40), bit[7]=DHW available
+[7]         - Feature flags: bit[2]=Auto, bit[3]=frost protection, bit[4]=silent,
+              bit[5]=night setback enabled, bit[6]=DHW boost, bit[7]=antibacteria enabled
+[8]         - Activity flags: bit[0]=heating resistor, bit[1]=heating/cooling compressor,
+              bit[2]=DHW resistor, bit[3]=DHW compressor, bit[4]=water pump,
+              bit[7]=heating external booster
 [9]         - DHW setpoint temperature (encoded as: °C = value/2 - 16)
 [10]        - Zone 1 setpoint temperature
-[11]        - (reserved/padding)
-[12]        - Zone 1 water temperature (°C = value/2 - 16)
-[13]        - (optional) Zone 2 setpoint
-[14]        - (optional) Zone 2 water temperature
+[11]        - Uninterpreted
+[12]        - DHW water temperature in full 0x15 status (zero means no DHW sensor)
+[13..14]    - Zone 1 water temperature slots in full 0x15 status;
+              the decoder uses populated byte 14, otherwise byte 13 (°C = value/2 - 16)
 ... [N-1]   - Checksum
 ```
 
 **Auto-detected master**: If `master_address_auto_` is enabled and this frame signature appears, the source address is recorded as the master.
+
+The following operation/output flags are independent of the Zone 1 and DHW
+operation flags in byte 6 and appear in both short `0x11` and full `0x15` master
+status frames. They describe controller-reported status, not independent physical
+feedback.
+
+| Byte | Mask | Controller indication |
+| --- | --- | --- |
+| 8 | `0x10` | Internal pump 1 or expansion pump 2 |
+| 8 | `0x02` | Heating/cooling compressor |
+| 8 | `0x01` | Heating resistor inside the hydro unit |
+| 8 | `0x08` | DHW compressor |
+| 8 | `0x04` | DHW cylinder resistor |
+| 8 | `0x80` | Heating external booster, including an auxiliary boiler |
+| 6 | `0x04` | Test Mode / Floor Drying wrench indication |
+
+The water-pump status bit can remain set during circulation after heating/cooling
+is disabled. The heating/cooling compressor bit applies in both Heat and Cool.
+
+Byte 7 masks `0x20` (Night Setback) and `0x80` (Antibacteria) report retained
+programme settings that can remain enabled between operating periods. The
+Night Setback icon needs heating/cooling selected; the Antibacteria icon needs
+DHW selected. The underlying flags can remain set while their icons are hidden.
 
 ---
 
@@ -213,6 +243,22 @@ startup queries are not implemented.
 
 ---
 
+#### 10. **Feature Control Commands**
+
+Frost Protection, Night Setback and Silent Mode use `E0:01:24` commands:
+
+| Feature | On / Off after `E0:01:24` | Status byte 7 mask |
+| --- | --- | --- |
+| Frost Protection | `02:02` / `02:00` | `0x08` |
+| Night Setback | `88:08` / `88:00` | `0x20` |
+| Silent Mode | `04:04` / `04:00` | `0x10` |
+
+Each command pair had matching short/full master statuses and observed icons.
+These commands change only their feature: they do not also turn heating On,
+change the selected Heat/Cool mode, or rewrite its setpoint.
+
+---
+
 ## Address Space
 
 | Address Range | Meaning | Default | Notes |
@@ -285,6 +331,27 @@ When `master_address_auto_` is enabled:
 2. Master responds with sensor data (0x80:0x5C) or "unavailable" (0x80:0xA2)
 3. Query is marked complete; next polled sensor can be queried
 4. If no response within timeout (~2.5s), query is abandoned
+
+---
+
+### Silent Mode controller behaviour
+
+The active Silent Mode flag in status byte 7 (`0x10`) is separate from the
+physical remote's local enable (FC09) and start/end hours (FC0A/0B). Those FC
+numbers belong to the remote controller; the hydro unit uses the same numbers
+for different settings.
+
+With FC09 = 0, the physical remote in Header mode was observed responding to an
+active Silent Mode flag with `E0:01:24:04:00`, which clears it. With FC09 = 1,
+externally issued On/Off commands were accepted without this cancellation,
+including outside the local
+schedule window. A physical remote in Second mode did not cancel those commands.
+
+Enabling the local setting on the physical remote in Header mode inside an
+already-started window sent no On command, even with the compressor running.
+At the next configured start boundary it sent `E0:01:24:04:04`, the master set
+`0x10`, and the Zzz icon
+appeared. The exact scheduled stop-boundary timing has not been verified.
 
 ---
 
@@ -458,6 +525,7 @@ Enable `DEBUG` log level on the `TAG` to see all frame details.
 
 ## References
 
+- [Controller manuals](estia_first_gen_configuration.md#manuals) — programme settings and controller roles
 - Source: `components/toshiba_ab/toshiba_ab.cpp` — `process_received_data_estia_first_gen_()` (line 3264)
 - Frame building: `toshiba_ab.cpp` — `make_estia_first_gen_frame()` (line 3203)
 - Commands: `send_estia_first_gen_*()` family of functions
