@@ -18,6 +18,12 @@ work/test_reader_resync
 
 Keep assertions enabled (do not define `NDEBUG`). No hardware is needed.
 
+The host integration suite also verifies the pre-keep-alive transmit hold-off
+for Normal, HM, TU2C, first-generation ESTIA and A0. Checks cover the 4.5-second
+boundary, late/missing keep-alives, clock rollover and timestamp zero, source and
+checksum rejection (with HM's existing limitation), independent status traffic,
+queued/raw frames, sensor-query deferral, command retries and post-RX silence.
+
 ## Estia R32 telemetry
 
 Generate a host source tree and run the integration checks with ESPHome 2026.9.1

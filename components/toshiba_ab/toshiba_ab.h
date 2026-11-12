@@ -64,6 +64,8 @@ class ToshibaAbEstiaZoneClimate : public climate::Climate {
 };
 
 const uint32_t ALIVE_MESSAGE_PERIOD_MILLIS = 5000;
+const uint32_t MASTER_KEEPALIVE_SILENCE_MILLIS = 500;
+const uint32_t MASTER_KEEPALIVE_SILENCE_END_MILLIS = 6000;
 const uint32_t LAST_ALIVE_TIMEOUT_MILLIS = ALIVE_MESSAGE_PERIOD_MILLIS * 3 +1000;
 
 const uint32_t PACKET_MIN_WAIT_MILLIS = 200;
@@ -993,6 +995,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
     this->set_dhw_resistor_active_binary_sensor(sensor);
   }
   void set_frame_format(FrameFormat format) {
+    this->last_master_keepalive_ms_.reset();
     data_reader.set_frame_format(format);
     frame_format_auto_ = false;
     frame_format_confirmed_ = true;
@@ -1004,6 +1007,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
     this->apply_default_master_address_for_frame_format_();
   }
   void set_frame_format_auto() {
+    this->last_master_keepalive_ms_.reset();
     data_reader.set_frame_format(FrameFormat::NORMAL);
     frame_format_auto_ = true;
     frame_format_confirmed_ = false;
@@ -1222,6 +1226,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void publish_bus_inventory_();
   bool is_initial_frame_send_block_active_(uint32_t now) const;
   bool has_bus_quiet_time_elapsed_(uint32_t now) const;
+  bool is_master_keepalive_silence_active_(uint32_t now) const;
   bool has_tu2c_quiet_time_elapsed_(uint32_t now) const;
   bool should_auto_detect_frame_format_() const { return frame_format_auto_ && !frame_format_confirmed_; }
   void confirm_frame_format_(FrameFormat format, const char *reason);
@@ -1446,6 +1451,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   static const uint32_t ESTIA_CMD_ACK_TIMEOUT_MS = 3000;
 
   uint32_t last_master_alive_millis_ = 0;
+  // Only periodic keep-alives set the phase; ordinary status/ACK traffic does not.
+  optional<uint32_t> last_master_keepalive_ms_;
   bool estia_was_connected_{false};
   uint16_t estia_source_address_{0x0040};  // default: mimic remote controller
   uint16_t estia_master_address_{0x0800};  // A0 master mode byte 0x08 + YAML master address

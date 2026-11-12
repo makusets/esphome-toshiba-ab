@@ -94,6 +94,37 @@ climate:
     frame_format: auto   # default option, and can be omitted; or forced with: normal
 ```
 
+## Transmit timing on all protocols
+
+Normal TCC-Link, HM, TU2C, first-generation ESTIA and A0/R32 all reserve a
+transmit-silent window before the master's regular keep-alive. After observing
+a keep-alive from the selected master, the component stops starting transmissions
+4.5 seconds later: 500 ms before the existing five-second expected period.
+Transmission remains deferred until six seconds after that keep-alive, allowing
+for a late arrival. Every new master keep-alive resets the timer. The existing
+post-receive and post-transmit quiet times still apply, including the 500 ms
+post-RX silence after an arriving keep-alive.
+
+Only the protocol's master keep-alive updates this timing reference. Ordinary
+status, ACKs, remote traffic and keep-alives from other source addresses do not
+move it. Normal, TU2C, ESTIA and A0 packets must pass their checksum checks; HM retains
+its existing checksum limitation described below. Before any keep-alive has been
+observed, the existing startup/quiet-time guards apply. If no new keep-alive
+arrives, the hold-off ends at six seconds and does not repeat until another
+keep-alive is received. Changing the selected master or frame format also resets it.
+
+The rule applies to commands, raw frames, regular reports, sensor queries and
+retries. Queued work waits for an available slot. Sensor queries are not drained
+during the hold-off, and retry attempts are not consumed while transmission is
+blocked. At most one queued frame is written per loop iteration, so a raw frame
+cannot be followed immediately by a regular frame without another timing check.
+Read-only mode continues to block all transmission. No YAML option is required.
+
+This implements the collision-avoidance timing reported in
+[PR #256](https://github.com/makusets/esphome-toshiba-ab/pull/256#issuecomment-6576455801).
+It does not add the separate room-temperature status-reply retry feature discussed
+there.
+
 ## `hm` / HM-range systems
 
 ### Structure

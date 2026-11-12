@@ -315,6 +315,15 @@ bool ToshibaAbClimate::has_bus_quiet_time_elapsed_(uint32_t now) const {
          (now - this->last_sent_frame_millis_) >= FRAME_SEND_MILLIS_FROM_LAST_SEND;
 }
 
+bool ToshibaAbClimate::is_master_keepalive_silence_active_(uint32_t now) const {
+  if (!this->last_master_keepalive_ms_.has_value()) return false;
+  const uint32_t elapsed = now - *this->last_master_keepalive_ms_;
+  // Reserve 4.5-6 seconds after the last observed keep-alive. A new keep-alive
+  // resets the phase; a missed one cannot leave transmission blocked forever.
+  return elapsed >= ALIVE_MESSAGE_PERIOD_MILLIS - MASTER_KEEPALIVE_SILENCE_MILLIS &&
+         elapsed < MASTER_KEEPALIVE_SILENCE_END_MILLIS;
+}
+
 bool ToshibaAbClimate::is_initial_frame_send_block_active_(uint32_t now) const {
   return (now - this->boot_millis_) < INITIAL_FRAME_SEND_BLOCK_MILLIS;
 }
@@ -1994,6 +2003,12 @@ void ToshibaAbClimate::process_received_data(const struct DataFrame *frame) {
         log_data_frame("PING/ALIVE", frame);
         this->record_discovered_address_(frame->source, false);
         this->confirm_frame_format_(FrameFormat::NORMAL, "valid keepalive from master");
+        if (frame->data_length >= 2 &&
+            ((this->is_hm_variant() && frame->data[0] == OPCODE2_READ_ALIVE && frame->data[1] == 0x00) ||
+             (!this->is_hm_variant() && frame->data[0] == this->command_mode_write_ &&
+              frame->data[1] == OPCODE2_READ_ALIVE))) {
+          this->last_master_keepalive_ms_ = millis();
+        }
         break;
         }
         case OPCODE_ACK: {
@@ -2336,6 +2351,8 @@ void ToshibaAbClimate::process_received_data_tu2c_(const struct DataFrame *frame
       ESP_LOGI(TAG, "Auto-detected master address from TU2C keepalive: 0x%02X", source);
       this->set_master_address(source);
     }
+    if (source == this->tu2c_master_address_ && dest == 0xFF && frame->raw[3] == 0xFF)
+      this->last_master_keepalive_ms_ = millis();
     return;
   }
 
@@ -2654,6 +2671,10 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
 
     // Heartbeat (0x10) — mark as connected
     if (frame_type == 0x10) {
+      const uint16_t source = (uint16_t(frame->raw[3]) << 8) | frame->raw[4];
+      if (fsz >= 11 && source == this->estia_master_address_ &&
+          frame->raw[7] == 0x00 && frame->raw[8] == OPCODE2_READ_ALIVE)
+        this->last_master_keepalive_ms_ = millis();
       last_master_alive_millis_ = millis();
       if (this->connected_binary_sensor_) {
         this->connected_binary_sensor_->publish_state(true);
@@ -3069,24 +3090,20 @@ void ToshibaAbClimate::loop() {
     this->initial_frame_send_block_logged_ = true;
   }
 
-  // Drain the pending sensor-query queue at most one per loop iteration.
-  // This must run BEFORE the TX dispatch below so an enqueued 0x17 has a
-  // chance to be picked up in the same tick.
-  if (!this->read_only_ && !initial_send_block_active) {
-    this->drain_sensor_query_queue_();
-  }
-
 #ifdef USE_ESP8266
   const bool rx_pending = this->hw_uart_rx_enabled_ ? s_bus_serial.available() > 0 : this->available() > 0;
 #else
   const bool rx_pending = this->available() > 0;
 #endif
   const bool bus_can_send = !this->read_only_ && !initial_send_block_active && !rx_pending &&
+                            !this->is_master_keepalive_silence_active_(now) &&
                             this->has_bus_quiet_time_elapsed_(now) &&
                             (this->data_reader.frame_format() != FrameFormat::TU2C ||
                              this->has_tu2c_quiet_time_elapsed_(now));
 
   if (bus_can_send) {
+    // Do not start a sensor reply timeout while transmission is held off.
+    this->drain_sensor_query_queue_();
     optional<DataFrame> frame_to_send{};
 
     if (this->last_unconfirmed_command_.has_value()) {
@@ -3133,9 +3150,7 @@ void ToshibaAbClimate::loop() {
       if (this->raw_write_queue_.empty() && this->write_queue_.empty()) {
         ESP_LOGV(TAG, "All frames written");
       }
-    }
-
-    if (!frame_to_send.has_value() && !this->last_unconfirmed_command_.has_value() && !this->write_queue_.empty()) {
+    } else if (!frame_to_send.has_value() && !this->last_unconfirmed_command_.has_value() && !this->write_queue_.empty()) {
       frame_to_send = this->write_queue_.front();
       this->write_queue_.pop();
       if (this->should_track_command_ack_(frame_to_send.value())) {
@@ -3216,7 +3231,7 @@ void ToshibaAbClimate::loop() {
   }
 
   // Estia command ACK timeout and retry
-  if (!this->read_only_ && !initial_send_block_active && !estia_pending_cmd_.empty() &&
+  if (bus_can_send && !estia_pending_cmd_.empty() &&
       (millis() - estia_cmd_sent_ms_) > ESTIA_CMD_ACK_TIMEOUT_MS) {
     if (estia_cmd_attempts_ >= ESTIA_MAX_CMD_ATTEMPTS) {
       ESP_LOGW(TAG, "Command not acknowledged after %u attempts (dtype %02X:%02X)",
@@ -4676,6 +4691,8 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
       this->master_address_confirmed_ = true;
       ESP_LOGI(TAG, "Estia first-gen master address confirmed: 0x%02X", this->master_address_);
     }
+    if (src == this->master_address_ && frame->raw[2] == 0xFF && frame->raw[3] == 0xFF && frame->raw[4] == 0x00)
+      this->last_master_keepalive_ms_ = millis();
   }
   if (is_remote_source && frame->raw[3] == 0xE0 && frame->raw[5] == 0x31) {
     if (frame->raw[6] == 0x00) {
@@ -4858,6 +4875,7 @@ void ToshibaAbReadOnlySwitch::write_state(bool state) {
 }
 
 void ToshibaAbClimate::set_master_address(uint8_t address) {
+  this->last_master_keepalive_ms_.reset();
   this->master_address_ = address;
   this->tu2c_master_address_ = address;
   // A0 uses a two-byte destination: mode byte 0x08 followed by the same
