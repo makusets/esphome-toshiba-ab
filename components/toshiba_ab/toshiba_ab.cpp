@@ -1771,6 +1771,13 @@ void ToshibaAbClimate::setup() {
   if (this->read_only_switch_)
     this->read_only_switch_->publish_state(this->read_only_);
 
+  // Default to no fault at boot; regular fault reports replace this state.
+  // This assumption does not establish master connectivity or add any polling.
+  if (this->is_estia_first_gen()) {
+    this->estia_first_gen_fault_code_ = 0;
+    if (this->fault_code_text_sensor_) this->fault_code_text_sensor_->publish_state("None");
+    if (this->fault_active_binary_sensor_) this->fault_active_binary_sensor_->publish_state(false);
+  }
 }
 
 void ToshibaAbClimate::sync_from_received_state() {

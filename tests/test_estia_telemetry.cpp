@@ -1229,9 +1229,12 @@ static void first_gen_fault_checks() {
     unit.set_fault_code_text_sensor(&code);
     unit.set_fault_active_binary_sensor(&active);
     unit.set_remote_error_binary_sensor(&remote_error);
+    unit.setup();
+    assert(unit.last_master_alive_millis_ == 0);  // Boot default is not a received report.
     unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
     unit.loop();
-    assert(!code.has_state() && !active.has_state());  // No assumed startup clear.
+    assert(code.has_state() && code.state == "None");
+    assert(active.has_state() && !active.state);  // No report is needed at boot.
     unsigned publications = 0;
     code.add_on_state_callback([&](const std::string &) { ++publications; });
     auto expect = [&](const char *value, bool fault) {

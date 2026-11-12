@@ -8,7 +8,9 @@ diagnostic entities. No additional YAML entries are required:
 | Toshiba Fault Active | Problem binary sensor: On for any nonzero master fault code |
 | Toshiba Fault Code | Text sensor: decoded code such as `A01`, `E09`, or `F23`; `None` for an explicit clear |
 
-Both start unknown. Valid master fault reports establish their state; normal
+At boot they default to `None`/off without waiting for a report. This is an
+assumed no-fault state, not confirmation of master connectivity. Valid master
+fault reports update their state; normal
 operating-status packets, keep-alives and a remote controller's status do not
 imply an all-clear. Both become unknown on the existing master-connection timeout
 and require another explicit fault or clear report after reconnection. The native
@@ -17,9 +19,10 @@ API propagates the unknown state to Home Assistant.
 Detection is entirely passive, including in read-only mode. This feature adds no
 polling, reset commands or other bus traffic. Unsolicited `C0:29` announcements
 report faults and clears. Broadcast `A0:29` replies to another controller's
-requests are decoded too. If the ESP starts after an announcement or misses a
-clear, the diagnostics remain unknown or retain the last reported fault until
-the next explicit report; ordinary bus traffic does not resolve that uncertainty.
+requests are decoded too. If the ESP starts after an announcement, it retains
+the boot default until the next report. A missed clear leaves the last reported
+fault active until another explicit clear or a connection timeout; ordinary bus
+traffic does not resolve that uncertainty.
 
 The optional existing `remote_error` sensor remains independent: it reports a
 remote controller's error indication, whereas these diagnostics report the

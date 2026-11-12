@@ -58,7 +58,7 @@ g++ -std=c++17 -Wall -Wextra -Werror -I. tests/test_climate_compat.cpp -o /tmp/t
 
 First-generation fault checks replay captured A01/F23/E09/clear broadcasts,
 verify checksum/source/destination/length rejection, independent remote status,
-unknown startup and timeout/reconnection behavior, and zero added TX in writable
+no-fault boot defaults and unknown timeout/reconnection behavior, and zero added TX in writable
 and read-only modes. Configuration checks verify both default diagnostic entities
 on R410A only, including naming overrides. The first-generation ESP8266 fixture
 includes the native API to compile unknown-state notifications.
