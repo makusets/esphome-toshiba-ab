@@ -123,6 +123,8 @@ CONF_DHW_RESISTOR_ACTIVE = "dhw_resistor_active"
 CONF_HEATING_EXTERNAL_BOOSTER_ACTIVE = "heating_external_booster_active"
 CONF_TEST_MODE_ACTIVE = "test_mode_active"
 CONF_REMOTE_ERROR = "remote_error"
+CONF_FAULT_CODE = "fault_code"
+CONF_FAULT_ACTIVE = "fault_active"
 
 #AC Sensors addresses
 
@@ -270,6 +272,9 @@ def _hardware_uart_rx_pin(value):
 def _add_automatic_entities(config):
     if str(config.get(CONF_FRAME_FORMAT, "auto")).lower() == "a0":
         config.setdefault(CONF_ZONE1_CLIMATE, True)
+    if str(config.get(CONF_FRAME_FORMAT, "auto")).lower() == "estia":
+        config.setdefault(CONF_FAULT_CODE, {CONF_NAME: "Toshiba Fault Code"})
+        config.setdefault(CONF_FAULT_ACTIVE, {CONF_NAME: "Toshiba Fault Active"})
     return config
 
 
@@ -317,6 +322,8 @@ def _validate_wall_mounted_louvre(config):
         raise cv.Invalid("curve_shift requires frame_format: estia (first-generation R410A)")
     if CONF_SILENT_MODE in config and config[CONF_FRAME_FORMAT] != "estia":
         raise cv.Invalid("silent_mode requires frame_format: estia (first-generation R410A)")
+    if (CONF_FAULT_CODE in config or CONF_FAULT_ACTIVE in config) and config[CONF_FRAME_FORMAT] != "estia":
+        raise cv.Invalid("fault_code and fault_active require frame_format: estia (first-generation R410A)")
     return config
 
 
@@ -348,6 +355,13 @@ CONFIG_SCHEMA = cv.All(
         cv.GenerateID(): cv.declare_id(ToshibaAbClimate),
         cv.Optional(CONF_CONNECTED): binary_sensor.binary_sensor_schema(
             device_class = DEVICE_CLASS_CONNECTIVITY,
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
+        cv.Optional(CONF_FAULT_CODE): text_sensor.text_sensor_schema(
+            entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+        ),
+        cv.Optional(CONF_FAULT_ACTIVE): binary_sensor.binary_sensor_schema(
+            device_class=DEVICE_CLASS_PROBLEM,
             entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
         ),
         cv.Optional(CONF_VENT): cv.maybe_simple_value(
@@ -943,6 +957,12 @@ async def to_code(config):
     if CONF_REMOTE_ERROR in config:
         sens = await binary_sensor.new_binary_sensor(config[CONF_REMOTE_ERROR])
         cg.add(var.set_remote_error_binary_sensor(sens))
+    if CONF_FAULT_CODE in config:
+        sens = await text_sensor.new_text_sensor(config[CONF_FAULT_CODE])
+        cg.add(var.set_fault_code_text_sensor(sens))
+    if CONF_FAULT_ACTIVE in config:
+        sens = await binary_sensor.new_binary_sensor(config[CONF_FAULT_ACTIVE])
+        cg.add(var.set_fault_active_binary_sensor(sens))
     if CONF_OUTDOOR_TEMPERATURE in config:
         sens = await sensor.new_sensor(config[CONF_OUTDOOR_TEMPERATURE])
         cg.add(var.set_outdoor_temp_sensor(sens))
