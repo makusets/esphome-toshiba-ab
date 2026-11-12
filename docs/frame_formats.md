@@ -245,6 +245,9 @@ climate:
 ### Structure
 
 The `estia` option selects the component's first-generation Estia support path.
+This format automatically creates fault-status and fault-code diagnostics, decoded
+passively without polling. See [fault diagnostics](estia_fault_reporting.md).
+
 When `master` is omitted, this format defaults the master address to `0x70`
 and keeps address auto-detection enabled.
 It uses the TU2C-style format rather than the Estia R32 A0 style and parity NONE:

@@ -1216,6 +1216,120 @@ static void first_gen_dhw_demand_checks() {
   assert(uart.transmitted == 0 && unit.write_queue_.empty() && unit.commands_empty());
 }
 
+static void first_gen_fault_checks() {
+  for (bool read_only : {false, true}) {
+    RecordingUart uart;
+    TestEstia unit;
+    unit.set_uart_parent(&uart);
+    unit.set_frame_format(FrameFormat::ESTIA);
+    unit.set_remote_address(0x61);
+    unit.set_read_only(read_only);
+    text_sensor::TextSensor code;
+    binary_sensor::BinarySensor active, remote_error;
+    unit.set_fault_code_text_sensor(&code);
+    unit.set_fault_active_binary_sensor(&active);
+    unit.set_remote_error_binary_sensor(&remote_error);
+    unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+    unit.loop();
+    assert(!code.has_state() && !active.has_state());  // No assumed startup clear.
+    unsigned publications = 0;
+    code.add_on_state_callback([&](const std::string &) { ++publications; });
+    auto expect = [&](const char *value, bool fault) {
+      assert(code.has_state() && code.state == value);
+      assert(active.has_state() && active.state == fault);
+    };
+    // Actual Series 5 captures: announcements, responses to a wall controller,
+    // and unsolicited all-clear announcements. All use the real CRC receive path.
+    const uint8_t captures[][9] = {
+        {0x0C, 0x70, 0xFF, 0xE0, 0xC0, 0x29, 0x70, 0x01, 0xB5},
+        {0x0C, 0x70, 0xFF, 0xE0, 0xA0, 0x29, 0x70, 0x01, 0x95},
+        {0x0C, 0x70, 0xFF, 0xE0, 0xC0, 0x29, 0x70, 0x00, 0xB4},
+        {0x0C, 0x70, 0xFF, 0xE0, 0xC0, 0x29, 0x70, 0x77, 0x2B},
+        {0x0C, 0x70, 0xFF, 0xE0, 0xA0, 0x29, 0x70, 0x77, 0x0B},
+        {0x0C, 0x70, 0xFF, 0xE0, 0xA0, 0x29, 0x70, 0x00, 0x94},
+        {0x0C, 0x70, 0xFF, 0xE0, 0xA0, 0x29, 0x70, 0x49, 0xDD},
+    };
+    const char *expected[] = {"A01", "A01", "None", "F23", "F23", "None", "E09"};
+    for (size_t i = 0; i < 7; ++i) {
+      DataFrame f{};
+      f.set_tu2c(true);
+      std::copy(std::begin(captures[i]), std::end(captures[i]), f.raw);
+      assert(unit.receive_data_frame(&f));
+      expect(expected[i], captures[i][7] != 0);
+      unit.loop();
+      assert(uart.transmitted == 0 && unit.write_queue_.empty() && unit.commands_empty());
+    }
+    const auto previous_publications = publications;
+    DataFrame report{};
+    report.set_tu2c(true);
+    std::copy(std::begin(captures[6]), std::end(captures[6]), report.raw);
+    assert(unit.receive_data_frame(&report));
+    assert(publications == previous_publications);  // Suppress duplicate updates.
+    auto bad = report;
+    bad.raw[7] = 0;
+    assert(!unit.receive_data_frame(&bad));
+    expect("E09", true);
+    for (unsigned changed_byte : {1, 2, 3, 4, 5}) {
+      bad = report;
+      bad.raw[7] = 0;
+      bad.raw[changed_byte] ^= 1;
+      bad.raw[8] = dn_checksum(bad.raw, 8);
+      assert(unit.receive_data_frame(&bad));
+      expect("E09", true);
+    }
+    bad = report;
+    bad.raw[0] = 0x0B;
+    bad.raw[7] = dn_checksum(bad.raw, 7);
+    assert(unit.receive_data_frame(&bad));  // Missing code is not an all-clear.
+    expect("E09", true);
+    auto status = first_gen_status(0x40, false, 0);
+    assert(unit.receive_data_frame(&status));
+    expect("E09", true);  // Ordinary status cannot clear the separate fault state.
+    DataFrame remote{};
+    remote.set_tu2c(true);
+    const uint8_t remote_bytes[] = {0x0B, 0x60, 0x70, 0xE0, 0x61, 0x31, 0x00, 0x4D};
+    std::copy(std::begin(remote_bytes), std::end(remote_bytes), remote.raw);
+    remote.raw[6] = 0x49;
+    remote.raw[7] = dn_checksum(remote.raw, 7);
+    assert(unit.receive_data_frame(&remote));
+    assert(remote_error.has_state() && remote_error.state);
+    remote.raw[6] = 0;
+    remote.raw[7] = dn_checksum(remote.raw, 7);
+    assert(unit.receive_data_frame(&remote));
+    assert(remote_error.has_state() && !remote_error.state);
+    expect("E09", true);  // Remote-controller status is independent.
+    report.raw[7] = 0x34;
+    report.raw[8] = dn_checksum(report.raw, 8);
+    assert(unit.receive_data_frame(&report));
+    expect("0x34", true);
+    unit.last_master_alive_millis_ = millis() - LAST_ALIVE_TIMEOUT_MILLIS - 1;
+    unit.loop(); unit.loop();
+    assert(!code.has_state() && !active.has_state());
+    assert(unit.receive_data_frame(&status));
+    assert(!code.has_state() && !active.has_state());  // Reconnection is not a clear.
+    assert(unit.receive_data_frame(&report));
+    expect("0x34", true);  // Identical fault must republish after a timeout.
+    report.raw[7] = 0;
+    report.raw[8] = dn_checksum(report.raw, 8);
+    assert(unit.receive_data_frame(&report));
+    expect("None", false);
+    assert(uart.transmitted == 0 && unit.write_queue_.empty() && unit.commands_empty());
+  }
+  // Honor an explicitly configured master instead of assuming address 0x70.
+  TestEstia configured;
+  configured.set_frame_format(FrameFormat::ESTIA);
+  configured.set_master_address(0x71);
+  text_sensor::TextSensor code;
+  configured.set_fault_code_text_sensor(&code);
+  DataFrame report{};
+  report.set_tu2c(true);
+  const uint8_t bytes[] = {0x0C, 0x71, 0xFF, 0xE0, 0xC0, 0x29, 0x70, 0x77, 0x00};
+  std::copy(std::begin(bytes), std::end(bytes), report.raw);
+  report.raw[8] = dn_checksum(report.raw, 8);
+  assert(configured.receive_data_frame(&report));
+  assert(code.has_state() && code.state == "F23");
+}
+
 static void read_only_transmission_checks() {
   for (auto format : {FrameFormat::A0, FrameFormat::NORMAL, FrameFormat::HM,
                       FrameFormat::TU2C, FrameFormat::ESTIA}) {
@@ -1552,6 +1666,7 @@ int main() {
   zone_mode_capability_checks();
   new (&App) Application();
   host::setup_preferences();
+  first_gen_fault_checks();
   first_gen_cooling_setpoint_checks();
   first_gen_dhw_mode_checks();
   first_gen_temperature_checks();

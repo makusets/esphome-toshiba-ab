@@ -107,6 +107,34 @@ with tempfile.TemporaryDirectory(prefix="estia-config-", dir=work) as temp:
         assert result.returncode != 0
         assert legacy in result.stdout + result.stderr and canonical in result.stdout + result.stderr
 
+    # R410A always creates both diagnostics without requiring YAML entries.
+    for framing in ("estia", "a0", "estia_a0", "normal", "hm", "tu2c", "auto"):
+        config["climate"] = [{"platform": "toshiba_ab", "name": "Fault defaults", "frame_format": framing}]
+        path = temp / f"fault-defaults-{framing}.yaml"
+        path.write_text(yaml.safe_dump(config))
+        subprocess.run([sys.executable, "-m", "esphome", "compile", "--only-generate", str(path)], check=True)
+        source = (build / "src/main.cpp").read_text()
+        for option in ("fault_code_text_sensor", "fault_active_binary_sensor"):
+            assert source.count(f"set_{option}(") == (1 if framing == "estia" else 0)
+        if framing == "estia":
+            assert '"Toshiba Fault Code"' in source and '"Toshiba Fault Active"' in source
+        else:
+            config["climate"][0]["fault_code"] = {"name": "Unsupported Fault"}
+            path.write_text(yaml.safe_dump(config))
+            result = subprocess.run([sys.executable, "-m", "esphome", "config", str(path)],
+                                    capture_output=True, text=True)
+            assert result.returncode != 0
+            assert "fault_code and fault_active require frame_format: estia" in result.stdout + result.stderr
+    config["climate"] = [{"platform": "toshiba_ab", "name": "Custom faults", "frame_format": "estia",
+                          "fault_code": {"name": "Custom Fault Code", "id": "my_fault_code"},
+                          "fault_active": {"name": "Custom Fault Status", "id": "my_fault_active"}}]
+    path = temp / "fault-custom.yaml"
+    path.write_text(yaml.safe_dump(config))
+    subprocess.run([sys.executable, "-m", "esphome", "compile", "--only-generate", str(path)], check=True)
+    source = (build / "src/main.cpp").read_text()
+    assert "set_fault_code_text_sensor(my_fault_code)" in source
+    assert "set_fault_active_binary_sensor(my_fault_active)" in source
+
     for framing in ["estia", "a0", "normal", "auto"]:
         config["climate"] = [{"platform": "toshiba_ab", "name": "DHW",
                               "frame_format": framing, "curve_shift": {"name": "Curve Shift"}}]
