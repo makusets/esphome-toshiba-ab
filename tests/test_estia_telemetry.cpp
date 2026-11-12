@@ -1,6 +1,7 @@
 #include "esphome/components/toshiba_ab/toshiba_ab.h"
 #include "esphome/core/application.h"
 #include "esphome/components/host/preferences.h"
+#include "esphome/components/template/number/template_number.h"
 #include <cassert>
 #include <array>
 #include <cmath>
@@ -1380,6 +1381,50 @@ static void master_keepalive_silence_checks() {
   }
 }
 
+static void a0_restored_slider_checks() {
+  uint32_t preference_key = 0x29100001;
+  for (float saved : {6.0f, 0.0f, NAN, 16.0f}) {
+    RecordingUart uart;
+    TestEstia unit;
+    unit.set_uart_parent(&uart);
+    unit.set_frame_format(FrameFormat::A0);
+    unit.set_demand_enabled(true);
+    unit.set_autonomous(false);
+    template_::TemplateNumber slider;
+    slider.object_id_hash_ = preference_key++;
+    slider.traits.set_min_value(0);
+    slider.traits.set_max_value(15);
+    slider.traits.set_step(1);
+    slider.set_restore_value(true);
+    slider.set_optimistic(true);
+    slider.add_on_state_callback([&](float value) {
+      if (std::isfinite(value) && value >= 0 && value <= 15)
+        unit.send_estia_demand(static_cast<uint8_t>(value));
+    });
+    auto preference = slider.make_entity_preference<float>();
+    assert(preference.save(&saved));
+    slider.setup();  // Actual ESPHome restoration publishes state; no bus report is needed.
+    if (!std::isfinite(saved) || saved > 15) {
+      assert(!unit.estia_demand_value_.has_value() && unit.commands_empty());
+      continue;
+    }
+    assert(unit.estia_demand_value_ == static_cast<uint8_t>(saved));
+    unit.setup();  // Number setup precedes the climate component's setup.
+    assert(unit.estia_demand_value_ == static_cast<uint8_t>(saved));
+    assert(unit.pop_command()[11] == static_cast<uint8_t>(saved));
+    unit.send_estia_demand_heartbeat();
+    assert(unit.commands_empty());  // Startup silence still applies.
+    unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+    unit.send_estia_demand_heartbeat();
+    assert(unit.pop_command()[12] == static_cast<uint8_t>(saved));
+    slider.make_call().set_value(5).perform();  // Same on_value hook handles ordinary changes.
+    assert(unit.pop_command()[11] == 5);
+    float persisted;
+    assert(preference.load(&persisted) && persisted == 5);
+    assert(uart.transmitted == 0);  // Only queued; the regular TX gate remains responsible.
+  }
+}
+
 static DataFrame a0_demand_report(uint8_t type, uint8_t ai1, uint8_t ai2 = 0, uint8_t ai3 = 0,
                                  uint16_t source = 0x0800, uint16_t destination = 0x00FE) {
   const size_t end = type == 0x58 ? 15 : type == 0x55 ? 14 : 12;
@@ -1965,6 +2010,7 @@ int main() {
   zone_mode_capability_checks();
   new (&App) Application();
   host::setup_preferences();
+  a0_restored_slider_checks();
   a0_demand_startup_checks();
   master_keepalive_silence_checks();
   first_gen_fault_checks();
