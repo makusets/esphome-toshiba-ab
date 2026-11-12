@@ -471,7 +471,7 @@ static void first_gen_temperature_checks() {
   near(dhw.state, 50.0f);
 }
 
-static void first_gen_outdoor_temperature_spike_checks() {
+static void first_gen_signed_sensor_checks() {
   TestEstia unit;
   unit.set_frame_format(FrameFormat::ESTIA);
   unit.set_master_address(0x70);
@@ -507,23 +507,51 @@ static void first_gen_outdoor_temperature_spike_checks() {
   near(outdoor.state, -5.0f);
   feed(0x00A9, 0x61);
   near(outdoor.state, 169.0f);
-  // A plausible value is accepted; the HA layer filters rate-of-change.
+  // Values are published as-is; any rate limiting belongs to the HA layer.
   feed(28, 0x61);
   near(outdoor.state, 28.0f);
   feed(8, 0x61);
   near(outdoor.state, 8.0f);
-  // A reply addressed to another remote must not be consumed.
-  feed(0x00A9, 0x61, 0x60);
+  // A reply addressed to another remote must not be consumed; our pending
+  // query must survive so the next reply addressed to us is still accepted.
+  unit.last_sensor_query_id_ = 0x61;
+  unit.sensor_query_outstanding_ = true;
+  auto other_5c = make_reply(0x00A9, 0x60);
+  unit.process_received_data_estia_first_gen_(&other_5c);
   near(outdoor.state, 8.0f);
+  assert(unit.sensor_query_outstanding_);
+  assert(unit.last_sensor_query_id_ == 0x61);
+  auto own_5c = make_reply(31, 0x61);
+  unit.process_received_data_estia_first_gen_(&own_5c);
+  near(outdoor.state, 31.0f);
+  // The same destination rule applies to a "sensor not available" (0xA2)
+  // reply; another remote's reply must not clear our pending query.
+  auto make_unavailable = [](uint8_t dest = 0x61) {
+    DataFrame f{};
+    const uint8_t base[] = {0x0C, 0x70, dest, 0xE0, 0x80, 0xA2, 0x00, 0x00, 0x00};
+    std::copy(std::begin(base), std::end(base), f.raw);
+    f.raw[8] = dn_checksum(f.raw, 8);
+    return f;
+  };
+  unit.last_sensor_query_id_ = 0x61;
+  unit.sensor_query_outstanding_ = true;
+  auto other_a2 = make_unavailable(0x60);
+  unit.process_received_data_estia_first_gen_(&other_a2);
+  assert(unit.sensor_query_outstanding_);
+  assert(unit.last_sensor_query_id_ == 0x61);
+  auto own_a2 = make_unavailable(0x61);
+  unit.process_received_data_estia_first_gen_(&own_a2);
+  assert(!unit.sensor_query_outstanding_);
+  assert(unit.last_sensor_query_id_ == 0xFF);
   // Unmatched 0x5C replies must never be published as outdoor temperature.
   feed(0x00A9, 0xFF);
-  near(outdoor.state, 8.0f);
+  near(outdoor.state, 31.0f);
   feed(0x00A9, 0x02);
-  near(outdoor.state, 8.0f);
+  near(outdoor.state, 31.0f);
 
   // The R410A example defines the outdoor temperature as a polled sensor with
   // address 0x61, so outdoor_temp_sensor_ may be null. The ID check must still
-  // reject out-of-range values.
+  // associate signed values with the polled 0x61 sensor.
   TestEstia polled;
   polled.set_frame_format(FrameFormat::ESTIA);
   polled.set_master_address(0x70);
@@ -566,8 +594,8 @@ static void first_gen_outdoor_temperature_spike_checks() {
   feed_polled(5, 0x02);
   near(signed_temp.state, 5.0f);
 
-  // A sentinel arriving before the first valid sample must not be published
-  // just because the previous state is still unknown.
+  // A signed -1 before the first valid sample is a valid temperature and is
+  // published, not treated as a sentinel.
   TestEstia startup;
   startup.set_frame_format(FrameFormat::ESTIA);
   startup.set_master_address(0x70);
@@ -1325,7 +1353,7 @@ int main() {
   first_gen_cooling_setpoint_checks();
   first_gen_dhw_mode_checks();
   first_gen_temperature_checks();
-  first_gen_outdoor_temperature_spike_checks();
+  first_gen_signed_sensor_checks();
   dn_checks();
   new (&App) Application();
   first_gen_dhw_demand_checks();
