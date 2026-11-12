@@ -1216,6 +1216,170 @@ static void first_gen_dhw_demand_checks() {
   assert(uart.transmitted == 0 && unit.write_queue_.empty() && unit.commands_empty());
 }
 
+static DataFrame master_keepalive(FrameFormat format) {
+  DataFrame f{};
+  if (format == FrameFormat::A0) {
+    f = frame(0x10, 0x008A, 9);
+    f.raw[3] = 0x08;
+    f.raw[6] = 0xFE;
+    const auto crc = f.calculate_estia_crc();
+    f.raw[9] = crc >> 8; f.raw[10] = crc;
+  } else if (format == FrameFormat::TU2C || format == FrameFormat::ESTIA) {
+    f.set_tu2c(true);
+    const uint8_t bytes[] = {0x0A, uint8_t(format == FrameFormat::TU2C ? 0x90 : 0x70),
+                             0xFF, 0xFF, 0x00, 0x3A, 0x00};
+    std::copy(std::begin(bytes), std::end(bytes), f.raw);
+    f.raw[6] = dn_checksum(f.raw, 6);
+  } else if (format == FrameFormat::HM) {
+    // Exercise the same conversion used by the HM wire reader. Its checksum
+    // algorithm is unknown; receive_data_frame intentionally tolerates it.
+    const uint8_t wire[] = {0xA0, 0x00, 0x10, 0x07, 0x00, 0x08, 0x00, 0x00, 0xFE, 0x00, 0x8A, 0x00};
+    std::copy(std::begin(wire), std::end(wire), f.raw);
+    assert(DataFrameReader::canonicalize_hm_frame(&f, sizeof(wire)));
+  } else {
+    f.source = 0x00; f.dest = 0xFE; f.opcode1 = OPCODE_PING; f.data_length = 2;
+    f.data[0] = 0x80; f.data[1] = 0x8A;
+    f.data[2] = f.calculate_crc();
+  }
+  return f;
+}
+
+static void master_keepalive_silence_checks() {
+  TestEstia timing;
+  assert(!timing.is_master_keepalive_silence_active_(5000));  // Nothing observed yet.
+  for (uint32_t last : {0U, 10000U, UINT32_MAX - 2000U}) {
+    timing.last_master_keepalive_ms_ = last;
+    assert(!timing.is_master_keepalive_silence_active_(last + 4499));
+    assert(timing.is_master_keepalive_silence_active_(last + 4500));
+    assert(timing.is_master_keepalive_silence_active_(last + 5000));
+    assert(timing.is_master_keepalive_silence_active_(last + 5300));  // Late keepalive.
+    assert(timing.is_master_keepalive_silence_active_(last + 5999));
+    assert(!timing.is_master_keepalive_silence_active_(last + 6000));
+    assert(!timing.is_master_keepalive_silence_active_(last + 10000));
+  }
+  for (auto format : {FrameFormat::NORMAL, FrameFormat::HM, FrameFormat::TU2C, FrameFormat::ESTIA, FrameFormat::A0}) {
+    RecordingUart uart;
+    TestEstia unit;
+    unit.set_uart_parent(&uart);
+    unit.set_frame_format(format);
+    const uint8_t master = format == FrameFormat::TU2C ? 0x90 : format == FrameFormat::ESTIA ? 0x70 : 0x00;
+    unit.set_master_address(master);
+    unit.set_autonomous(false);
+    unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+    unit.announce_ack_received_ = true;
+    const auto ping = master_keepalive(format);
+    assert(unit.receive_data_frame(&ping));
+    assert(unit.last_master_keepalive_ms_.has_value());
+    // Ordinary master traffic refreshes connectivity, not the periodic phase.
+    unit.last_master_keepalive_ms_ = 123456;
+    auto other = ping;
+    if (format == FrameFormat::A0) {
+      other.raw[0] = 0x58;
+      const auto crc = other.calculate_estia_crc();
+      other.raw[9] = crc >> 8; other.raw[10] = crc;
+    } else if (other.is_tu2c()) {
+      other.raw[5] = 0x39;
+      other.raw[6] = dn_checksum(other.raw, 6);
+    } else {
+      other.opcode1 = 0x7F;
+      other.data[2] = other.calculate_crc();
+    }
+    assert(unit.receive_data_frame(&other));
+    assert(*unit.last_master_keepalive_ms_ == 123456);
+    other = ping;
+    if (format == FrameFormat::A0) {
+      other.raw[4] ^= 1;
+      const auto crc = other.calculate_estia_crc();
+      other.raw[9] = crc >> 8; other.raw[10] = crc;
+    } else if (other.is_tu2c()) {
+      other.raw[1] ^= 1;
+      other.raw[6] = dn_checksum(other.raw, 6);
+    } else {
+      other.source ^= 1;
+      other.data[2] = other.calculate_crc();
+    }
+    assert(unit.receive_data_frame(&other));
+    assert(*unit.last_master_keepalive_ms_ == 123456);  // Another source cannot rephase us.
+    if (format != FrameFormat::HM) {
+      other = ping;
+      const size_t size = other.is_estia() ? other.estia_size() : other.size();
+      other.raw[size - 1] ^= 1;
+      assert(!unit.receive_data_frame(&other));
+      assert(*unit.last_master_keepalive_ms_ == 123456);
+    }
+    auto quiet_bus = [&]() {
+      unit.last_received_frame_millis_ = millis() - 1000;
+      unit.last_sent_frame_millis_ = millis() - 1000;
+      unit.last_tu2c_received_frame_millis_ = millis() - 1000;
+      unit.last_tu2c_sent_frame_millis_ = millis() - 1000;
+    };
+    DataFrame command{};
+    command.data_length = 2;
+    assert(unit.enqueue_command_(command));
+    assert(unit.enqueue_raw_frame_({0xA0, 0x00}));
+    quiet_bus();
+    unit.last_master_keepalive_ms_ = millis() - 4500;
+    unit.loop();
+    assert(uart.transmitted == 0 && unit.write_queue_.size() == 1 && unit.raw_write_queue_.size() == 1);
+    unit.last_master_keepalive_ms_ = millis() - 6000;
+    unit.loop();
+    assert(uart.transmitted == 2 && unit.raw_write_queue_.empty() && unit.write_queue_.size() == 1);
+    assert(unit.enqueue_raw_frame_({0xA0, 0x00}));
+    uart.transmitted = 0;
+    assert(unit.receive_data_frame(&ping));
+    assert(!unit.is_master_keepalive_silence_active_(millis()));
+    unit.last_received_frame_millis_ = millis();
+    unit.loop();
+    assert(uart.transmitted == 0);  // Existing post-RX silence still applies.
+    quiet_bus();
+    unit.loop();
+    assert(uart.transmitted == 2 && unit.raw_write_queue_.empty() && unit.write_queue_.size() == 1);
+    quiet_bus();
+    unit.loop();
+    assert(uart.transmitted > 2 && unit.write_queue_.empty());  // One frame per TX slot.
+    uart.transmitted = 0;
+    assert(unit.enqueue_sensor_query_(0x02));
+    quiet_bus();
+    unit.last_master_keepalive_ms_ = millis() - 4500;
+    unit.loop();
+    assert(unit.pending_count_ == 1 && !unit.sensor_query_outstanding_ && uart.transmitted == 0);
+    assert(unit.receive_data_frame(&ping));
+    quiet_bus();
+    unit.loop();
+    assert(unit.pending_count_ == 0 && unit.sensor_query_outstanding_ && uart.transmitted > 0);
+    unit.set_read_only(true); unit.set_read_only(false);  // Clear queues before retry checks.
+    uart.transmitted = 0;
+    quiet_bus();
+    unit.last_master_keepalive_ms_ = millis() - 4500;
+    if (format == FrameFormat::A0) {
+      unit.estia_pending_cmd_ = {0xA0, 0x00};
+      unit.estia_cmd_attempts_ = 1;
+      unit.estia_cmd_sent_ms_ = millis() - 4000;
+      unit.loop();
+      assert(unit.estia_cmd_attempts_ == 1 && unit.raw_write_queue_.empty() && uart.transmitted == 0);
+      assert(unit.receive_data_frame(&ping));
+      quiet_bus(); unit.loop();
+      assert(unit.estia_cmd_attempts_ == 2 && unit.raw_write_queue_.size() == 1);
+      unit.loop();
+      assert(uart.transmitted == 2);
+    } else {
+      unit.last_unconfirmed_command_ = command;
+      unit.last_unconfirmed_command_attempts_ = 1;
+      unit.last_unconfirmed_command_sent_ms_ = millis() - 1000;
+      unit.loop();
+      assert(unit.last_unconfirmed_command_attempts_ == 1 && uart.transmitted == 0);
+      assert(unit.receive_data_frame(&ping));
+      quiet_bus(); unit.loop();
+      assert(unit.last_unconfirmed_command_attempts_ == 2 && uart.transmitted > 0);
+    }
+    unit.set_master_address(master);
+    assert(!unit.last_master_keepalive_ms_.has_value());
+    assert(unit.receive_data_frame(&ping));
+    unit.set_frame_format(format);
+    assert(!unit.last_master_keepalive_ms_.has_value());
+  }
+}
+
 static void first_gen_fault_checks() {
   for (bool read_only : {false, true}) {
     RecordingUart uart;
@@ -1669,6 +1833,7 @@ int main() {
   zone_mode_capability_checks();
   new (&App) Application();
   host::setup_preferences();
+  master_keepalive_silence_checks();
   first_gen_fault_checks();
   first_gen_cooling_setpoint_checks();
   first_gen_dhw_mode_checks();
