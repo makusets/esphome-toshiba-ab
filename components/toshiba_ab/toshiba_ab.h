@@ -1104,6 +1104,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void send_estia_first_gen_antibacteria(bool on);
   void send_estia_first_gen_auto_mode(bool on);
   void send_estia_first_gen_request_data(uint8_t request_code);
+  void send_estia_first_gen_ping_();
+  void send_estia_first_gen_header_status_();
   // One DN read at a time. Callback receives (success, raw value); timeout is 10s
   // from transmission. False means the request was not accepted.
   using EstiaDnReadCallback = std::function<void(bool, uint8_t)>;
