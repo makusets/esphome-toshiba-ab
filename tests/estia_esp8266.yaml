@@ -18,9 +18,24 @@ uart:
 climate:
   - platform: toshiba_ab
     name: Estia DHW
+    id: toshiba_estia
     frame_format: a0
     demand_enabled: true
     demand:
       name: Reported Demand
     zone2_climate:
       supports_heat: false
+number:
+  - platform: template
+    name: Estia Demand
+    id: estia_demand
+    min_value: 0
+    max_value: 15
+    step: 1
+    optimistic: true
+    restore_value: true
+    on_value:
+      then:
+        - lambda: |-
+            if (std::isfinite(x) && x >= 0 && x <= 15)
+              id(toshiba_estia).send_estia_demand(static_cast<uint8_t>(x));

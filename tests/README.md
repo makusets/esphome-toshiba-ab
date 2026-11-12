@@ -58,6 +58,10 @@ A0 demand checks verify unknown startup without zero heartbeats, master-echo and
 interface payload offsets, CRC/length/address/range rejection, retained AI2/AI3
 channels, explicit zero, pending-command protection, startup silence, read-only
 decoding, enable/disable behavior and isolation from the other protocols.
+The restored-slider check uses ESPHome's actual template-number setup and
+preferences to verify startup forwarding of saved 6 and 0 without a master echo,
+rejection of invalid stored values, later slider changes, and startup hold-off.
+Preferences are isolated in the test runner's temporary directory.
 
 Custom preset API compatibility checks (legacy traits API, current entity API,
 and transitional releases exposing both):

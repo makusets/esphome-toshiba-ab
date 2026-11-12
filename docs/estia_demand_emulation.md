@@ -2,9 +2,11 @@
 
 With `frame_format: a0` and `demand_enabled: true`, automatic demand heartbeats
 wait for a known demand value. Rebooting the ESP no longer causes it to transmit
-a fabricated zero before reading the bus. The component learns demand during
-the existing startup silence and starts heartbeats afterward using the most
-recent decoded value. It does not queue intermediate heartbeats during startup.
+a fabricated zero. For a restored template slider, forward its state using the
+`on_value` action below. The first automatic heartbeat then uses that value after
+the existing startup silence. Bus reports can also supply state, but master
+echoes are responses to interface traffic and cannot be relied on to bootstrap
+emulation. No intermediate heartbeats are queued during startup.
 
 Known values can come from a checksum-valid report on the bus or an explicit
 `send_estia_demand(value)` call. Zero is a valid decoded or explicitly requested
@@ -44,10 +46,35 @@ channels instead of assuming a fixed temperature formula.
 
 An optimistic template number with `restore_value: true` restores its displayed
 value. That alone does not call `send_estia_demand()` on the climate component.
-Bus synchronization therefore uses the master's reported value rather than
-assuming the slider has restored the emulation state. An explicit user or
-automation request still sets the desired AI1 value immediately, even if a
-startup report has not arrived yet.
+Use `on_value` instead of `set_action` to forward both the restored startup value
+and later slider changes. With `demand_enabled: true`, configure the number as
+follows (replace the climate ID with the one used by your device):
+
+```yaml
+number:
+  - platform: template
+    name: Estia Demand
+    id: estia_demand
+    min_value: 0
+    max_value: 15
+    step: 1
+    optimistic: true
+    restore_value: true
+    on_value:
+      then:
+        - lambda: |-
+            if (std::isfinite(x) && x >= 0 && x <= 15)
+              id(toshiba_estia).send_estia_demand(static_cast<uint8_t>(x));
+```
+
+The slider must have `restore_value: true`. Its setup publishes the restored
+(or configured initial) value, triggering `on_value`. Remove the old `set_action`
+to avoid forwarding changes twice. The command remains
+subject to the component's startup transmit hold-off and read-only guard. Master
+echoes provide subsequent readback, not the initial value. No second copy of the
+slider's saved value is stored by the component. Persistence across full power
+loss on ESP8266 also depends on its `restore_from_flash` setting and the normal
+preferences write interval.
 
 For an independent readback, add this under the existing climate entry:
 

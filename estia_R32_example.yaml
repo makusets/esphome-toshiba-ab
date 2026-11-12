@@ -278,6 +278,8 @@ climate:
 # Also set demand_enabled: true in the climate section above.
 # Heartbeats wait for decoded bus state or an explicit slider request; they no
 # longer start at zero. restore_value below restores only the slider's state.
+# Use on_value, not set_action: restoration publishes the slider state without
+# invoking set_action. This initializes emulation without waiting for a master echo.
 # Optional readback under the climate entry: demand: {name: "Estia Reported Demand"}
 # See docs/estia_demand_emulation.md for packet layouts and startup behavior.
 
@@ -290,8 +292,11 @@ climate:
 #     step: 1
 #     optimistic: true
 #     restore_value: true
-#     set_action:
-#       - lambda: id(toshiba_estia).send_estia_demand((uint8_t)x);
+#     on_value:
+#       then:
+#         - lambda: |-
+#             if (std::isfinite(x) && x >= 0 && x <= 15)
+#               id(toshiba_estia).send_estia_demand(static_cast<uint8_t>(x));
 
 
   # - platform: template
