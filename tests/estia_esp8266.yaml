@@ -19,5 +19,8 @@ climate:
   - platform: toshiba_ab
     name: Estia DHW
     frame_format: a0
+    demand_enabled: true
+    demand:
+      name: Reported Demand
     zone2_climate:
       supports_heat: false
