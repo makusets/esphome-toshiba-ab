@@ -370,7 +370,7 @@ is known to be a U-series/TU2C system, use `parity: NONE` and
 
 The component uses one remote address for the selected protocol. Without an
 explicit YAML `remote`, TCC-Link/HM starts at `0x40`, TU2C at `0x50`, and
-first-generation Estia at `0x60`. Setting `remote` explicitly disables automatic
+first-generation Estia at `0x60`, and A0 / Estia R32 at `0x0040`. Setting `remote` explicitly disables automatic
 collision recovery.
 
 TU2C detects collisions from valid received remote frames after filtering its own
@@ -391,6 +391,20 @@ reserved temperature-sensor address where applicable (Estia retains its full
 `0x60`–`0x69` range). Registration is built using the selected
 address after the silent period; startup registration requests are not queued
 with an earlier candidate. Collision recovery stays active afterward.
+
+
+For A0 / Estia R32, automatic controller addressing starts at `0x0040` and
+advances through `0x0049` when a CRC-valid frame reveals an occupied address.
+`0x0041` is reserved when demand emulation is enabled; otherwise it is
+available like the other addresses. An explicit `remote:` setting disables automatic selection. If all
+addresses are occupied, controller transmissions stop. The separate demand
+interface keeps its fixed address and heartbeat.
+
+A0 sends a periodic remote PING regardless of the `autonomous` setting, using
+the selected controller and master addresses. It respects read-only mode,
+`ping: false`, startup listening and the bus transmission guards. Its `000C`
+request uses the remote PING payload `81 00 00 48 00` with A0 addressing and
+CRC16; this translation still needs confirmation on an R32 installation.
 
 ### Regular TU2C remote temperature reports
 
