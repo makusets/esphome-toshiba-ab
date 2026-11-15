@@ -2149,10 +2149,85 @@ static void zone_mode_capability_checks() {
   }
 }
 
+static void test_a0_address_selection_and_ping() {
+  TestEstia unit;
+  unit.set_frame_format(FrameFormat::A0);
+  unit.set_autonomous(false);
+  unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+  unit.send_estia_a0_ping_();
+  assert(unit.raw_write_queue_.size() == 1);
+  auto ping = unit.raw_write_queue_.front();
+  assert(ping.size() == 18 && ping[5] == 0 && ping[6] == 0x40);
+  assert(ping[7] == 0x08 && ping[8] == 0 && ping[10] == 0x0C && ping[11] == 0x81);
+  DataFrame echo{};
+  echo.set_estia(true); echo.set_estia_len(ping[3]);
+  std::memcpy(echo.raw, ping.data() + 2, ping.size() - 2);
+  assert(echo.validate_estia_crc());
+  unit.remember_tx_frame_for_echo_(ping.data(), ping.size(), false);
+  assert(unit.receive_data_frame(&echo));
+  assert(unit.remote_address_ == 0x40);
+  auto remote = [&](uint16_t source) {
+    auto f = frame(0x15, 0x00E8, 12);
+    f.raw[3] = source >> 8; f.raw[4] = source;
+    f.raw[5] = 0x08; f.raw[6] = 0;
+    auto crc = f.calculate_estia_crc();
+    f.raw[12] = crc >> 8; f.raw[13] = crc;
+    assert(unit.receive_data_frame(&f));
+  };
+  remote(0x0140);
+  assert(unit.remote_address_ == 0x40);
+  auto demand_frame = ping;
+  demand_frame[6] = 0x41; demand_frame[9] = 0x00; demand_frame[10] = 0x5F;
+  assert(unit.enqueue_raw_frame_(demand_frame));
+  unit.estia_pending_cmd_ = ping;
+  unit.sensor_query_outstanding_ = true;
+  auto invalid = echo;
+  invalid.raw[invalid.estia_size() - 1] ^= 1;
+  assert(!unit.receive_data_frame(&invalid));
+  assert(unit.remote_address_ == 0x40);
+  remote(0x40);
+  assert(unit.estia_pending_cmd_.empty() && !unit.sensor_query_outstanding_);
+  assert(unit.raw_write_queue_.size() == 1 && unit.raw_write_queue_.front() == demand_frame);
+  unit.raw_write_queue_.pop();
+  unit.send_estia_a0_ping_();
+  assert(unit.raw_write_queue_.front()[6] == 0x41);
+  unit.raw_write_queue_.pop();
+  assert(unit.remote_address_ == 0x41 && unit.estia_source_address_ == 0x41);
+  assert(unit.raw_write_queue_.empty() && unit.write_queue_.empty());
+  remote(0x43); // Remember occupied addresses before we reach them.
+  remote(0x41);
+  assert(unit.remote_address_ == 0x42);
+  remote(0x42);
+  assert(unit.remote_address_ == 0x44);
+  for (uint8_t address = 0x44; address <= 0x49; address++) remote(address);
+  assert(!unit.remote_address_available_);
+  unit.send_estia_a0_ping_();
+  assert(unit.raw_write_queue_.empty());
+  TestEstia demand;
+  demand.set_frame_format(FrameFormat::A0);
+  demand.set_demand_enabled(true);
+  demand.handle_remote_address_collision_(0x40, "test");
+  assert(demand.remote_address_ == 0x42 && demand.estia_source_address_ == 0x42);
+  TestEstia fixed;
+  fixed.set_frame_format(FrameFormat::A0);
+  fixed.set_remote_address(0x40);
+  fixed.handle_remote_address_collision_(0x40, "test");
+  assert(fixed.remote_address_ == 0x40 && fixed.remote_address_available_);
+  fixed.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+  fixed.read_only_ = true;
+  fixed.send_estia_a0_ping_();
+  assert(fixed.raw_write_queue_.empty());
+  fixed.read_only_ = false;
+  fixed.ping_enabled_ = false;
+  fixed.send_estia_a0_ping_();
+  assert(fixed.raw_write_queue_.empty());
+}
+
 int main() {
   zone_mode_capability_checks();
   new (&App) Application();
   host::setup_preferences();
+  test_a0_address_selection_and_ping();
   a0_restored_slider_checks();
   a0_demand_startup_checks();
   master_keepalive_silence_checks();

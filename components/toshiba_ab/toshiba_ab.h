@@ -1088,6 +1088,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   
   void set_autonomous(bool v) { autonomous_ = v; }
   void send_ping();
+  void send_estia_a0_ping_();
+  bool is_a0_controller_frame_(const std::vector<uint8_t> &raw) const;
   void send_read_block(uint8_t opcode2, uint16_t start, uint16_t length);
   void remote_announce();
   void tu2c_remote_announce();

@@ -144,7 +144,10 @@ bool ToshibaAbClimate::is_own_tx_echo_(const DataFrame *f) const { // used to fi
   if (!this->last_tx_frame_for_echo_.has_value() || f == nullptr) return false;
   if ((millis() - this->last_tx_frame_millis_) > ECHO_MATCH_WINDOW_MS) return false;
   const auto &tx = this->last_tx_frame_for_echo_.value();  // last frame we wrote
-  if (f->size() == tx.size() && std::memcmp(f->raw, tx.raw, f->size()) == 0) return true;
+  const size_t rx_size = f->is_estia() ? f->estia_size() : f->size();
+  const size_t tx_size = tx.is_estia() ? tx.estia_size() : tx.size();
+  if (f->is_estia() == tx.is_estia() && rx_size > 0 && rx_size == tx_size &&
+      std::memcmp(f->raw, tx.raw, rx_size) == 0) return true;
 
   // First-generation Estia uses the TU2C reader path. On some adapters the
   // local TX can be echoed back with slightly different wrapper/timing state,
@@ -179,10 +182,18 @@ void ToshibaAbClimate::remember_tx_frame_for_echo_(const uint8_t *bytes, size_t 
     return;
   }
 
+  const bool a0 = size >= 4 && bytes[0] == 0xA0 && bytes[1] == 0x00;
+  if (a0) {
+    payload = bytes + 2;
+    payload_size = size - 2;
+  }
   DataFrame tx{};
   std::memcpy(tx.raw, payload, payload_size);
+  tx.set_estia(a0);
+  if (a0) tx.set_estia_len(payload[1]);
   tx.set_tu2c(payload_tu2c);
-  if (tx.size() == 0 || tx.size() != payload_size) {
+  const size_t frame_size = a0 ? tx.estia_size() : tx.size();
+  if (frame_size == 0 || frame_size != payload_size) {
     return;
   }
 
@@ -816,9 +827,11 @@ bool ToshibaAbClimate::is_remote_announce_frame_(const DataFrame *frame) const {
 void ToshibaAbClimate::handle_remote_address_collision_(uint8_t address, const char *reason) {
   const bool tu2c = this->data_reader.frame_format() == FrameFormat::TU2C;
   const bool estia = this->is_estia_first_gen();
+  const bool a0 = this->data_reader.frame_format() == FrameFormat::A0;
   const uint8_t max_address = estia ? TOSHIBA_ESTIA_REMOTE_MAX
                                   : tu2c ? TOSHIBA_TU2C_REMOTE_MAX : TOSHIBA_REMOTE_MAX;
-  const uint8_t sensor_address = estia ? 0xFF : tu2c ? TOSHIBA_TU2C_TEMP_SENSOR : TOSHIBA_TEMP_SENSOR;
+  const uint8_t sensor_address = a0 ? (this->demand_enabled_ ? 0x41 : 0xFF)
+                                       : estia ? 0xFF : tu2c ? TOSHIBA_TU2C_TEMP_SENSOR : TOSHIBA_TEMP_SENSOR;
   const uint8_t min_address = estia ? TOSHIBA_ESTIA_REMOTE_DEFAULT
                                   : tu2c ? TOSHIBA_TU2C_REMOTE_DEFAULT : TOSHIBA_REMOTE_DEFAULT;
   if (address < min_address || address > max_address || address == sensor_address) return;
@@ -834,6 +847,27 @@ void ToshibaAbClimate::handle_remote_address_collision_(uint8_t address, const c
   // Nothing queued under a collided address may be sent after listening ends.
   this->write_queue_ = {};
   this->last_unconfirmed_command_.reset();
+  if (a0) {
+    // Discard frames carrying the collided controller identity. The separate
+    // demand interface uses a fixed address and must retain its heartbeat.
+    std::queue<std::vector<uint8_t>> retained;
+    while (!this->raw_write_queue_.empty()) {
+      auto raw = this->raw_write_queue_.front();
+      this->raw_write_queue_.pop();
+      if (!this->is_a0_controller_frame_(raw)) retained.push(std::move(raw));
+    }
+    this->raw_write_queue_ = std::move(retained);
+    if (this->is_a0_controller_frame_(this->estia_pending_cmd_)) {
+      this->estia_pending_cmd_.clear();
+      this->estia_cmd_attempts_ = 0;
+    }
+    this->sensor_query_outstanding_ = false;
+    this->last_sensor_query_id_ = 0xFF;
+    this->last_sensor_query_ms_ = 0;
+    this->estia_zone1_on_pending_ = false;
+    this->estia_mode_after_automatik_.reset();
+    this->cancel_timeout("estia_poweron");
+  }
   if (next > max_address) {
     this->remote_address_available_ = false;
     this->announce_ack_received_ = false;
@@ -842,7 +876,8 @@ void ToshibaAbClimate::handle_remote_address_collision_(uint8_t address, const c
   }
   this->remote_address_ = next;
   this->remote_address_available_ = true;
-  if (estia) {
+  if (a0) this->estia_source_address_ = next;
+  if (estia || a0) {
     ESP_LOGI(TAG, "%s at 0x%02X; switching to remote address 0x%02X", reason, old, next);
     return;
   }
@@ -1721,6 +1756,10 @@ void ToshibaAbClimate::setup() {
   if (this->ping_enabled_) {
     this->set_interval(this->ping_interval_ms_, [this]() {
       const FrameFormat format = this->data_reader.frame_format();
+      if (format == FrameFormat::A0) {
+        this->send_estia_a0_ping_();
+        return;
+      }
       if (format == FrameFormat::ESTIA) {
         this->send_estia_first_gen_ping_();
         this->send_estia_first_gen_header_status_();
@@ -2502,6 +2541,10 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
       this->record_crc_failure_();
       return false;
     }
+    if (this->is_own_tx_echo_(frame)) return true;
+    const uint16_t source_address = (uint16_t(frame->raw[3]) << 8) | frame->raw[4];
+    if (source_address <= 0xFF)
+      this->handle_remote_address_collision_(source_address, "A0 remote-address collision");
     uint8_t frame_type = frame->raw[0];
     uint8_t frame_len = frame->raw[1];
     ESP_LOGV(TAG, "RX frame: type=0x%02X len=%d src=0x%02X%02X dst=0x%02X%02X",
@@ -2547,7 +2590,9 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
                frame->raw[7], frame->raw[8]);
 
       // Decode known dtype payloads
-      if (dtype == 0x03C6 && frame_len >= 15) {
+      if (frame_type == 0x15 && dtype == 0x000C && frame_len >= 12 && frame->raw[9] == 0x81) {
+        ESP_LOGV(TAG, "Remote PING (A0 keep-alive)");
+      } else if (dtype == 0x03C6 && frame_len >= 15) {
         // Status/state change with DHW, Zone 1 and Zone 2 setpoints. These
         // bytes were previously logged as current/setpoint/outdoor, but the
         // setpoint changes in issue #197 show that interpretation is wrong.
@@ -2877,7 +2922,8 @@ bool ToshibaAbClimate::receive_data_frame(const struct DataFrame *frame) {
     // Format: 18:LL:00:SRC:DST:00:A1:XX:YY:CRC where XX:YY = acknowledged dtype
     if (frame_type == 0x18 && frame_len >= 9 && frame->raw[7] == 0x00 && frame->raw[8] == 0xA1) {
       const uint16_t destination = (static_cast<uint16_t>(frame->raw[5]) << 8) | frame->raw[6];
-      if (destination != this->estia_source_address_) {
+      const uint16_t source = (uint16_t(frame->raw[3]) << 8) | frame->raw[4];
+      if (source != this->estia_master_address_ || destination != this->estia_source_address_) {
         ESP_LOGV(TAG, "Ignoring A0 ACK addressed to 0x%04X (ours is 0x%04X)", destination,
                  this->estia_source_address_);
         return true;
@@ -3815,7 +3861,33 @@ bool ToshibaAbClimate::enqueue_command_(const DataFrame &command) {
   return true;
 }
 
+bool ToshibaAbClimate::is_a0_controller_frame_(const std::vector<uint8_t> &raw) const {
+  if (raw.size() < 13 || raw[0] != 0xA0 || raw[1] != 0x00) return false;
+  const uint16_t source = (uint16_t(raw[5]) << 8) | raw[6];
+  const uint16_t dtype = (uint16_t(raw[9]) << 8) | raw[10];
+  // These frames belong to the independent 0–10 V interface, even when
+  // the controller happens to use 0x0041 as well.
+  if (source == 0x0041 && (dtype == 0x009F || dtype == 0x005F)) return false;
+  return source == this->estia_source_address_;
+}
+
+void ToshibaAbClimate::send_estia_a0_ping_() {
+  if (!this->ping_enabled_ || this->read_only_ || !this->remote_address_available_ ||
+      this->is_initial_frame_send_block_active_(millis())) return;
+  const uint16_t src = this->estia_source_address_, dst = this->estia_master_address_;
+  // Remote PING request: dtype 000C, status selector 81 and the shared
+  // remote keep-alive payload, wrapped in A0's 16-bit addressing and CRC.
+  std::vector<uint8_t> raw{0xA0, 0x00, 0x15, 0x0C, 0x00,
+    uint8_t(src >> 8), uint8_t(src), uint8_t(dst >> 8), uint8_t(dst),
+    0x00, 0x0C, 0x81, 0x00, 0x00, 0x48, 0x00, 0x00, 0x00};
+  const uint16_t crc = estia_crc16(raw.data(), raw.size() - 2);
+  raw[raw.size() - 2] = crc >> 8;
+  raw.back() = crc;
+  this->enqueue_raw_frame_(raw);
+}
+
 bool ToshibaAbClimate::enqueue_raw_frame_(const std::vector<uint8_t> &raw_frame) {
+  if (!this->remote_address_available_ && this->is_a0_controller_frame_(raw_frame)) return false;
   if (this->read_only_) return false;
 
   std::queue<std::vector<uint8_t>> queued = this->raw_write_queue_;
