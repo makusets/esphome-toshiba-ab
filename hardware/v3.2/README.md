@@ -50,9 +50,7 @@ This is how I installed it
 
 # Boards on eBay
 
-1 board: [eBay link](https://www.ebay.com.au/itm/307132294608)
-
-2 boards: [eBay link](https://www.ebay.com.au/itm/307132302164)
+eBay listings: ([https://www.ebay.com.au/itm/307132294608](https://www.ebay.com.au/usr/zaurak_trade))
 
 
 
