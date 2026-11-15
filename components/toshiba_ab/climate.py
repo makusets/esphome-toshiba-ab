@@ -235,6 +235,8 @@ REPORT_SENSOR_TEMP_SCHEMA = cv.All(cv.Schema({
 
 CONF_HARDWARE_UART_RX_PIN = "hardware_uart_rx_pin"
 CONF_HARDWARE_UART_PARITY = "hardware_uart_parity"
+# Internal metadata from final validation; no additional YAML setting.
+CONF_INTERRUPTIBLE_TX = "_interruptible_tx"
 CONF_PARITY = "parity"
 
 HARDWARE_UART_PARITY = {
@@ -753,6 +755,21 @@ def validate_uart(config):
         config[CONF_HARDWARE_UART_RX_PIN] = auto_rx_pin
     if CONF_HARDWARE_UART_RX_PIN in config:
         config[CONF_HARDWARE_UART_PARITY] = _hardware_uart_parity(config)
+        if CORE.is_esp8266:
+            def detect_software_tx(hub):
+                tx = hub.get(CONF_TX_PIN)
+                # Keep hardware-capable TX pins on the parent driver. Also
+                # retain legacy flash-pin configurations (e.g. v3 GPIO10),
+                # which EspSoftwareSerial rejects on a regular ESP8266.
+                if _pin_number(tx) in (0, 3, 4, 5, 12, 13, 14, 16):
+                    config[CONF_INTERRUPTIBLE_TX] = {
+                        "pin": tx,
+                        "parity": str(hub.get(CONF_PARITY, "NONE")).upper(),
+                        "data_bits": hub.get("data_bits", 8),
+                        "stop_bits": hub.get("stop_bits", 1),
+                    }
+                return hub
+            _uart_hub_config(config, detect_software_tx)
     return config
 
 
@@ -819,6 +836,15 @@ async def to_code(config):
         cg.add(var.set_hardware_uart_rx_pin(config[CONF_HARDWARE_UART_RX_PIN]))
     if CONF_HARDWARE_UART_PARITY in config:
         cg.add(var.set_hardware_uart_parity(config[CONF_HARDWARE_UART_PARITY]))
+    if CONF_INTERRUPTIBLE_TX in config:
+        tx = config[CONF_INTERRUPTIBLE_TX]
+        cg.add_define("USE_TOSHIBA_AB_INTERRUPTIBLE_TX")
+        # Use the library bundled with the ESP8266 Arduino framework.
+        cg.add_library("EspSoftwareSerial", None)
+        pin = await cg.get_variable(tx["pin"][CONF_ID])
+        cg.add(var.set_interruptible_tx_pin(pin))
+        serial_config = f'SWSERIAL_{tx["data_bits"]}{tx["parity"][0]}{tx["stop_bits"]}'
+        cg.add(var.set_interruptible_tx_config(cg.RawExpression(f"EspSoftwareSerial::{serial_config}")))
 
     if CONF_CONNECTED in config:
         sens = await binary_sensor.new_binary_sensor(config[CONF_CONNECTED])
