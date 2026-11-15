@@ -1233,6 +1233,7 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   void update_estia_demand_(uint8_t ai1, uint8_t ai2, uint8_t ai3);
   void update_estia_first_gen_fault_(uint8_t code);
   void invalidate_estia_first_gen_fault_();
+  DataFrame make_estia_first_gen_fault_query_() const;
   bool is_own_tx_echo_(const DataFrame *f) const; //used to filter echo after sending frame
   void remember_tx_frame_for_echo_(const uint8_t *bytes, size_t size, bool tu2c);
   void update_frame_validation_();
@@ -1341,6 +1342,8 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   text_sensor::TextSensor *fault_code_text_sensor_{nullptr};
   binary_sensor::BinarySensor *fault_active_binary_sensor_{nullptr};
   optional<uint8_t> estia_first_gen_fault_code_;
+  bool estia_first_gen_fault_refresh_pending_{true};
+  bool estia_first_gen_master_online_{false};
   bool remote_error_active_{false};
   uint8_t remote_error_autoreset_attempts_{0};
   bool remote_error_autoreset_give_up_logged_{false};
