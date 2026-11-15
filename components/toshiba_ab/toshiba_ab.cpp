@@ -1841,7 +1841,8 @@ void ToshibaAbClimate::setup() {
     this->read_only_switch_->publish_state(this->read_only_);
 
   // Default to no fault at boot; regular fault reports replace this state.
-  // This assumption does not establish master connectivity or add any polling.
+  // This assumption does not establish master connectivity; a one-shot query
+  // refreshes it after startup listening and master confirmation.
   if (this->is_estia_first_gen()) {
     this->estia_first_gen_fault_code_ = 0;
     if (this->fault_code_text_sensor_) this->fault_code_text_sensor_->publish_state("None");
@@ -3177,6 +3178,7 @@ void ToshibaAbClimate::loop() {
     // Do not start a sensor reply timeout while transmission is held off.
     this->drain_sensor_query_queue_();
     optional<DataFrame> frame_to_send{};
+    bool sending_fault_refresh = false;
 
     if (this->last_unconfirmed_command_.has_value()) {
       if (this->command_ack_timeout_elapsed_(now)) {
@@ -3196,6 +3198,17 @@ void ToshibaAbClimate::loop() {
                    static_cast<unsigned>(MAX_COMMAND_SEND_ATTEMPTS));
         }
       }
+    }
+
+    // Select the one-shot only when it can actually be transmitted. It is not
+    // queued under an address that discovery may later change or read-only may
+    // discard. Existing unacknowledged writes retain their normal retry handling.
+    if (!frame_to_send.has_value() && !this->last_unconfirmed_command_.has_value() &&
+        this->is_estia_first_gen() && this->estia_first_gen_fault_refresh_pending_ &&
+        this->estia_first_gen_master_online_ && this->master_address_confirmed_ &&
+        this->remote_address_available_ && now - this->last_master_alive_millis_ <= LAST_ALIVE_TIMEOUT_MILLIS) {
+      frame_to_send = this->make_estia_first_gen_fault_query_();
+      sending_fault_refresh = true;
     }
 
     if (!frame_to_send.has_value() && !this->last_unconfirmed_command_.has_value() &&
@@ -3293,6 +3306,10 @@ void ToshibaAbClimate::loop() {
         this->write_bus_frame_(frame.raw, frame.size());
       }
 
+      if (sending_fault_refresh) {
+        this->estia_first_gen_fault_refresh_pending_ = false;
+        ESP_LOGD(TAG, "Sent one-shot Estia fault-status query");
+      }
       if (this->last_unconfirmed_command_.has_value()) {
         this->last_unconfirmed_command_sent_ms_ = millis();
       }
@@ -3455,7 +3472,12 @@ void ToshibaAbClimate::loop() {
     }
   }
 
-  if (last_master_alive_millis_ > 0 && (millis() - last_master_alive_millis_) > LAST_ALIVE_TIMEOUT_MILLIS) {
+  if ((last_master_alive_millis_ > 0 || (this->is_estia_first_gen() && this->estia_first_gen_master_online_)) &&
+      (millis() - last_master_alive_millis_) > LAST_ALIVE_TIMEOUT_MILLIS) {
+    if (this->is_estia_first_gen() && this->estia_first_gen_master_online_) {
+      this->estia_first_gen_master_online_ = false;
+      this->estia_first_gen_fault_refresh_pending_ = true;
+    }
     this->invalidate_estia_first_gen_fault_();
     if (estia_was_connected_) {
       ESP_LOGW(TAG, "Heat pump disconnected");
@@ -4613,6 +4635,12 @@ void ToshibaAbClimate::send_estia_first_gen_request_data(uint8_t request_code) {
   this->send_command(make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload)));
 }
 
+DataFrame ToshibaAbClimate::make_estia_first_gen_fault_query_() const {
+  // Captured R410A request: E0:61:29, followed by a broadcast E0:A0:29 reply.
+  const uint8_t payload[] = {0xE0, 0x61, 0x29};
+  return make_estia_first_gen_frame(this->remote_address_, this->master_address_, payload, sizeof(payload));
+}
+
 void ToshibaAbClimate::send_estia_first_gen_ping_() {
   if (!this->is_estia_first_gen() || !this->ping_enabled_ || !this->master_address_confirmed_) return;
   const uint8_t payload[] = {0xE0, 0x41, 0x0C, 0x81, 0x00, 0x00, 0x48, 0x00};
@@ -4786,6 +4814,14 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     ESP_LOGD(TAG, "Estia first-gen checksum fail for %s", label.c_str());
     return;
   }
+  // Detect recovery before decoding a fault carried by this very frame, even
+  // if RX resumes before loop() observes the timeout. API reconnects do not
+  // affect these AB-master timestamps or the pending refresh.
+  if (src == this->master_address_ && this->estia_first_gen_master_online_ &&
+      millis() - this->last_master_alive_millis_ > LAST_ALIVE_TIMEOUT_MILLIS) {
+    this->invalidate_estia_first_gen_fault_();
+    this->estia_first_gen_fault_refresh_pending_ = true;
+  }
   this->decode_estia_first_gen_dn_(frame);
   // Captured fault announcements (C0:29) and replies to another controller's
   // status requests (A0:29). Both are broadcasts; zero is an explicit clear.
@@ -4829,6 +4865,7 @@ void ToshibaAbClimate::process_received_data_estia_first_gen_(const DataFrame *f
     this->handle_remote_address_collision_(src, "Estia remote-address collision from decoded remote frame");
   }
   if (src == this->master_address_) {
+    this->estia_first_gen_master_online_ = true;
     this->last_master_alive_millis_ = millis();
     if (this->connected_binary_sensor_) this->connected_binary_sensor_->publish_state(true);
   }

@@ -1406,6 +1406,8 @@ static void master_keepalive_silence_checks() {
     TestEstia unit;
     unit.set_uart_parent(&uart);
     unit.set_frame_format(format);
+    // This test isolates existing queued traffic from the separate startup refresh.
+    unit.estia_first_gen_fault_refresh_pending_ = false;
     const uint8_t master = format == FrameFormat::TU2C ? 0x90 : format == FrameFormat::ESTIA ? 0x70 : 0x00;
     unit.set_master_address(master);
     unit.set_autonomous(false);
@@ -1697,6 +1699,132 @@ static void a0_demand_startup_checks() {
     other.send_estia_demand(6);
     other.send_estia_demand_heartbeat();
     assert(!other.estia_demand_value_.has_value() && other.commands_empty() && other.write_queue_.empty());
+  }
+}
+
+static void first_gen_fault_refresh_checks() {
+  RecordingUart uart;
+  TestEstia unit;
+  unit.set_uart_parent(&uart);
+  unit.set_frame_format(FrameFormat::ESTIA);
+  unit.set_autonomous(false);
+  unit.set_ping_enabled(false);  // Refresh is independent of regular keepalives.
+  text_sensor::TextSensor code;
+  binary_sensor::BinarySensor active;
+  unit.set_fault_code_text_sensor(&code);
+  unit.set_fault_active_binary_sensor(&active);
+  unit.setup();
+  assert(code.has_state() && code.state == "None" && active.has_state() && !active.state);
+  auto quiet = [&]() {
+    unit.last_received_frame_millis_ = millis() - 1000;
+    unit.last_sent_frame_millis_ = millis() - 1000;
+    unit.last_tu2c_received_frame_millis_ = millis() - 1000;
+    unit.last_tu2c_sent_frame_millis_ = millis() - 1000;
+  };
+  auto tick = [&]() { quiet(); unit.loop(); };
+  unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+  tick();
+  assert(uart.writes.empty());  // No master traffic or confirmation yet.
+  auto status = first_gen_status(0x40, false, 0);
+  assert(unit.receive_data_frame(&status));
+  tick();
+  assert(uart.writes.empty());  // Status alone does not confirm a master address.
+  auto alive = master_keepalive(FrameFormat::ESTIA);
+  assert(unit.receive_data_frame(&alive));
+  unit.boot_millis_ = millis();
+  tick();
+  assert(uart.writes.empty());  // Existing startup listening period.
+  unit.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+  unit.set_read_only(true);
+  tick();
+  assert(uart.writes.empty() && unit.estia_first_gen_fault_refresh_pending_);
+  unit.set_read_only(false);
+  unit.remote_address_available_ = false;
+  tick();
+  assert(uart.writes.empty());
+  unit.remote_address_available_ = true;
+  unit.handle_remote_address_collision_(0x60, "test");
+  assert(unit.remote_address_ == 0x61);
+  unit.last_master_keepalive_ms_ = millis() - 4500;
+  tick();
+  assert(uart.writes.empty());  // Same pre-keepalive hold-off as other traffic.
+  unit.last_master_keepalive_ms_ = millis() - 6000;
+  tick();
+  const std::vector<uint8_t> expected{0xF0, 0xF0, 0x0A, 0x61, 0x70, 0xE0, 0x61, 0x29, 0x45, 0xA0};
+  assert(uart.writes.size() == 1 && uart.writes.back() == expected);
+  assert(!unit.estia_first_gen_fault_refresh_pending_ && !unit.last_unconfirmed_command_.has_value());
+  assert(code.state == "None" && !active.state);  // Sending is not a report.
+  for (int i = 0; i < 4; i++) {
+    assert(unit.receive_data_frame(&alive));
+    tick();
+  }
+  assert(uart.writes.size() == 1);  // No periodic polling or ACK-driven retries.
+  DataFrame report{};
+  report.set_tu2c(true);
+  const uint8_t fault[] = {0x0C, 0x70, 0xFF, 0xE0, 0xA0, 0x29, 0x70, 0x77, 0x0B};
+  std::copy(std::begin(fault), std::end(fault), report.raw);
+  assert(unit.receive_data_frame(&report));
+  assert(code.state == "F23" && active.state);
+  unit.last_master_alive_millis_ = millis() - LAST_ALIVE_TIMEOUT_MILLIS - 1;
+  tick(); tick();
+  assert(uart.writes.size() == 1 && !code.has_state() && !active.has_state());
+  assert(unit.estia_first_gen_fault_refresh_pending_);
+  assert(unit.receive_data_frame(&status));
+  tick();
+  assert(uart.writes.size() == 2 && uart.writes.back() == expected);
+  assert(!code.has_state() && !active.has_state());  // Recovery/query is not an all-clear.
+  report.raw[7] = 0;
+  report.raw[8] = dn_checksum(report.raw, 8);
+  assert(unit.receive_data_frame(&report));
+  assert(code.has_state() && code.state == "None" && active.has_state() && !active.state);
+  tick();
+  assert(uart.writes.size() == 2);
+  // Recovery can arrive before loop() gets a chance to observe the timeout.
+  unit.last_master_alive_millis_ = millis() - LAST_ALIVE_TIMEOUT_MILLIS - 1;
+  assert(unit.receive_data_frame(&status));
+  assert(!code.has_state() && !active.has_state());
+  tick();
+  assert(uart.writes.size() == 3);
+  // A returning fault report must be decoded after invalidating the stale state.
+  unit.last_master_alive_millis_ = millis() - LAST_ALIVE_TIMEOUT_MILLIS - 1;
+  report.raw[7] = 0x77; report.raw[8] = dn_checksum(report.raw, 8);
+  assert(unit.receive_data_frame(&report));
+  assert(code.has_state() && code.state == "F23" && active.has_state() && active.state);
+  unit.set_read_only(true);
+  tick();
+  assert(uart.writes.size() == 3 && unit.estia_first_gen_fault_refresh_pending_);
+  unit.set_read_only(false);
+  tick();
+  assert(uart.writes.size() == 4);
+  // A configured master and fixed controller address are used on the wire.
+  TestEstia configured;
+  RecordingUart configured_uart;
+  configured.set_uart_parent(&configured_uart);
+  configured.set_frame_format(FrameFormat::ESTIA);
+  configured.set_master_address(0x71);
+  configured.set_remote_address(0x63);
+  configured.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+  alive.raw[1] = 0x71; alive.raw[6] = dn_checksum(alive.raw, 6);
+  assert(configured.receive_data_frame(&alive));
+  configured.last_received_frame_millis_ = millis() - 1000;
+  configured.last_sent_frame_millis_ = millis() - 1000;
+  configured.last_tu2c_received_frame_millis_ = millis() - 1000;
+  configured.last_tu2c_sent_frame_millis_ = millis() - 1000;
+  configured.loop();
+  const std::vector<uint8_t> custom{0xF0, 0xF0, 0x0A, 0x63, 0x71, 0xE0, 0x61, 0x29, 0x48, 0xA0};
+  assert(configured_uart.writes.size() == 1 && configured_uart.writes.back() == custom);
+  // Other frame formats cannot send this query, even with all flags set.
+  for (auto format : {FrameFormat::NORMAL, FrameFormat::HM, FrameFormat::TU2C, FrameFormat::A0}) {
+    TestEstia other;
+    RecordingUart other_uart;
+    other.set_uart_parent(&other_uart);
+    other.set_frame_format(format);
+    other.boot_millis_ = millis() - INITIAL_FRAME_SEND_BLOCK_MILLIS;
+    other.master_address_confirmed_ = true;
+    other.estia_first_gen_master_online_ = true;
+    other.last_master_alive_millis_ = millis();
+    other.loop();
+    assert(other_uart.writes.empty());
   }
 }
 
@@ -2231,6 +2359,7 @@ int main() {
   a0_restored_slider_checks();
   a0_demand_startup_checks();
   master_keepalive_silence_checks();
+  first_gen_fault_refresh_checks();
   first_gen_fault_checks();
   first_gen_cooling_setpoint_checks();
   first_gen_dhw_mode_checks();
