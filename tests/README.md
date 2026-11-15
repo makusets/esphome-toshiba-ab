@@ -109,3 +109,16 @@ First-generation mode checks replay the Series 5 DHW-availability status bit
 with both captured status lengths. They verify Heat/Cool/Auto command bytes,
 independence from DHW On/Off, startup deferral and cancellation, live status
 updates, malformed/wrong-source rejection, and read-only/boot send guards.
+
+## ESP8266 software TX selection
+
+```sh
+python3 tests/test_software_tx_config.py
+```
+
+These real ESPHome codegen checks cover the GPIO12 / hardware-RX split, automatic
+and explicit hardware RX, EVEN/NONE/ODD parity, pin inversion and exclusion of
+hardware TX, legacy GPIO10 TX and configurations without component-owned hardware RX. The existing
+ESP8266 fixtures compile the bundled EspSoftwareSerial backend, and host tests
+continue to exercise frame bytes, bus guards and retries across all protocols.
+Physical bit timing and long-term watchdog stability require hardware testing.

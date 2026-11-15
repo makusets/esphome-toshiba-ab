@@ -13,6 +13,9 @@
 #include <cctype>
 #include <queue>
 #include <functional>
+#ifdef USE_TOSHIBA_AB_INTERRUPTIBLE_TX
+#include <SoftwareSerial.h>
+#endif
 
 namespace esphome {
 namespace toshiba_ab {
@@ -1054,6 +1057,10 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
     this->hw_uart_rx_enabled_ = true;
   }
   void set_hardware_uart_parity(uint8_t parity) { this->hw_uart_parity_ = parity; }
+#ifdef USE_TOSHIBA_AB_INTERRUPTIBLE_TX
+  void set_interruptible_tx_pin(InternalGPIOPin *pin) { this->interruptible_tx_pin_ = pin; }
+  void set_interruptible_tx_config(EspSoftwareSerial::Config config) { this->interruptible_tx_config_ = config; }
+#endif
 
   climate::ClimateTraits traits() override;
   void control(const climate::ClimateCall &call) override;
@@ -1187,6 +1194,12 @@ class ToshibaAbClimate : public Component, public uart::UARTDevice, public clima
   // 0 = none, 1 = even, 2 = odd. Mirrors the ESPHome UART hub parity setting
   // so hardware-UART RX mode does not force the bus to 8E1.
   uint8_t hw_uart_parity_{0};
+#ifdef USE_TOSHIBA_AB_INTERRUPTIBLE_TX
+  InternalGPIOPin *interruptible_tx_pin_{nullptr};
+  EspSoftwareSerial::Config interruptible_tx_config_{EspSoftwareSerial::SWSERIAL_8E1};
+  EspSoftwareSerial::UART *interruptible_tx_{nullptr};
+#endif
+  void write_bus_frame_(const uint8_t *bytes, size_t size);
 
   DataFrameReader data_reader;
   TccState tcc_state;

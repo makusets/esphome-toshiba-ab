@@ -1576,6 +1576,12 @@ void ToshibaAbClimate::dump_config() {
     ESP_LOGCONFIG(TAG, "    Configured RX pin: GPIO%u", this->hw_uart_rx_pin_);
   }
 #endif
+#ifdef USE_TOSHIBA_AB_INTERRUPTIBLE_TX
+  if (this->interruptible_tx_ != nullptr) {
+    ESP_LOGCONFIG(TAG, "  Transmit path: interrupt-enabled software UART on GPIO%u",
+                  this->interruptible_tx_pin_->get_pin());
+  }
+#endif
   ESP_LOGCONFIG(TAG, "  Filter frames: %s", this->filter_frames_ ? "true" : "false");
   ESP_LOGCONFIG(TAG, "  Packet min wait: %" PRIu32 "ms", this->packet_min_wait_millis_);
   ESP_LOGCONFIG(TAG, "  Autonomous mode: %s", this->autonomous_ ? "true" : "false");
@@ -1751,6 +1757,21 @@ void ToshibaAbClimate::setup() {
       this->remote_announce();
     }
   });
+
+#ifdef USE_TOSHIBA_AB_INTERRUPTIBLE_TX
+  if (this->interruptible_tx_pin_ != nullptr) {
+    this->interruptible_tx_ = new EspSoftwareSerial::UART();
+    this->interruptible_tx_->begin(2400, this->interruptible_tx_config_, -1,
+                                  this->interruptible_tx_pin_->get_pin(), this->interruptible_tx_pin_->is_inverted());
+    // Unlike ESPHome's per-byte InterruptLock, allow the Wi-Fi SDK to service
+    // interrupts throughout TX. At 2400 baud the bit interval is about 417 us.
+    this->interruptible_tx_->enableIntTx(true);
+    // EspSoftwareSerial initializes the pin as push-pull. Restore the configured
+    // GPIO flags (including open drain) and its logical UART idle level.
+    this->interruptible_tx_pin_->setup();
+    this->interruptible_tx_pin_->digital_write(true);
+  }
+#endif
 
   // Mimic the wall remote's periodic keep-alive traffic in both operating modes.
   if (this->ping_enabled_) {
@@ -3113,6 +3134,23 @@ void ToshibaAbClimate::publish_reader_diagnostics_() {
   }
 }
 
+void ToshibaAbClimate::write_bus_frame_(const uint8_t *bytes, size_t size) {
+#ifdef USE_TOSHIBA_AB_INTERRUPTIBLE_TX
+  if (this->interruptible_tx_ != nullptr) {
+    this->interruptible_tx_->write(bytes, size);
+  } else
+#endif
+  {
+    this->write_array(bytes, size);
+  }
+  // Software TX is synchronous and may service SDK work between stop bits.
+  // Measure the next bus quiet interval from the end of the actual frame.
+  this->last_sent_frame_millis_ = millis();
+  if (this->data_reader.frame_format() == FrameFormat::TU2C || this->is_estia_first_gen())
+    this->last_tu2c_sent_frame_millis_ = this->last_sent_frame_millis_;
+  this->last_tx_frame_millis_ = this->last_sent_frame_millis_;
+}
+
 void ToshibaAbClimate::loop() {
   this->update_estia_dn_();
   if (millis() - this->last_diagnostics_publish_ms_ >= 30000) this->publish_reader_diagnostics_();
@@ -3179,7 +3217,7 @@ void ToshibaAbClimate::loop() {
 
       ESP_LOGD(TAG, "Write raw frame: %s", payload.c_str());
       this->remember_tx_frame_for_echo_(raw_frame.data(), raw_frame.size(), false);
-      this->write_array(raw_frame.data(), raw_frame.size());
+      this->write_bus_frame_(raw_frame.data(), raw_frame.size());
 
       if (this->raw_write_queue_.empty() && this->write_queue_.empty()) {
         ESP_LOGV(TAG, "All frames written");
@@ -3246,13 +3284,13 @@ void ToshibaAbClimate::loop() {
           std::memcpy(&tu2c_frame[2], frame.raw, raw_size);
           tu2c_frame[2 + raw_size] = 0xA0;
           log_tx_bytes(tu2c_frame, raw_size + 3);
-          this->write_array(tu2c_frame, raw_size + 3);
+          this->write_bus_frame_(tu2c_frame, raw_size + 3);
         } else {
           ESP_LOGW(TAG, "TU2C frame too large to send (size=%u)", static_cast<unsigned>(raw_size));
         }
       } else {
         log_tx_bytes(frame.raw, frame.size());
-        this->write_array(frame.raw, frame.size());
+        this->write_bus_frame_(frame.raw, frame.size());
       }
 
       if (this->last_unconfirmed_command_.has_value()) {
