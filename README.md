@@ -382,5 +382,3 @@ shared hardware findings, models, captures, code and documentation.
 If you are after a fully finished product, I usually have some fully assembled boards that I am happy to sell.
 Check my listings: [boards on eBay](https://www.ebay.com.au/usr/zaurak_trade)
 
-For A0 / Estia R32 controller addressing and PING behavior, see
-[remote address selection](docs/frame_formats.md#remote-address-selection).
