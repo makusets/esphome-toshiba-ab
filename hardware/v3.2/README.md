@@ -23,7 +23,7 @@ If you are after a fully finished product, I usually have some fully assembled b
 
 It often happens that components are out of stock or become unavailable and need to be replaced when uploading the BOM file. If you are not comfortable in doing so,
 JLCPCB have the option of "parts sourced by JLCPCB" instead of "by customer". That should make it easy to replace shortfalls. Otherwise, use the search option and look for an equivalent component, AI is your friend and can help you find equivalent parts if in doubt. The 3D view on the next page can be useful to double check that you made the right choice and if any component needs to be reoriented.
-The K7803XXX DCDC buck is a critical component, the board works fine with RESINE and DEXU branded ones, other brands not so good as they introduce some noise in the AB line, causing corrupted frames from time to time although the system will likely work.
+The K7803XXX DCDC buck is a critical component, the board works fine with DEXU branded ones, other brands not so good as they introduce noise in the AB line, causing corrupted frames.
 
 <img src="v3_2.png" width="70%">
 
