@@ -22,32 +22,9 @@ materials, pick-and-place data and/or editable EasyEDA project.
 ## ESP8266 serial operation
 
 The v3.2, v3.3 and v3.3_SMD boards use TX GPIO12 / RX GPIO13. The component
-automatically uses hardware UART0 for reception and the Arduino framework's bundled EspSoftwareSerial
-for transmission, with interrupts enabled during TX. No YAML or wiring change is
-needed. This avoids ESPHome software TX's approximately 4 ms interrupt lock per
-byte at 2400 baud, which can interfere with the Wi-Fi SDK.
+automatically uses hardware UART0 for reception and SoftwareSerial
+for transmission, with interrupts enabled during TX, no minimise blocking of WiFi and WDT restarts.
 
-The startup configuration log identifies the active component transmit path:
-
-```text
-Transmit path: interrupt-enabled software UART on GPIO12
-```
-
-The parent ESPHome UART can still report `Using software serial`; the component
-uses its own transmitter in this configuration. The same backend is selected
-for other supported software TX pins when the component owns hardware UART RX.
-Hardware TX pins and legacy flash-pin wiring such as GPIO10 retain the ESPHome
-UART path. Parity, data/stop bits, inversion and GPIO
-flags come from the existing UART configuration, and all protocol frames use the
-same bus guards and transmit queues. Direct ESPHome `uart.write` actions use the
-parent UART rather than this component's transmitter.
-
-The reported SDK `dev 1163` / hardware-watchdog failure has not been reproduced
-on a test board. Confirm the new startup line, then monitor uptime, failed CRCs,
-command acknowledgements and Wi-Fi stability for several days; a short test
-cannot establish resolution of a crash previously seen after 17 h 54 min.
-Interrupt-enabled software TX also needs timing validation under Wi-Fi load on
-the physical bus.
 
 ## Design
 
@@ -58,8 +35,8 @@ The bridge input makes these revisions insensitive to A/B polarity.
 
 Wi-Fi current peaks are considerably higher than those of a wall controller.
 For that reason the board uses a buck converter rather than only an LDO, followed
-by a low-noise 3.3 V LDO and a large rail capacitor. The tested DEXU K7803-500 and
-K7803-1000 converters work well. Component substitution—especially the buck
+by a low-noise 3.3 V LDO and a large rail capacitor. The tested DEXU and RESINE K7803-500R3 and
+K7803M-1000R3 converters work well. Component substitution—especially the buck
 converter or filter capacitors—can introduce enough noise to corrupt AB traffic.
 
 For DIY soldering, [v3.3](../hardware/v3.3/README.md) uses a mix of through-hole
@@ -118,7 +95,7 @@ behavior does not work.
 ## Enclosure
 
 A two-part printable enclosure is included in [`hardware/v3`](../hardware/v3/).
-The v3.2 board fits the same case. STL files are ready for printing, and the
+All v3 boards fit the same case. STL files are ready for printing, and the
 public Onshape source can be found by searching for `toshiba_esp_case` in
 Onshape.
 
