@@ -2,6 +2,9 @@
 
 ## Ordering or building the board
 
+For a mixed through-hole/SMD version intended for DIY soldering, see
+[v3.3](../v3.3/README.md).
+
 v3.3_SMD is a revision of the Toshiba AB interface aimed at people who want to
 order the board assembled by a PCB manufacturer such as JLCPCB. Components have
 been chosen to reduce assembly cost compared with previous versions. The design
@@ -91,4 +94,4 @@ If you prefer a finished board, check these listings
 
 [boards on eBay](https://www.ebay.com.au/usr/zaurak_trade)
 
-[Back to the main README](../../README.md) · [v3.2 design](../v3.2/README.md)
+[Back to the main README](../../README.md) · [v3.3 DIY design](../v3.3/README.md) · [v3.2 design](../v3.2/README.md)

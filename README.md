@@ -6,9 +6,23 @@ ESTIA hydronic heat-pump systems that communicate over the two-wire **AB bus**.
 > This project is not suitable for most domestic split systems that are controlled only
 > by an infrared remote, although some models do use the AB Bus and are compatible
 
-<img src="hardware/v3.3_SMD/v3_3_SMD.JPG" width="60%" alt="Toshiba AB v3.2 board"> <img src="card.JPG" width="30%" alt="Assembled Toshiba AB board">
+<img src="hardware/v3.3_SMD/v3_3_SMD.JPG" width="60%" alt="Toshiba AB v3.3_SMD board"> <img src="card.JPG" width="30%" alt="Assembled Toshiba AB board">
 
 ## Changelog
+
+### November 2026 — v3.3 DIY hardware revision
+
+The new [v3.3 board](hardware/v3.3/README.md) brings the v3.3_SMD design to DIY
+builders with a mix of through-hole and SMD components for easier hand
+soldering. Improved noise filtering, including a **3.6 Ω limiting resistor on
+the 3.3 V supply path ahead of the large 3300 µF capacitor**, reduces noise
+injected onto the AB line compared with earlier designs. It is more tolerant of
+DC/DC buck converter brand choice; **RESINE and DEXU are recommended**.
+
+Pin assignments remain the same as v3.2: **TX GPIO12, RX GPIO13**, with no
+ESPHome configuration changes required. See the [build instructions](hardware/v3.3/README.md)
+and [design files](hardware/v3.3/). For factory assembly and automatic USB
+flashing, the [v3.3_SMD version](hardware/v3.3_SMD/README.md) remains available.
 
 ### October 2026 — v3.3_SMD hardware and protocol improvements
 
@@ -49,12 +63,17 @@ and hardware UART operation improve compatibility and stability.
 
 ### Hardware releases
 
+- **[v3.3](hardware/v3.3/README.md):** DIY assembly with mixed through-hole/SMD
+  parts, improved noise filtering and a 3.6 Ω supply limiting resistor; same
+  pins as v3.2.
+
 - **[v3.3_SMD](hardware/v3.3_SMD/README.md):** lower-cost factory assembly,
   automatic USB flashing and reduced AB-circuit noise; same pins as v3.2.
 
-- **v3.2:** revised UART pins, a 3300 µF 3.3 V rail capacitor, easier-to-solder
-  USB-C, boot/reset buttons, a power-selection jumper and easier assembly.
-- **D1 mini:** a simpler board designed with
+- **[v3.2](hardware/v3.2/README.md):** revised UART pins, a 3300 µF 3.3 V rail
+  capacitor, easier-to-solder USB-C, boot/reset buttons, a power-selection jumper
+  and easier assembly.
+- **[D1 mini](hardware/D1%20mini/README.md):** a simpler board designed with
   [@issalig](https://github.com/issalig), using RX D7 and TX D8.
 
 
@@ -97,8 +116,8 @@ before building a board or substituting components.
 1. Start with [`example.yaml`](example.yaml), or copy the minimal configuration
    from the air-to-air/ESTIA section below. Add your normal ESPHome Wi-Fi, API,
    OTA and secrets settings.
-2. Select the UART pins for your board: v3.3_SMD and v3.2 use TX `GPIO12` and RX `GPIO13`;
-   v3 uses TX `GPIO10` and RX `GPIO13`;
+2. Select the UART pins for your board: v3.3, v3.3_SMD and v3.2 use TX `GPIO12`
+   and RX `GPIO13`; v3 uses TX `GPIO10` and RX `GPIO13`;
    D1 mini uses TX `D8` and RX `D7`. Also select the parity and optionally the
    `frame_format` required by your AC system in the tables below.
 4. **Do not connect the A/B wires yet.** Put the board's power-selection jumper/switch
@@ -109,7 +128,7 @@ before building a board or substituting components.
    [first-device connection guide](https://esphome.io/guides/physical_device_connection/)
    if the serial device is not detected.
 7. v3.3_SMD enters flashing mode automatically; no boot-button press is needed.
-   For v3.2, connect the USB while continuing to hold **BOOT**. When the
+   For v3.3 and v3.2, connect the USB while continuing to hold **BOOT**. When the
    upload finishes, confirm that the device boots, joins Wi-Fi and appears in
    ESPHome/Home Assistant. Later firmware updates can be installed over Wi-Fi.
 
@@ -143,7 +162,7 @@ The A/B screws on a typical wired-controller PCB look like this:
 <details>
 <summary><strong>Hardware design, construction, installation and case</strong></summary>
 
-The v3.2 and v3.3_SMD boards include AB-line power conversion, noise filtering,
+The v3.2, v3.3 and v3.3_SMD boards include AB-line power conversion, noise filtering,
 a comparator receiver and a transistor writer. Isolate the HVAC system before
 opening a controller or changing AB wiring. Select USB power for initial flashing
 and AB power only after USB power has been disconnected.
@@ -152,7 +171,8 @@ Board fabrication files, schematics, bills of materials, assembly advice,
 installation steps and enclosure details are collected in the
 [hardware guide](docs/hardware.md). Go directly to a board revision:
 
-- [v3.3_SMD](hardware/v3.3_SMD/README.md) — latest revision, aimed at factory assembly
+- [v3.3](hardware/v3.3/README.md) — DIY soldering, improved filtering and reduced AB-line noise
+- [v3.3_SMD](hardware/v3.3_SMD/README.md) — designed for factory assembly and automatic USB flashing
 - [v3.2](hardware/v3.2/README.md) — previous full board
 - [D1 mini](hardware/D1%20mini/README.md) — simpler modular variant
 - [v3](hardware/v3/README.md) and [v1](hardware/v1/README.md) — older revisions

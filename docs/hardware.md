@@ -9,7 +9,9 @@ directory.
 
 | Board | Use | UART pins | Documentation |
 | --- | --- | --- | --- |
-| v3.2 | Recommended integrated ESP-12 board | TX GPIO12, RX GPIO13 | [Build files and assembly](../hardware/v3.2/README.md) |
+| v3.3 | DIY assembly; improved filtering, mixed through-hole/SMD parts | TX GPIO12, RX GPIO13 | [Build files and assembly](../hardware/v3.3/README.md) |
+| v3.3_SMD | Factory assembly; automatic USB flashing | TX GPIO12, RX GPIO13 | [Build files and assembly](../hardware/v3.3_SMD/README.md) |
+| v3.2 | Previous integrated ESP-12 board | TX GPIO12, RX GPIO13 | [Build files and assembly](../hardware/v3.2/README.md) |
 | D1 mini | Simpler modular board | TX D8, RX D7 | [Build files and assembly](../hardware/D1%20mini/README.md) |
 | v3 | Previous integrated board | TX GPIO10, RX GPIO13 | [Build files and assembly](../hardware/v3/README.md) |
 | v1 | Original board; polarity-sensitive AB input | TX GPIO15, RX GPIO13 | [Build files and assembly](../hardware/v1/README.md) |
@@ -19,8 +21,8 @@ materials, pick-and-place data and/or editable EasyEDA project.
 
 ## ESP8266 serial operation
 
-The v3.2 wiring remains TX GPIO12 / RX GPIO13. The component automatically uses
-hardware UART0 for reception and the Arduino framework's bundled EspSoftwareSerial
+The v3.2, v3.3 and v3.3_SMD boards use TX GPIO12 / RX GPIO13. The component
+automatically uses hardware UART0 for reception and the Arduino framework's bundled EspSoftwareSerial
 for transmission, with interrupts enabled during TX. No YAML or wiring change is
 needed. This avoids ESPHome software TX's approximately 4 ms interrupt lock per
 byte at 2400 baud, which can interfere with the Wi-Fi SDK.
@@ -49,9 +51,9 @@ the physical bus.
 
 ## Design
 
-The v3/v3.2 design accepts the voltage range found on the AB line, filters power
-and data noise, reads data through DC filtering and a comparator, and writes a
-zero bit by pulling A toward B through a resistor, as Toshiba controllers do.
+The v3, v3.2, v3.3 and v3.3_SMD designs accept the voltage range found on the AB
+line, filter power and data noise, read data through DC filtering and a
+comparator, and write a zero bit by pulling A toward B through a resistor, as Toshiba controllers do.
 The bridge input makes these revisions insensitive to A/B polarity.
 
 Wi-Fi current peaks are considerably higher than those of a wall controller.
@@ -59,6 +61,16 @@ For that reason the board uses a buck converter rather than only an LDO, followe
 by a low-noise 3.3 V LDO and a large rail capacitor. The tested DEXU K7803-500 and
 K7803-1000 converters work well. Component substitution—especially the buck
 converter or filter capacitors—can introduce enough noise to corrupt AB traffic.
+
+For DIY soldering, [v3.3](../hardware/v3.3/README.md) uses a mix of through-hole
+and SMD components based on the v3.3_SMD design. Its improved supply filtering
+includes a **3.6 Ω series limiting resistor (R7)** before the large **3300 µF
+capacitor (C5)** on the 3.3 V supply path, reducing noise injected onto the AB
+line. This makes buck converter brand choice more forgiving than on earlier
+boards; **RESINE and DEXU remain recommended**. Use the revision-specific BOM
+and schematic when sourcing parts. Choose
+[v3.3_SMD](../hardware/v3.3_SMD/README.md) for factory assembly and automatic USB
+flashing.
 
 The I²C header supports an optional BME280 temperature, humidity and pressure
 sensor, or another ESPHome-compatible I²C device.
@@ -70,8 +82,9 @@ sensor, or another ESPHome-compatible I²C device.
    supply that revision's BOM and pick-and-place file and verify component
    orientation in the fabricator's 3D preview.
 3. Fit any through-hole capacitors or modules omitted by the assembly service.
-4. For the first ESPHome flash, select **USB** power and connect USB. On v3.2,
-   hold **BOOT** while applying USB power to enter flashing mode if necessary.
+4. For the first ESPHome flash, select **USB** power and connect USB. On v3.3 and
+   v3.2, hold **BOOT** while applying USB power to enter flashing mode.
+   v3.3_SMD enters flashing mode automatically; no boot-button press is needed.
 5. In the ESPHome dashboard choose **Install → Plug into this computer**, or run
    `esphome run your-device.yaml` and select the USB serial port. See ESPHome's
    [first-device connection guide](https://esphome.io/guides/physical_device_connection/)
@@ -92,8 +105,8 @@ and the AB line before moving the jumper or switch.
 3. Remove the wired controller cover and loosen its A/B terminal screws, or use
    the unit's documented AB connection point. Leave the controller's existing
    wires in place: the interface board connects in parallel.
-4. Wire A and B to the PCB. v1 is polarity-sensitive (A to A and B to B); v3 and
-   v3.2 can be connected either way.
+4. Wire A and B to the PCB. v1 is polarity-sensitive (A to A and B to B); v3,
+   v3.2, v3.3 and v3.3_SMD can be connected either way.
 5. With USB disconnected, select **AB** power on boards that have a selector.
 6. Reassemble the controller, restore HVAC power and inspect ESPHome logs for
    valid frames before sending commands.
